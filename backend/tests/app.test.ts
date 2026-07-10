@@ -57,6 +57,18 @@ describe("createApp", () => {
       .expect(400, { error: "userId_required" });
   });
 
+  it("requires a userId to delete a user", async () => {
+    const app = createApp({
+      apiToken: "test-api-token",
+      checkDatabase: async () => 1,
+    });
+
+    await request(app)
+      .delete("/v1/user")
+      .set("Authorization", "Bearer test-api-token")
+      .expect(400, { error: "userId_required" });
+  });
+
   it("sets security headers via Helmet", async () => {
     const app = createApp({
       apiToken: "test-api-token",

@@ -10,6 +10,7 @@ import { sleepRouter } from "./routes/sleep.js";
 import { syncRouter } from "./routes/sync.js";
 import { todayRouter } from "./routes/today.js";
 import { trainRouter } from "./routes/train.js";
+import { userRouter } from "./routes/user.js";
 
 export interface RateLimitOptions {
   windowMs: number;
@@ -69,6 +70,7 @@ export function createApp({
   app.use("/v1/train", trainRouter);
   app.use("/v1/body", bodyRouter);
   app.use("/v1/coach", coachRouter);
+  app.use("/v1/user", userRouter);
 
   return app;
 }
