@@ -2,7 +2,11 @@ import cors from "cors";
 import express from "express";
 import { loadEnv } from "./env.js";
 import { requireToken } from "./middleware/auth.js";
+import { bodyRouter } from "./routes/body.js";
+import { sleepRouter } from "./routes/sleep.js";
 import { syncRouter } from "./routes/sync.js";
+import { todayRouter } from "./routes/today.js";
+import { trainRouter } from "./routes/train.js";
 
 const env = loadEnv();
 
@@ -16,6 +20,10 @@ app.get("/health", (_req, res) => {
 
 app.use("/v1", requireToken(env.API_TOKEN));
 app.use("/v1/sync", syncRouter);
+app.use("/v1/today", todayRouter);
+app.use("/v1/sleep", sleepRouter);
+app.use("/v1/train", trainRouter);
+app.use("/v1/body", bodyRouter);
 
 if (process.env.NODE_ENV !== "test") {
   app.listen(env.PORT, () => {
