@@ -3,6 +3,7 @@ import express from "express";
 import { loadEnv } from "./env.js";
 import { requireToken } from "./middleware/auth.js";
 import { bodyRouter } from "./routes/body.js";
+import { coachRouter } from "./routes/coach.js";
 import { sleepRouter } from "./routes/sleep.js";
 import { syncRouter } from "./routes/sync.js";
 import { todayRouter } from "./routes/today.js";
@@ -24,6 +25,7 @@ app.use("/v1/today", todayRouter);
 app.use("/v1/sleep", sleepRouter);
 app.use("/v1/train", trainRouter);
 app.use("/v1/body", bodyRouter);
+app.use("/v1/coach", coachRouter);
 
 if (process.env.NODE_ENV !== "test") {
   app.listen(env.PORT, () => {

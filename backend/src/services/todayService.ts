@@ -2,6 +2,7 @@ import { prisma } from "../db.js";
 import { rollingMean, stddev } from "../scoring/baselines.js";
 import { computeReadiness } from "../scoring/readiness.js";
 import type { PillarScore } from "../scoring/types.js";
+import { getAdvisorNote, type AdvisorNote } from "./advisorService.js";
 
 export interface TodayResponse {
   date: string;
@@ -16,6 +17,7 @@ export interface TodayResponse {
   overridesApplied: string[];
   confidence: "high" | "low";
   missing: string[];
+  advisor: AdvisorNote;
 }
 
 export interface SleepSample {
@@ -319,7 +321,7 @@ export async function getToday(userId: string, requestedDate = defaultRequestedD
     },
   });
 
-  return {
+  const response: Omit<TodayResponse, "advisor"> = {
     date,
     readiness: readiness.readiness,
     decision: readiness.decision,
@@ -329,6 +331,8 @@ export async function getToday(userId: string, requestedDate = defaultRequestedD
     confidence: missing.length === 0 ? "high" : "low",
     missing,
   };
+  const advisor = await getAdvisorNote(userId, targetStart, response);
+  return { ...response, advisor };
 }
 
 export async function getSleepDetails(userId: string, days: number, requestedDate = defaultRequestedDate()) {
