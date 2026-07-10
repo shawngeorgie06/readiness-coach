@@ -1,5 +1,10 @@
 import cors from "cors";
 import express from "express";
+import { loadEnv } from "./env.js";
+import { requireToken } from "./middleware/auth.js";
+import { syncRouter } from "./routes/sync.js";
+
+const env = loadEnv();
 
 const app = express();
 app.use(cors());
@@ -9,10 +14,12 @@ app.get("/health", (_req, res) => {
   res.json({ ok: true });
 });
 
-const port = Number(process.env.PORT ?? 4000);
+app.use("/v1", requireToken(env.API_TOKEN));
+app.use("/v1/sync", syncRouter);
+
 if (process.env.NODE_ENV !== "test") {
-  app.listen(port, () => {
-    console.log(`readiness-coach API on :${port}`);
+  app.listen(env.PORT, () => {
+    console.log(`readiness-coach API on :${env.PORT}`);
   });
 }
 
