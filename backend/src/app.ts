@@ -1,5 +1,7 @@
 import cors from "cors";
 import express from "express";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 import { prisma } from "./db.js";
 import { requireToken } from "./middleware/auth.js";
 import { bodyRouter } from "./routes/body.js";
@@ -9,17 +11,36 @@ import { syncRouter } from "./routes/sync.js";
 import { todayRouter } from "./routes/today.js";
 import { trainRouter } from "./routes/train.js";
 
+export interface RateLimitOptions {
+  windowMs: number;
+  max: number;
+}
+
 export interface AppOptions {
   apiToken: string;
   checkDatabase?: () => Promise<unknown>;
+  /** Origin allowed to make cross-origin requests. Unset = no cross-origin access. */
+  corsOrigin?: string;
+  rateLimit?: RateLimitOptions;
 }
+
+const defaultRateLimit: RateLimitOptions = { windowMs: 15 * 60 * 1000, max: 300 };
 
 export function createApp({
   apiToken,
   checkDatabase = () => prisma.$queryRaw`SELECT 1`,
+  corsOrigin,
+  rateLimit: rateLimitOptions = defaultRateLimit,
 }: AppOptions) {
   const app = express();
-  app.use(cors());
+  app.use(helmet());
+  app.use(
+    cors({
+      origin: corsOrigin
+        ? (origin, callback) => callback(null, origin === corsOrigin)
+        : false,
+    }),
+  );
   app.use(express.json({ limit: "2mb" }));
 
   app.get("/health", async (_req, res) => {
@@ -32,6 +53,15 @@ export function createApp({
     }
   });
 
+  app.use(
+    "/v1",
+    rateLimit({
+      windowMs: rateLimitOptions.windowMs,
+      limit: rateLimitOptions.max,
+      standardHeaders: true,
+      legacyHeaders: false,
+    }),
+  );
   app.use("/v1", requireToken(apiToken));
   app.use("/v1/sync", syncRouter);
   app.use("/v1/today", todayRouter);

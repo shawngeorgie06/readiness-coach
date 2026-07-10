@@ -7,6 +7,7 @@ const envSchema = z.object({
   LLM_API_KEY: z.string().optional(),
   LLM_BASE_URL: z.string().url().default("https://api.openai.com/v1"),
   LLM_MODEL: z.string().default("gpt-4o-mini"),
+  CORS_ORIGIN: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
