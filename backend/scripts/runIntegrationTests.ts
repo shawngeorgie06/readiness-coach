@@ -20,6 +20,7 @@ function run(args: string[]): void {
     cwd: process.cwd(),
     env,
     stdio: "inherit",
+    shell: process.platform === "win32",
   });
 
   if (result.error) throw result.error;
