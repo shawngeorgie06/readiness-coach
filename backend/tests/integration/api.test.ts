@@ -176,4 +176,69 @@ describe("backend API integration", () => {
       }),
     ).toBe(1);
   });
+
+  it("returns 404 deleting an unknown user", async () => {
+    await request(app)
+      .delete("/v1/user?userId=unknown")
+      .set("Authorization", authorization)
+      .expect(404, { error: "user_not_found" });
+  });
+
+  it("deletes a user and all associated data", async () => {
+    const payloadWithWorkout = {
+      ...syncPayload,
+      workouts: [
+        {
+          hkUuid: "run-1",
+          sport: "running",
+          startAt: "2026-07-10T12:00:00.000Z",
+          endAt: "2026-07-10T12:30:00.000Z",
+          durationMin: 30,
+          avgHrBpm: 150,
+          calories: 300,
+        },
+      ],
+    };
+
+    await request(app)
+      .post("/v1/sync")
+      .set("Authorization", authorization)
+      .send(payloadWithWorkout)
+      .expect(200);
+    await request(app)
+      .get(`/v1/today?userId=${syncPayload.userId}&date=${date}`)
+      .set("Authorization", authorization)
+      .expect(200);
+
+    expect(
+      await prisma.workout.count({ where: { userId: syncPayload.userId } }),
+    ).toBe(1);
+    expect(
+      await prisma.advisorNote.count({ where: { userId: syncPayload.userId } }),
+    ).toBe(1);
+
+    await request(app)
+      .delete(`/v1/user?userId=${syncPayload.userId}`)
+      .set("Authorization", authorization)
+      .expect(200, { ok: true });
+
+    expect(await prisma.user.findUnique({ where: { id: syncPayload.userId } })).toBeNull();
+    expect(
+      await prisma.healthSample.count({ where: { userId: syncPayload.userId } }),
+    ).toBe(0);
+    expect(
+      await prisma.dailyScore.count({ where: { userId: syncPayload.userId } }),
+    ).toBe(0);
+    expect(
+      await prisma.workout.count({ where: { userId: syncPayload.userId } }),
+    ).toBe(0);
+    expect(
+      await prisma.advisorNote.count({ where: { userId: syncPayload.userId } }),
+    ).toBe(0);
+
+    await request(app)
+      .delete(`/v1/user?userId=${syncPayload.userId}`)
+      .set("Authorization", authorization)
+      .expect(404, { error: "user_not_found" });
+  });
 });

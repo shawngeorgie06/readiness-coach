@@ -12,7 +12,7 @@ here.
 - Run `npm run seed:demo` in `backend` if a demo Today payload is needed before
   HealthKit sync is working.
 - Use the API contract exposed by `/v1/today`, `/v1/sync`, `/v1/sleep`,
-  `/v1/train`, `/v1/body`, and `/v1/coach/ask`.
+  `/v1/train`, `/v1/body`, `/v1/coach/ask`, and `DELETE /v1/user`.
 
 ## Complete Tasks 10–12 in order
 
@@ -33,5 +33,6 @@ here.
   the web dashboard.
 - Missing data remains low confidence and conservative.
 - A Recover lock always remains Recover in advisor notes and Ask Coach output.
-- Exercise account-data deletion through the planned `DELETE /v1/user` route
-  before release.
+- Exercise account-data deletion through `DELETE /v1/user?userId=<id>` before
+  release (implemented; deletes the user and all associated health samples,
+  workouts, daily scores, and advisor notes; returns 404 for an unknown user).
