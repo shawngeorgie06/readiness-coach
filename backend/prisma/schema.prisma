@@ -1,0 +1,87 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String         @id @default(cuid())
+  createdAt      DateTime       @default(now())
+  goal           String         @default("recomp")
+  sleepNeedHours Float          @default(8)
+  samples        HealthSample[]
+  workouts       Workout[]
+  dailyScores    DailyScore[]
+  advisorNotes   AdvisorNote[]
+  settings       Json?
+}
+
+model HealthSample {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  hkUuid    String
+  type      String
+  startAt   DateTime
+  endAt     DateTime
+  value     Float?
+  unit      String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@unique([userId, hkUuid])
+  @@index([userId, type, startAt])
+}
+
+model Workout {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  hkUuid      String
+  sport       String
+  startAt     DateTime
+  endAt       DateTime
+  durationMin Float
+  avgHrBpm    Float?
+  calories    Float?
+  strain      Float
+  createdAt   DateTime @default(now())
+
+  @@unique([userId, hkUuid])
+  @@index([userId, startAt])
+}
+
+model DailyScore {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  date          DateTime @db.Date
+  sleepScore    Int
+  recoveryScore Int
+  loadScore     Int
+  readiness     Int
+  decision      String
+  overrides     Json
+  calibrating   Boolean
+  drivers       Json
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([userId, date])
+}
+
+model AdvisorNote {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  date      DateTime @db.Date
+  decision  String
+  noteJson  Json
+  source    String
+  createdAt DateTime @default(now())
+
+  @@unique([userId, date])
+}
