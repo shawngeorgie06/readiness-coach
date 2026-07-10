@@ -9,11 +9,18 @@
 
 1. Copy `.env.example` to `.env`.
 2. Set `DATABASE_URL` and a private `API_TOKEN`.
-3. On Windows, use `127.0.0.1` instead of `localhost` if Prisma cannot reach PostgreSQL.
-4. Run `npm install`.
-5. From the repository root, run `docker compose up -d`.
-6. In `backend`, run `npx prisma migrate deploy`.
-7. Start the API with `npm run dev`.
+3. Set `CORS_ORIGIN` to the web dashboard's origin (e.g. `http://localhost:5173`). Leave unset to reject all cross-origin browser requests.
+4. On Windows, use `127.0.0.1` instead of `localhost` if Prisma cannot reach PostgreSQL.
+5. Run `npm install`.
+6. From the repository root, run `docker compose up -d`.
+7. In `backend`, run `npx prisma migrate deploy`.
+8. Start the API with `npm run dev`.
+
+## Security
+
+- Helmet sets standard security response headers.
+- CORS is deny-by-default; only the origin in `CORS_ORIGIN` may make cross-origin requests.
+- `/v1/*` is rate-limited (300 requests / 15 min per IP by default) in addition to bearer-token auth.
 
 ## Tests
 

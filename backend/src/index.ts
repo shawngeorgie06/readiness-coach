@@ -4,7 +4,7 @@ import { loadEnv } from "./env.js";
 import { createGracefulShutdown } from "./shutdown.js";
 
 const env = loadEnv();
-const app = createApp({ apiToken: env.API_TOKEN });
+const app = createApp({ apiToken: env.API_TOKEN, corsOrigin: env.CORS_ORIGIN });
 const server = app.listen(env.PORT, () => {
   console.log(`readiness-coach API on :${env.PORT}`);
 });
