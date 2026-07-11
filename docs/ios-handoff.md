@@ -1,9 +1,25 @@
 # iOS implementation handoff
 
-Tasks 1–9 are complete and verified in this Windows environment. Tasks 10–12
-require macOS with Xcode, plus a physical iPhone with HealthKit access and
-Apple Watch data; they were intentionally not scaffolded or claimed complete
-here.
+Tasks 1–9 are complete and verified. Tasks 10–12 are implemented under `ios/`
+(SwiftUI iOS 17 app, HealthKit read-only sync, all six tabs, and the
+strict-advisor Ask Coach lock). The app **compiles cleanly against the iOS SDK**
+— verified with `xcodebuild` for the iOS Simulator (Debug, `** BUILD
+SUCCEEDED **`) using Xcode 26.6 / iOS 26.5 SDK.
+
+**Remaining — requires code signing + a physical device:** the app has not yet
+been code-signed and run on hardware, and the HealthKit sync has not been
+exercised against real Watch data (HealthKit is unavailable in the Simulator).
+Open the project in Xcode, set your signing Team, run on a physical iPhone, and
+work the acceptance checklist below. See `ios/README.md` for step-by-step setup.
+
+Reproduce the build check:
+
+```bash
+cd ios
+xcodebuild -project ReadinessCoach.xcodeproj -scheme ReadinessCoach \
+  -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+  CODE_SIGNING_ALLOWED=NO build
+```
 
 ## Before starting
 

@@ -21,7 +21,12 @@ Watch → HealthKit → iPhone app → your API → readiness score (Push / Main
 
 ## Status
 
-Design and implementation plan are checked in. Implementation starts at Task 1 of the plan (backend scaffold + scoring TDD).
+Backend + web (Tasks 1–9) are implemented and verified. The iOS app (Tasks
+10–12) is implemented under [`ios/`](ios/README.md) — full SwiftUI source wired
+to the API — and **compiles against the iOS SDK** (`xcodebuild` for the
+Simulator, `** BUILD SUCCEEDED **`). It still needs to be code-signed and run on
+a physical iPhone in Xcode to exercise HealthKit (device-only). See
+[`ios/README.md`](ios/README.md) and [`docs/ios-handoff.md`](docs/ios-handoff.md).
 
 ## Local setup (after implementation begins)
 
