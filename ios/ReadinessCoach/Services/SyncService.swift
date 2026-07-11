@@ -1,0 +1,67 @@
+import Foundation
+
+/// Coordinates HealthKit sync and Today refresh, and holds the observable state
+/// the views render. One instance is shared through the environment.
+@MainActor
+final class SyncService: ObservableObject {
+    @Published var today: TodayDTO?
+    @Published var isSyncing = false
+    @Published var isLoadingToday = false
+    @Published var errorMessage: String?
+    @Published var lastSyncSummary: String?
+
+    private let health = HealthKitService()
+
+    /// Reads new HealthKit samples, uploads them, then refreshes Today so the
+    /// locked decision reflects the just-synced data.
+    func syncNow(_ settings: AppSettings) async {
+        guard let client = settings.makeClient() else {
+            errorMessage = APIError.notConfigured.localizedDescription
+            return
+        }
+        isSyncing = true
+        errorMessage = nil
+        defer { isSyncing = false }
+
+        do {
+            if HealthKitService.isAvailable {
+                let payload = try await health.fetchSamples(
+                    since: settings.lastSyncAt,
+                    userId: settings.userId
+                )
+                if !payload.isEmpty {
+                    let result = try await client.sync(payload)
+                    lastSyncSummary = "Synced \(result.samples) samples, \(result.workouts) workouts."
+                } else {
+                    lastSyncSummary = "No new HealthKit samples since last sync."
+                }
+                settings.lastSyncAt = Date()
+            } else {
+                lastSyncSummary = "HealthKit unavailable — showing server data only."
+            }
+            today = try await client.getToday()
+        } catch {
+            errorMessage = readable(error)
+        }
+    }
+
+    /// Fetches Today without pushing new samples (e.g. on tab appear).
+    func refreshToday(_ settings: AppSettings) async {
+        guard let client = settings.makeClient() else {
+            errorMessage = APIError.notConfigured.localizedDescription
+            return
+        }
+        isLoadingToday = true
+        errorMessage = nil
+        defer { isLoadingToday = false }
+        do {
+            today = try await client.getToday()
+        } catch {
+            errorMessage = readable(error)
+        }
+    }
+
+    private func readable(_ error: Error) -> String {
+        (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+    }
+}
