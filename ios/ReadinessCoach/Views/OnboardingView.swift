@@ -10,6 +10,8 @@ struct OnboardingView: View {
     @State private var healthGranted = false
     @State private var error: String?
     @State private var isFinishing = false
+    @State private var isTesting = false
+    @State private var testOK: Bool?
 
     private let health = HealthKitService()
 
@@ -22,10 +24,25 @@ struct OnboardingView: View {
                     SectionCard(title: "1 · Connect your API") {
                         LabeledField(label: "API URL", text: $settings.apiBaseURL, keyboard: .URL)
                         LabeledField(label: "API token", text: $settings.apiToken, secure: true)
-                        LabeledField(label: "User ID", text: $settings.userId)
+                        DisclosureGroup("Advanced") {
+                            LabeledField(label: "User ID", text: $settings.userId)
+                                .padding(.top, 4)
+                        }
+                        .font(.subheadline)
+                        Button {
+                            Task { await testConnection() }
+                        } label: {
+                            HStack {
+                                Image(systemName: testIcon)
+                                Text(isTesting ? "Testing…" : "Test connection")
+                                Spacer()
+                                if isTesting { ProgressView() }
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(isTesting || !settings.isConfigured)
                         Text("The score is computed on your API. Point this at your backend and use a private bearer token.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(.caption).foregroundStyle(.secondary)
                     }
 
                     SectionCard(title: "2 · Allow Health access") {
@@ -75,6 +92,25 @@ struct OnboardingView: View {
             Text("A strict, evidence-backed readiness advisor. The score locks the decision; the coach only explains it.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    private var testIcon: String {
+        switch testOK {
+        case .some(true): return "checkmark.circle.fill"
+        case .some(false): return "xmark.circle.fill"
+        case nil: return "bolt.horizontal.circle"
+        }
+    }
+
+    private func testConnection() async {
+        guard let client = settings.makeClient() else { return }
+        isTesting = true; error = nil
+        defer { isTesting = false }
+        do { try await client.testConnection(); testOK = true }
+        catch {
+            testOK = false
+            self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
 

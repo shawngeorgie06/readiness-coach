@@ -110,6 +110,9 @@ struct LabeledField: View {
             Group {
                 if secure {
                     SecureField(label, text: $text)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .font(.body.monospaced())
                 } else {
                     TextField(label, text: $text)
                         .keyboardType(keyboard)

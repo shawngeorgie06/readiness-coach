@@ -69,6 +69,15 @@ struct APIClient {
         return try await send("v1/coach/ask", method: "POST", body: body)
     }
 
+    /// Verifies the base URL + token reach a working backend for this user.
+    func testConnection() async throws {
+        // /health needs no auth but confirms the origin; getToday confirms auth + user.
+        var health = URLRequest(url: baseURL.appendingPathComponent("health"))
+        health.timeoutInterval = 8
+        _ = try await URLSession.shared.data(for: health)
+        _ = try await getToday()
+    }
+
     /// Deletes the user and all associated health data (GDPR-style erase).
     func deleteAccount() async throws {
         _ = try await requestData(path: "v1/user", method: "DELETE", query: [], body: Optional<SyncPayload>.none)
