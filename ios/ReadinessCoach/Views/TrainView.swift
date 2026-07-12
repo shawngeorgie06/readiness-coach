@@ -15,7 +15,7 @@ struct TrainView: View {
                         SectionCard(title: "Strain — last \(response.days) days") {
                             Chart(response.data) { workout in
                                 BarMark(
-                                    x: .value("Day", shortDate(workout.startAt)),
+                                    x: .value("Day", ChartDate.day(workout.startAt)),
                                     y: .value("Strain", workout.strain)
                                 )
                                 .foregroundStyle(.orange)
@@ -62,39 +62,69 @@ struct TrainView: View {
         }
     }
 
-    private func shortDate(_ iso: String) -> String {
-        guard let date = DateFormatting.date(fromISO: iso) else { return String(iso.prefix(10)) }
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MM-dd"
-        return formatter.string(from: date)
-    }
 }
 
 struct WorkoutRow: View {
     let workout: WorkoutDTO
+    private let zoneColors: [Color] = [.gray, .blue, .green, .orange, .red]
 
     var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(workout.sport.capitalized).font(.subheadline.weight(.semibold))
-                Text(subtitle).font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 2) {
-                Text("strain \(String(format: "%.1f", workout.strain))")
-                    .font(.subheadline.monospacedDigit())
-                if let hr = workout.avgHrBpm {
-                    Text("\(Int(hr.rounded())) bpm avg")
-                        .font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(workout.sport.capitalized).font(.subheadline.weight(.semibold))
+                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
                 }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("strain \(String(format: "%.1f", workout.strain))")
+                        .font(.subheadline.monospacedDigit())
+                    if !hrText.isEmpty {
+                        Text(hrText).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            if let zones = workout.hrZonesMin, zones.contains(where: { $0 > 0 }) {
+                zoneBar(zones)
             }
         }
         .padding(.vertical, 2)
+    }
+
+    private func zoneBar(_ zones: [Double]) -> some View {
+        let total = max(zones.reduce(0, +), 0.001)
+        return VStack(alignment: .leading, spacing: 3) {
+            GeometryReader { geo in
+                HStack(spacing: 1) {
+                    ForEach(Array(zones.enumerated()), id: \.offset) { index, minutes in
+                        zoneColors[min(index, 4)]
+                            .frame(width: max(0, geo.size.width * (minutes / total)))
+                    }
+                }
+            }
+            .frame(height: 8)
+            .clipShape(Capsule())
+            Text("HR zones · " + zones.enumerated()
+                .map { "Z\($0.offset + 1) \(fmtMin($0.element))m" }
+                .joined(separator: "  "))
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+
+    private var hrText: String {
+        var parts: [String] = []
+        if let avg = workout.avgHrBpm { parts.append("\(Int(avg.rounded())) avg") }
+        if let max = workout.maxHrBpm { parts.append("\(Int(max.rounded())) max") }
+        return parts.isEmpty ? "" : parts.joined(separator: " · ") + " bpm"
     }
 
     private var subtitle: String {
         var parts = ["\(Int(workout.durationMin.rounded())) min"]
         if let cal = workout.calories { parts.append("\(Int(cal.rounded())) kcal") }
         return parts.joined(separator: " · ")
+    }
+
+    private func fmtMin(_ value: Double) -> String {
+        value == value.rounded() ? String(Int(value)) : String(format: "%.1f", value)
     }
 }

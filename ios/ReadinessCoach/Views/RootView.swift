@@ -25,11 +25,28 @@ struct MainTabView: View {
                 .tabItem { Label("Train", systemImage: "figure.run") }
             BodyView()
                 .tabItem { Label("Body", systemImage: "heart") }
+            TrendsView()
+                .tabItem { Label("Trends", systemImage: "chart.line.uptrend.xyaxis") }
             AskCoachView()
                 .tabItem { Label("Ask", systemImage: "bubble.left.and.text.bubble.right") }
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape") }
         }
+    }
+}
+
+/// Shared helpers for date-based chart axes (auto-thinned, formatted labels).
+enum ChartDate {
+    private static let parser: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        return formatter
+    }()
+
+    /// Parse a "yyyy-MM-dd" (or ISO) string to a Date for plotting.
+    static func day(_ iso: String) -> Date {
+        parser.date(from: String(iso.prefix(10))) ?? Date()
     }
 }
 

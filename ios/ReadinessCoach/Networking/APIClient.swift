@@ -50,8 +50,12 @@ struct APIClient {
         try await get("v1/train", query: [URLQueryItem(name: "days", value: String(days))] + dateQuery(date))
     }
 
-    func getBody(days: Int = 14, date: String? = nil) async throws -> BodyResponse {
+    func getBody(days: Int = 30, date: String? = nil) async throws -> BodyResponse {
         try await get("v1/body", query: [URLQueryItem(name: "days", value: String(days))] + dateQuery(date))
+    }
+
+    func getHistory(days: Int = 30, date: String? = nil) async throws -> ReadinessHistoryResponse {
+        try await get("v1/history", query: [URLQueryItem(name: "days", value: String(days))] + dateQuery(date))
     }
 
     // MARK: Writes

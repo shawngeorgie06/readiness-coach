@@ -11,9 +11,10 @@ struct BodyView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    if let response, !response.data.isEmpty {
-                        chartCard(title: "HRV (SDNN, ms)", type: "hrv_sdnn", color: .teal, data: response.data)
-                        chartCard(title: "Resting heart rate (bpm)", type: "resting_heart_rate", color: .pink, data: response.data)
+                    if let response, !response.daily.isEmpty {
+                        lineCard("HRV (SDNN, ms)", type: "hrv_sdnn", color: .teal, rows: response.daily)
+                        lineCard("Resting heart rate (bpm)", type: "resting_heart_rate", color: .pink, rows: response.daily)
+                        heartRateCard(response.daily)
                     } else if isLoading {
                         ProgressView().padding(.top, 60)
                     } else {
@@ -35,26 +36,48 @@ struct BodyView: View {
         }
     }
 
+    /// Daily-average line for a single metric type.
     @ViewBuilder
-    private func chartCard(title: String, type: String, color: Color, data: [BodySample]) -> some View {
-        let points = data
-            .filter { $0.type == type && $0.value != nil }
-            .compactMap { sample -> (Date, Double)? in
-                guard let date = DateFormatting.date(fromISO: sample.startAt), let value = sample.value else { return nil }
-                return (date, value)
-            }
-        if !points.isEmpty {
+    private func lineCard(_ title: String, type: String, color: Color, rows: [BodyDaily]) -> some View {
+        let series = rows.filter { $0.type == type }.sorted { $0.date < $1.date }
+        if !series.isEmpty {
             SectionCard(title: title) {
-                Chart {
-                    ForEach(Array(points.enumerated()), id: \.offset) { _, point in
-                        LineMark(x: .value("Time", point.0), y: .value("Value", point.1))
-                            .foregroundStyle(color)
-                        PointMark(x: .value("Time", point.0), y: .value("Value", point.1))
-                            .foregroundStyle(color)
-                            .symbolSize(20)
-                    }
+                Chart(series) { day in
+                    LineMark(x: .value("Date", ChartDate.day(day.date)), y: .value("Avg", day.avg))
+                        .foregroundStyle(color)
+                    PointMark(x: .value("Date", ChartDate.day(day.date)), y: .value("Avg", day.avg))
+                        .foregroundStyle(color).symbolSize(18)
+                }
+                .frame(height: 190)
+                if let latest = series.last {
+                    Text("Latest avg \(fmt(latest.avg))  (range \(fmt(latest.min))–\(fmt(latest.max)))")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    /// Heart rate as a daily min–max band with the average line on top.
+    @ViewBuilder
+    private func heartRateCard(_ rows: [BodyDaily]) -> some View {
+        let series = rows.filter { $0.type == "heart_rate" }.sorted { $0.date < $1.date }
+        if !series.isEmpty {
+            SectionCard(title: "Heart rate (bpm) — daily min · avg · max") {
+                Chart(series) { day in
+                    AreaMark(
+                        x: .value("Date", ChartDate.day(day.date)),
+                        yStart: .value("Min", day.min),
+                        yEnd: .value("Max", day.max)
+                    )
+                    .foregroundStyle(.red.opacity(0.15))
+                    LineMark(x: .value("Date", ChartDate.day(day.date)), y: .value("Avg", day.avg))
+                        .foregroundStyle(.red)
                 }
                 .frame(height: 200)
+                if let latest = series.last {
+                    Text("Latest — min \(fmt(latest.min)) · avg \(fmt(latest.avg)) · max \(fmt(latest.max)) bpm")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
         }
     }
@@ -65,9 +88,13 @@ struct BodyView: View {
         error = nil
         defer { isLoading = false }
         do {
-            response = try await client.getBody(days: 14)
+            response = try await client.getBody(days: 30)
         } catch {
             self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
+    }
+
+    private func fmt(_ value: Double) -> String {
+        value == value.rounded() ? String(Int(value)) : String(format: "%.1f", value)
     }
 }

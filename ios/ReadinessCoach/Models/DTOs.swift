@@ -60,10 +60,18 @@ struct SleepDetailResponse: Codable {
     let data: [SleepDay]
 }
 
+struct SleepStages: Codable, Hashable {
+    let deep: Double
+    let rem: Double
+    let core: Double
+    let awake: Double
+}
+
 struct SleepDay: Codable, Identifiable {
     let date: String
     let durationHours: Double
     let restorativeHours: Double
+    let stages: SleepStages
     var id: String { date }
 }
 
@@ -79,22 +87,45 @@ struct WorkoutDTO: Codable, Identifiable {
     let endAt: String
     let durationMin: Double
     let avgHrBpm: Double?
+    let maxHrBpm: Double?
     let calories: Double?
     let strain: Double
+    /// Estimated minutes in HR zones Z1–Z5, or nil when no HR was recorded.
+    let hrZonesMin: [Double]?
 }
 
 struct BodyResponse: Codable {
     let days: Int
-    let data: [BodySample]
+    let daily: [BodyDaily]
 }
 
-struct BodySample: Codable, Identifiable {
+/// Per-day min/avg/max for a single metric type (hrv_sdnn, resting_heart_rate, heart_rate).
+struct BodyDaily: Codable, Identifiable {
     let type: String
-    let startAt: String
-    let endAt: String
-    let value: Double?
-    let unit: String?
-    var id: String { type + startAt }
+    let date: String
+    let min: Double
+    let avg: Double
+    let max: Double
+    let count: Int
+    var id: String { type + date }
+}
+
+// MARK: - Readiness history
+
+struct ReadinessHistoryResponse: Codable {
+    let days: Int
+    let data: [ReadinessPoint]
+}
+
+struct ReadinessPoint: Codable, Identifiable {
+    let date: String
+    let readiness: Double
+    let decision: Decision
+    let sleepScore: Double
+    let recoveryScore: Double
+    let loadScore: Double
+    let calibrating: Bool
+    var id: String { date }
 }
 
 // MARK: - Ask Coach
