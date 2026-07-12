@@ -6,6 +6,7 @@ import { prisma } from "./db.js";
 import { requireToken } from "./middleware/auth.js";
 import { bodyRouter } from "./routes/body.js";
 import { coachRouter } from "./routes/coach.js";
+import { historyRouter } from "./routes/history.js";
 import { sleepRouter } from "./routes/sleep.js";
 import { syncRouter } from "./routes/sync.js";
 import { todayRouter } from "./routes/today.js";
@@ -66,6 +67,7 @@ export function createApp({
   app.use("/v1", requireToken(apiToken));
   app.use("/v1/sync", syncRouter);
   app.use("/v1/today", todayRouter);
+  app.use("/v1/history", historyRouter);
   app.use("/v1/sleep", sleepRouter);
   app.use("/v1/train", trainRouter);
   app.use("/v1/body", bodyRouter);

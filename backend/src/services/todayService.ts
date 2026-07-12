@@ -31,6 +31,13 @@ export interface SleepSummary {
   restorativeHours: number;
 }
 
+export interface SleepStageHours {
+  deep: number;
+  rem: number;
+  core: number;
+  awake: number;
+}
+
 export class UserNotFoundError extends Error {
   constructor(userId: string) {
     super(`User ${userId} was not found`);
@@ -85,6 +92,33 @@ export function summarizeSleep(
     durationHours: round(durationMs / (60 * 60 * 1000)),
     restorativeHours: round(restorativeMs / (60 * 60 * 1000)),
   };
+}
+
+/** Break a sleep window into hours per stage (deep/rem/core/awake). */
+export function summarizeSleepStages(
+  samples: SleepSample[],
+  windowStart: Date,
+  windowEnd: Date,
+): SleepStageHours {
+  const ms: SleepStageHours = { deep: 0, rem: 0, core: 0, awake: 0 };
+
+  for (const sample of samples) {
+    const stage = sleepStage(sample.metadata);
+    if (stage.includes("inbed")) continue;
+
+    const start = Math.max(sample.startAt.getTime(), windowStart.getTime());
+    const end = Math.min(sample.endAt.getTime(), windowEnd.getTime());
+    const overlapMs = Math.max(0, end - start);
+    if (overlapMs === 0) continue;
+
+    if (stage.includes("awake")) ms.awake += overlapMs;
+    else if (stage.includes("deep")) ms.deep += overlapMs;
+    else if (stage.includes("rem")) ms.rem += overlapMs;
+    else ms.core += overlapMs; // core + unspecified "asleep"
+  }
+
+  const toHours = (value: number) => round(value / (60 * 60 * 1000));
+  return { deep: toHours(ms.deep), rem: toHours(ms.rem), core: toHours(ms.core), awake: toHours(ms.awake) };
 }
 
 /** Last night runs from noon on the previous calendar day through noon today. */
@@ -186,8 +220,8 @@ async function daysOfHistory(userId: string, date: Date): Promise<number> {
   return first == null ? 0 : Math.max(1, Math.floor((date.getTime() - first.getTime()) / DAY_MS) + 1);
 }
 
-/** Compute today from synced raw data and persist its deterministic score. */
-export async function getToday(userId: string, requestedDate = defaultRequestedDate()): Promise<TodayResponse> {
+/** Deterministic score for a date: compute, persist the DailyScore, and return the response minus the advisor note. */
+export async function computeScore(userId: string, requestedDate = defaultRequestedDate()): Promise<Omit<TodayResponse, "advisor">> {
   const date = parseRequestedDate(requestedDate);
   const targetStart = dateStart(date);
   const targetEnd = addDays(targetStart, 1);
@@ -331,8 +365,79 @@ export async function getToday(userId: string, requestedDate = defaultRequestedD
     confidence: missing.length === 0 ? "high" : "low",
     missing,
   };
-  const advisor = await getAdvisorNote(userId, targetStart, response);
+  return response;
+}
+
+/** Compute today's deterministic score and attach the strict advisor note. */
+export async function getToday(userId: string, requestedDate = defaultRequestedDate()): Promise<TodayResponse> {
+  const response = await computeScore(userId, requestedDate);
+  const advisor = await getAdvisorNote(userId, dateStart(response.date), response);
   return { ...response, advisor };
+}
+
+export interface ReadinessHistoryPoint {
+  date: string;
+  readiness: number;
+  decision: "push" | "maintain" | "recover";
+  sleepScore: number;
+  recoveryScore: number;
+  loadScore: number;
+  calibrating: boolean;
+}
+
+/** Daily readiness scores over a window, backfilling any not-yet-computed days (no advisor/LLM). */
+export async function getReadinessHistory(
+  userId: string,
+  days: number,
+  requestedDate = defaultRequestedDate(),
+): Promise<{ days: number; data: ReadinessHistoryPoint[] }> {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (user == null) throw new UserNotFoundError(userId);
+
+  const target = dateStart(requestedDate);
+  let startDate = addDays(target, -(days - 1));
+
+  // Don't fabricate trend points for days before the user had any data.
+  const [firstSample, firstWorkout] = await Promise.all([
+    prisma.healthSample.findFirst({ where: { userId }, orderBy: { startAt: "asc" } }),
+    prisma.workout.findFirst({ where: { userId }, orderBy: { startAt: "asc" } }),
+  ]);
+  const firstData = [firstSample?.startAt, firstWorkout?.startAt]
+    .filter((value): value is Date => value != null)
+    .sort((a, b) => a.getTime() - b.getTime())[0];
+  if (firstData != null) {
+    const firstDay = dateStart(firstData.toISOString().slice(0, 10));
+    if (firstDay > startDate) startDate = firstDay;
+  }
+
+  const existing = await prisma.dailyScore.findMany({
+    where: { userId, date: { gte: startDate, lte: target } },
+  });
+  const stored = new Map(existing.map((score) => [score.date.toISOString().slice(0, 10), score]));
+
+  const data: ReadinessHistoryPoint[] = [];
+  const total = Math.floor((target.getTime() - startDate.getTime()) / DAY_MS) + 1;
+  for (let index = 0; index < total; index += 1) {
+    const day = addDays(startDate, index);
+    const iso = day.toISOString().slice(0, 10);
+    let row = stored.get(iso);
+    if (row == null) {
+      await computeScore(userId, iso);
+      row = (await prisma.dailyScore.findUnique({ where: { userId_date: { userId, date: day } } })) ?? undefined;
+    }
+    if (row != null) {
+      data.push({
+        date: iso,
+        readiness: row.readiness,
+        decision: row.decision as ReadinessHistoryPoint["decision"],
+        sleepScore: row.sleepScore,
+        recoveryScore: row.recoveryScore,
+        loadScore: row.loadScore,
+        calibrating: row.calibrating,
+      });
+    }
+  }
+  return { days, data };
 }
 
 export async function getSleepDetails(userId: string, days: number, requestedDate = defaultRequestedDate()) {
@@ -352,7 +457,11 @@ export async function getSleepDetails(userId: string, days: number, requestedDat
     data: Array.from({ length: days }, (_, index) => {
       const day = addDays(start, index);
       const window = sleepWindowForDate(day);
-      return { date: day.toISOString().slice(0, 10), ...summarizeSleep(samples, window.start, window.end) };
+      return {
+        date: day.toISOString().slice(0, 10),
+        ...summarizeSleep(samples, window.start, window.end),
+        stages: summarizeSleepStages(samples, window.start, window.end),
+      };
     }),
   };
 }
@@ -364,18 +473,48 @@ export async function getTrainingDetails(userId: string, days: number, requested
     where: { userId, endAt: { gte: start, lt: end } },
     orderBy: { startAt: "desc" },
   });
+
+  // Enrich each workout with max HR and HR-zone minutes computed from the raw
+  // heart-rate samples already synced — no extra fields need to be uploaded.
+  const earliest = workouts.reduce((min, workout) => (workout.startAt < min ? workout.startAt : min), end);
+  const hrSamples = workouts.length === 0
+    ? []
+    : await prisma.healthSample.findMany({
+        where: { userId, type: "heart_rate", startAt: { gte: earliest, lte: end }, value: { not: null } },
+        select: { startAt: true, value: true },
+        orderBy: { startAt: "asc" },
+      });
+
+  const HR_MAX = 190; // zone thresholds as % of an assumed max HR
   return {
     days,
-    data: workouts.map((workout) => ({
-      id: workout.id,
-      sport: workout.sport,
-      startAt: workout.startAt.toISOString(),
-      endAt: workout.endAt.toISOString(),
-      durationMin: workout.durationMin,
-      avgHrBpm: workout.avgHrBpm,
-      calories: workout.calories,
-      strain: workout.strain,
-    })),
+    data: workouts.map((workout) => {
+      const values = hrSamples
+        .filter((sample) => sample.startAt >= workout.startAt && sample.startAt <= workout.endAt)
+        .map((sample) => sample.value as number);
+      const maxHrBpm = values.length > 0 ? Math.round(Math.max(...values)) : null;
+      const zoneCounts = [0, 0, 0, 0, 0];
+      for (const value of values) {
+        const pct = value / HR_MAX;
+        const zone = pct < 0.6 ? 0 : pct < 0.7 ? 1 : pct < 0.8 ? 2 : pct < 0.9 ? 3 : 4;
+        zoneCounts[zone] += 1;
+      }
+      const hrZonesMin = values.length > 0
+        ? zoneCounts.map((count) => round((count / values.length) * workout.durationMin, 1))
+        : null;
+      return {
+        id: workout.id,
+        sport: workout.sport,
+        startAt: workout.startAt.toISOString(),
+        endAt: workout.endAt.toISOString(),
+        durationMin: workout.durationMin,
+        avgHrBpm: workout.avgHrBpm,
+        maxHrBpm,
+        calories: workout.calories,
+        strain: workout.strain,
+        hrZonesMin,
+      };
+    }),
   };
 }
 
@@ -390,14 +529,38 @@ export async function getBodyDetails(userId: string, days: number, requestedDate
     },
     orderBy: { startAt: "asc" },
   });
-  return {
-    days,
-    data: samples.map((sample) => ({
-      type: sample.type,
-      startAt: sample.startAt.toISOString(),
-      endAt: sample.endAt.toISOString(),
-      value: sample.value,
-      unit: sample.unit,
-    })),
-  };
+  // Aggregate to per-day min/avg/max per type so the app charts trends without
+  // shipping tens of thousands of raw heart-rate points.
+  interface Bucket { sum: number; count: number; min: number; max: number; }
+  const buckets = new Map<string, Bucket>();
+  for (const sample of samples) {
+    if (sample.value == null) continue;
+    const dayIso = sample.startAt.toISOString().slice(0, 10);
+    const key = `${sample.type}|${dayIso}`;
+    const bucket = buckets.get(key);
+    if (bucket == null) {
+      buckets.set(key, { sum: sample.value, count: 1, min: sample.value, max: sample.value });
+    } else {
+      bucket.sum += sample.value;
+      bucket.count += 1;
+      bucket.min = Math.min(bucket.min, sample.value);
+      bucket.max = Math.max(bucket.max, sample.value);
+    }
+  }
+
+  const daily = Array.from(buckets.entries())
+    .map(([key, bucket]) => {
+      const [type, date] = key.split("|");
+      return {
+        type,
+        date,
+        min: round(bucket.min),
+        avg: round(bucket.sum / bucket.count),
+        max: round(bucket.max),
+        count: bucket.count,
+      };
+    })
+    .sort((a, b) => (a.type === b.type ? a.date.localeCompare(b.date) : a.type.localeCompare(b.type)));
+
+  return { days, daily };
 }
