@@ -94,11 +94,25 @@ function configuredLlm(): LlmClient | undefined {
   });
 }
 
-const ADVISOR_SYSTEM_PROMPT = [
+const ADVISOR_BASE_PROMPT = [
   "You are a strict readiness advisor for recomp/general fitness.",
   "Use only the supplied metrics. No diagnosis, cheerleading, or invented data.",
   "The deterministic decision is locked: you may be more conservative but never more aggressive.",
-  "Return JSON only with decision, why (2-4 evidence-backed strings), prescription, and ifIgnored.",
+].join(" ");
+
+const ADVISOR_SYSTEM_PROMPT =
+  `${ADVISOR_BASE_PROMPT} Return JSON only with decision, why (2-4 evidence-backed strings), prescription, and ifIgnored.`;
+
+const COACH_SYSTEM_PROMPT = [
+  ADVISOR_BASE_PROMPT,
+  "Answer the user's question in plain prose paragraphs — no JSON, no bullet lists.",
+  "Be specific and thorough, not vague:",
+  "directly answer the question first;",
+  "justify it by citing the actual pillar scores and their drivers with the real numbers (e.g. HRV %, sleep hours, sleep debt, acute:chronic ratio);",
+  "explain what those signals mean for training today;",
+  "give a concrete prescription of what to do and what to avoid, with rough intensity/duration;",
+  "and state what would need to change for the decision to improve.",
+  "Name the locked decision and never recommend training more aggressive than it allows.",
 ].join(" ");
 
 /** Generate a structured note, returning the deterministic template whenever cloud generation is unavailable or invalid. */
@@ -108,6 +122,7 @@ export async function generateAdvisorNote(today: AdvisorContext, llm: LlmClient 
 
   try {
     const content = await llm.chat({
+      json: true,
       messages: [
         { role: "system", content: ADVISOR_SYSTEM_PROMPT },
         { role: "user", content: JSON.stringify(metricSummary(today)) },
@@ -177,7 +192,7 @@ export async function askCoach(question: string, today: AdvisorContext, llm: Llm
       messages: [
         {
           role: "system",
-          content: `${ADVISOR_SYSTEM_PROMPT} Answer the question directly in plain text. State and obey the locked decision.`,
+          content: COACH_SYSTEM_PROMPT,
         },
         { role: "user", content: JSON.stringify({ question, today: metricSummary(today) }) },
       ],

@@ -6,6 +6,8 @@ export interface ChatMessage {
 export interface ChatRequest {
   messages: ChatMessage[];
   temperature?: number;
+  /** Request a strict JSON object response. Off by default so plain-text answers stay prose. */
+  json?: boolean;
 }
 
 /** Provider-neutral interface to allow the advisor service to be tested without network access. */
@@ -49,7 +51,7 @@ export function createOpenAiCompatibleClient(options: OpenAiCompatibleClientOpti
             model,
             messages: request.messages,
             temperature: request.temperature ?? 0.2,
-            response_format: { type: "json_object" },
+            ...(request.json ? { response_format: { type: "json_object" } } : {}),
           }),
           signal: controller.signal,
         });
