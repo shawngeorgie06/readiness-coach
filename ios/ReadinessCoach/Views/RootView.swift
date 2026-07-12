@@ -4,10 +4,16 @@ import SwiftUI
 /// HealthKit permission has been requested.
 struct RootView: View {
     @EnvironmentObject private var settings: AppSettings
+    @EnvironmentObject private var sync: SyncService
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         if settings.isReady {
             MainTabView()
+                .onChange(of: scenePhase) { _, phase in
+                    if phase == .active { Task { await sync.autoSync(settings) } }
+                }
+                .task { await sync.autoSync(settings) }
         } else {
             OnboardingView()
         }
@@ -17,20 +23,11 @@ struct RootView: View {
 struct MainTabView: View {
     var body: some View {
         TabView {
-            TodayView()
-                .tabItem { Label("Today", systemImage: "sun.max") }
-            SleepView()
-                .tabItem { Label("Sleep", systemImage: "bed.double") }
-            TrainView()
-                .tabItem { Label("Train", systemImage: "figure.run") }
-            BodyView()
-                .tabItem { Label("Body", systemImage: "heart") }
-            TrendsView()
-                .tabItem { Label("Trends", systemImage: "chart.line.uptrend.xyaxis") }
-            AskCoachView()
-                .tabItem { Label("Ask", systemImage: "bubble.left.and.text.bubble.right") }
-            SettingsView()
-                .tabItem { Label("Settings", systemImage: "gearshape") }
+            TodayView().tabItem { Label("Today", systemImage: "sun.max") }
+            SleepView().tabItem { Label("Sleep", systemImage: "bed.double") }
+            TrainView().tabItem { Label("Train", systemImage: "figure.run") }
+            BodyView().tabItem { Label("Body", systemImage: "heart") }
+            TrendsView().tabItem { Label("Trends", systemImage: "chart.line.uptrend.xyaxis") }
         }
     }
 }
@@ -66,6 +63,14 @@ extension Decision {
         case .push: return "bolt.fill"
         case .maintain: return "equal.circle.fill"
         case .recover: return "moon.zzz.fill"
+        }
+    }
+
+    var meaning: String {
+        switch self {
+        case .push: return "You're recovered — a hard session is on the table."
+        case .maintain: return "Train, but keep intensity moderate; no maximal efforts."
+        case .recover: return "Back off today — rest or light movement only."
         }
     }
 }

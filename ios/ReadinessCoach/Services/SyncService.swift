@@ -9,8 +9,17 @@ final class SyncService: ObservableObject {
     @Published var isLoadingToday = false
     @Published var errorMessage: String?
     @Published var lastSyncSummary: String?
+    @Published var uploadingCount: Int?
 
     private let health = HealthKitService()
+    private var lastAutoSyncAt: Date?
+
+    /// Foreground-triggered sync, debounced so rapid app switches don't re-sync.
+    func autoSync(_ settings: AppSettings) async {
+        if let last = lastAutoSyncAt, Date().timeIntervalSince(last) < 30 { return }
+        lastAutoSyncAt = Date()
+        await syncNow(settings)
+    }
 
     /// Reads new HealthKit samples, uploads them, then refreshes Today so the
     /// locked decision reflects the just-synced data.
@@ -21,7 +30,7 @@ final class SyncService: ObservableObject {
         }
         isSyncing = true
         errorMessage = nil
-        defer { isSyncing = false }
+        defer { isSyncing = false; uploadingCount = nil }
 
         do {
             if HealthKitService.isAvailable {
@@ -30,6 +39,7 @@ final class SyncService: ObservableObject {
                     userId: settings.userId
                 )
                 if !payload.isEmpty {
+                    uploadingCount = payload.samples.count
                     let result = try await client.sync(payload)
                     lastSyncSummary = "Synced \(result.samples) samples, \(result.workouts) workouts."
                 } else {

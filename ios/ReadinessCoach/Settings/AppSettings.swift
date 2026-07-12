@@ -33,6 +33,14 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    /// Human-friendly "3m ago" text for the last successful sync, or nil if never.
+    var lastSyncRelativeText: String? {
+        guard let date = lastSyncAt else { return nil }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter.localizedString(for: date, relativeTo: Date())
+    }
+
     var isConfigured: Bool {
         guard let url = URL(string: apiBaseURL.trimmingCharacters(in: .whitespaces)),
               url.scheme != nil, url.host != nil else { return false }

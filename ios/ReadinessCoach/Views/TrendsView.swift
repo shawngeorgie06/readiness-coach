@@ -24,7 +24,7 @@ struct TrendsView: View {
                         )
                     }
                     if let error {
-                        Text(error).font(.footnote).foregroundStyle(.red)
+                        ErrorCard(message: error) { Task { await load() } }
                     }
                 }
                 .padding()

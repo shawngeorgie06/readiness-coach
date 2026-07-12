@@ -4,6 +4,11 @@ struct TodayView: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var sync: SyncService
 
+    @State private var showAsk = false
+    @State private var showSettings = false
+    @State private var pillarInfo: PillarInfo?
+    @State private var recent: [ReadinessPoint] = []
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -22,19 +27,24 @@ struct TodayView: View {
                     }
 
                     if let error = sync.errorMessage {
-                        Text(error)
-                            .font(.footnote)
-                            .foregroundStyle(.red)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        ErrorCard(message: error) {
+                            Task { await sync.syncNow(settings); await loadRecent() }
+                        }
                     }
                 }
                 .padding()
             }
             .navigationTitle("Today")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { showSettings = true } label: { Image(systemName: "gearshape") }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showAsk = true } label: { Image(systemName: "bubble.left.and.text.bubble.right") }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        Task { await sync.syncNow(settings) }
+                        Task { await sync.syncNow(settings); await loadRecent() }
                     } label: {
                         if sync.isSyncing {
                             ProgressView()
@@ -45,10 +55,11 @@ struct TodayView: View {
                     .disabled(sync.isSyncing)
                 }
             }
-            .refreshable { await sync.syncNow(settings) }
-            .task {
-                if sync.today == nil { await sync.refreshToday(settings) }
-            }
+            .sheet(isPresented: $showAsk) { NavigationStack { AskCoachView() } }
+            .sheet(isPresented: $showSettings) { NavigationStack { SettingsView() } }
+            .sheet(item: $pillarInfo) { PillarDetailSheet(info: $0) }
+            .refreshable { await sync.syncNow(settings); await loadRecent() }
+            .task { await loadRecent() }
         }
     }
 
@@ -59,7 +70,9 @@ struct TodayView: View {
                 "Calibrating",
                 "Baselines are still forming from your recent history. Treat scores as provisional.",
                 color: .orange,
-                icon: "gauge.with.dots.needle.33percent"
+                icon: "gauge.with.dots.needle.33percent",
+                infoTitle: "Calibrating",
+                infoMessage: "Your baselines are still forming from recent history. Scores are provisional until ~14 days of data exist."
             )
         }
         if today.isLowConfidence {
@@ -67,13 +80,26 @@ struct TodayView: View {
                 "Low confidence",
                 "Missing \(today.missing.isEmpty ? "some signals" : today.missing.joined(separator: ", ")). The decision stays conservative.",
                 color: .yellow,
-                icon: "exclamationmark.triangle"
+                icon: "exclamationmark.triangle",
+                infoTitle: "Low confidence",
+                infoMessage: "Some signals are missing today, so the decision stays conservative. Sync your Watch data to improve it."
             )
         }
 
         VStack(spacing: 12) {
             ReadinessRing(readiness: today.readiness, decision: today.decision)
             DecisionChip(decision: today.decision)
+            Text(today.decision.meaning)
+                .font(.subheadline).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+            if let count = sync.uploadingCount {
+                Label("Uploading \(count) samples…", systemImage: "arrow.up.circle")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if let synced = settings.lastSyncRelativeText {
+                Text("Last synced \(synced)")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             if !today.overridesApplied.isEmpty {
                 Text("Overrides: \(today.overridesApplied.joined(separator: ", "))")
                     .font(.caption)
@@ -83,17 +109,44 @@ struct TodayView: View {
         .padding(.vertical, 8)
 
         pillars(today.pillars)
+        if recent.count > 1 {
+            SectionCard(title: "Readiness trend") {
+                ReadinessSparkline(points: recent)
+                Text("Last \(recent.count) days · tap Trends for detail")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
         advisor(today.advisor)
+        Button { showAsk = true } label: {
+            Label("Ask the coach", systemImage: "bubble.left.and.text.bubble.right")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
     }
 
     private func pillars(_ pillars: Pillars) -> some View {
         SectionCard(title: "Pillars") {
-            PillarRow(name: "Sleep", weight: "35%", pillar: pillars.sleep)
+            pillarButton("Sleep", "35%",
+                "Last night's duration and quality vs your ~8h need, plus recent sleep debt and consistency.",
+                pillars.sleep)
             Divider()
-            PillarRow(name: "Recovery", weight: "40%", pillar: pillars.recovery)
+            pillarButton("Recovery", "40%",
+                "HRV and resting heart rate vs your 30-day baseline — the strongest readiness signal.",
+                pillars.recovery)
             Divider()
-            PillarRow(name: "Load", weight: "25%", pillar: pillars.load)
+            pillarButton("Load", "25%",
+                "Recent training strain and the acute:chronic ratio — how hard you've pushed lately vs your norm.",
+                pillars.load)
         }
+    }
+
+    private func pillarButton(_ name: String, _ weight: String, _ description: String, _ pillar: PillarScore) -> some View {
+        Button {
+            pillarInfo = PillarInfo(name: name, weight: weight, description: description, pillar: pillar)
+        } label: {
+            PillarRow(name: name, weight: weight, pillar: pillar)
+        }
+        .buttonStyle(.plain)
     }
 
     private func advisor(_ note: AdvisorNote) -> some View {
@@ -117,7 +170,8 @@ struct TodayView: View {
         }
     }
 
-    private func banner(_ title: String, _ message: String, color: Color, icon: String) -> some View {
+    private func banner(_ title: String, _ message: String, color: Color, icon: String,
+                        infoTitle: String, infoMessage: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: icon).foregroundStyle(color)
             VStack(alignment: .leading, spacing: 2) {
@@ -125,9 +179,16 @@ struct TodayView: View {
                 Text(message).font(.footnote).foregroundStyle(.secondary)
             }
             Spacer()
+            InfoBadge(title: infoTitle, message: infoMessage)
         }
         .padding()
         .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    /// Loads the 7-day readiness history for the sparkline; failures hide it silently.
+    private func loadRecent() async {
+        guard let client = settings.makeClient() else { return }
+        recent = (try? await client.getHistory(days: 7).data) ?? []
     }
 }
 
