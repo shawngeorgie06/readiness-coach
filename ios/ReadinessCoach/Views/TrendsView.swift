@@ -6,6 +6,8 @@ struct TrendsView: View {
     @State private var response: ReadinessHistoryResponse?
     @State private var error: String?
     @State private var isLoading = false
+    @State private var readinessSelection: Date?
+    @State private var pillarSelection: Date?
 
     var body: some View {
         NavigationStack {
@@ -45,9 +47,17 @@ struct TrendsView: View {
                 PointMark(x: .value("Date", ChartDate.day(point.date)), y: .value("Readiness", point.readiness))
                     .foregroundStyle(point.decision.tint)
                     .symbolSize(40)
+                if let sel = readinessSelection, let hit = points.first(where: { ChartDate.day($0.date) == sel }) {
+                    RuleMark(x: .value("Date", sel))
+                        .foregroundStyle(.gray.opacity(0.4))
+                        .annotation(position: .top, overflowResolution: .init(x: .fit, y: .disabled)) {
+                            ScrubReadout(date: sel, lines: ["\(Int(hit.readiness.rounded())) · \(hit.decision.title)"])
+                        }
+                }
             }
             .chartYScale(domain: 0 ... 100)
             .frame(height: 200)
+            .chartScrub(dates: points.map { ChartDate.day($0.date) }, selected: $readinessSelection)
             HStack(spacing: 14) {
                 ForEach(Decision.allCases, id: \.self) { decision in
                     Label(decision.title, systemImage: "circle.fill")
@@ -79,10 +89,22 @@ struct TrendsView: View {
                              series: .value("Pillar", "Load"))
                         .foregroundStyle(by: .value("Pillar", "Load"))
                 }
+                if let sel = pillarSelection, let hit = points.first(where: { ChartDate.day($0.date) == sel }) {
+                    RuleMark(x: .value("Date", sel))
+                        .foregroundStyle(.gray.opacity(0.4))
+                        .annotation(position: .top, overflowResolution: .init(x: .fit, y: .disabled)) {
+                            ScrubReadout(date: sel, lines: [
+                                "Sleep \(Int(hit.sleepScore.rounded()))",
+                                "Recovery \(Int(hit.recoveryScore.rounded()))",
+                                "Load \(Int(hit.loadScore.rounded()))",
+                            ])
+                        }
+                }
             }
             .chartForegroundStyleScale(domain: ["Sleep", "Recovery", "Load"], range: [.blue, .teal, .orange])
             .chartYScale(domain: 0 ... 100)
             .frame(height: 200)
+            .chartScrub(dates: points.map { ChartDate.day($0.date) }, selected: $pillarSelection)
         }
     }
 

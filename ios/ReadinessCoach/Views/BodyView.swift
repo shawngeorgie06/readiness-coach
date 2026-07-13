@@ -6,6 +6,8 @@ struct BodyView: View {
     @State private var response: BodyResponse?
     @State private var error: String?
     @State private var isLoading = false
+    @State private var lineSelection: Date?
+    @State private var hrSelection: Date?
 
     var body: some View {
         NavigationStack {
@@ -47,8 +49,16 @@ struct BodyView: View {
                         .foregroundStyle(color)
                     PointMark(x: .value("Date", ChartDate.day(day.date)), y: .value("Avg", day.avg))
                         .foregroundStyle(color).symbolSize(18)
+                    if let sel = lineSelection, let hit = series.first(where: { ChartDate.day($0.date) == sel }) {
+                        RuleMark(x: .value("Date", sel))
+                            .foregroundStyle(.gray.opacity(0.4))
+                            .annotation(position: .top, overflowResolution: .init(x: .fit, y: .disabled)) {
+                                ScrubReadout(date: sel, lines: ["\(fmt(hit.avg)) avg"])
+                            }
+                    }
                 }
                 .frame(height: 190)
+                .chartScrub(dates: series.map { ChartDate.day($0.date) }, selected: $lineSelection)
                 if let latest = series.last {
                     Text("Latest avg \(fmt(latest.avg))  (range \(fmt(latest.min))–\(fmt(latest.max)))")
                         .font(.caption).foregroundStyle(.secondary)
@@ -72,8 +82,18 @@ struct BodyView: View {
                     .foregroundStyle(.red.opacity(0.15))
                     LineMark(x: .value("Date", ChartDate.day(day.date)), y: .value("Avg", day.avg))
                         .foregroundStyle(.red)
+                    if let sel = hrSelection, let hit = series.first(where: { ChartDate.day($0.date) == sel }) {
+                        RuleMark(x: .value("Date", sel))
+                            .foregroundStyle(.gray.opacity(0.4))
+                            .annotation(position: .top, overflowResolution: .init(x: .fit, y: .disabled)) {
+                                ScrubReadout(date: sel, lines: [
+                                    "min \(fmt(hit.min))", "avg \(fmt(hit.avg))", "max \(fmt(hit.max))",
+                                ])
+                            }
+                    }
                 }
                 .frame(height: 200)
+                .chartScrub(dates: series.map { ChartDate.day($0.date) }, selected: $hrSelection)
                 if let latest = series.last {
                     Text("Latest — min \(fmt(latest.min)) · avg \(fmt(latest.avg)) · max \(fmt(latest.max)) bpm")
                         .font(.caption).foregroundStyle(.secondary)
