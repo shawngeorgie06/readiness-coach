@@ -47,12 +47,14 @@ struct TrendsView: View {
                 PointMark(x: .value("Date", ChartDate.day(point.date)), y: .value("Readiness", point.readiness))
                     .foregroundStyle(point.decision.tint)
                     .symbolSize(40)
-                if let sel = nearestDate(readinessSelection, in: points.map { ChartDate.day($0.date) }),
-                   let hit = points.first(where: { ChartDate.day($0.date) == sel }) {
+                if let sel = readinessSelection {
                     RuleMark(x: .value("Date", sel))
                         .foregroundStyle(.gray.opacity(0.4))
                         .annotation(position: .top, overflowResolution: .init(x: .fit, y: .disabled)) {
-                            ScrubReadout(date: sel, lines: ["\(Int(hit.readiness.rounded())) · \(hit.decision.title)"])
+                            if let snapped = nearestDate(sel, in: points.map { ChartDate.day($0.date) }),
+                               let hit = points.first(where: { ChartDate.day($0.date) == snapped }) {
+                                ScrubReadout(date: snapped, lines: ["\(Int(hit.readiness.rounded())) · \(hit.decision.title)"])
+                            }
                         }
                 }
             }
@@ -90,16 +92,18 @@ struct TrendsView: View {
                              series: .value("Pillar", "Load"))
                         .foregroundStyle(by: .value("Pillar", "Load"))
                 }
-                if let sel = nearestDate(pillarSelection, in: points.map { ChartDate.day($0.date) }),
-                   let hit = points.first(where: { ChartDate.day($0.date) == sel }) {
+                if let sel = pillarSelection {
                     RuleMark(x: .value("Date", sel))
                         .foregroundStyle(.gray.opacity(0.4))
                         .annotation(position: .top, overflowResolution: .init(x: .fit, y: .disabled)) {
-                            ScrubReadout(date: sel, lines: [
-                                "Sleep \(Int(hit.sleepScore.rounded()))",
-                                "Recovery \(Int(hit.recoveryScore.rounded()))",
-                                "Load \(Int(hit.loadScore.rounded()))",
-                            ])
+                            if let snapped = nearestDate(sel, in: points.map { ChartDate.day($0.date) }),
+                               let hit = points.first(where: { ChartDate.day($0.date) == snapped }) {
+                                ScrubReadout(date: snapped, lines: [
+                                    "Sleep \(Int(hit.sleepScore.rounded()))",
+                                    "Recovery \(Int(hit.recoveryScore.rounded()))",
+                                    "Load \(Int(hit.loadScore.rounded()))",
+                                ])
+                            }
                         }
                 }
             }

@@ -6,7 +6,8 @@ struct BodyView: View {
     @State private var response: BodyResponse?
     @State private var error: String?
     @State private var isLoading = false
-    @State private var lineSelection: Date?
+    @State private var hrvSelection: Date?
+    @State private var rhrSelection: Date?
     @State private var hrSelection: Date?
 
     var body: some View {
@@ -14,8 +15,8 @@ struct BodyView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     if let response, !response.daily.isEmpty {
-                        lineCard("HRV (SDNN, ms)", type: "hrv_sdnn", color: .teal, rows: response.daily)
-                        lineCard("Resting heart rate (bpm)", type: "resting_heart_rate", color: .pink, rows: response.daily)
+                        lineCard("HRV (SDNN, ms)", type: "hrv_sdnn", color: .teal, rows: response.daily, selection: $hrvSelection)
+                        lineCard("Resting heart rate (bpm)", type: "resting_heart_rate", color: .pink, rows: response.daily, selection: $rhrSelection)
                         heartRateCard(response.daily)
                     } else if isLoading {
                         ProgressView().padding(.top, 60)
@@ -40,7 +41,7 @@ struct BodyView: View {
 
     /// Daily-average line for a single metric type.
     @ViewBuilder
-    private func lineCard(_ title: String, type: String, color: Color, rows: [BodyDaily]) -> some View {
+    private func lineCard(_ title: String, type: String, color: Color, rows: [BodyDaily], selection: Binding<Date?>) -> some View {
         let series = rows.filter { $0.type == type }.sorted { $0.date < $1.date }
         if !series.isEmpty {
             SectionCard(title: title) {
@@ -49,17 +50,19 @@ struct BodyView: View {
                         .foregroundStyle(color)
                     PointMark(x: .value("Date", ChartDate.day(day.date)), y: .value("Avg", day.avg))
                         .foregroundStyle(color).symbolSize(18)
-                    if let sel = nearestDate(lineSelection, in: series.map { ChartDate.day($0.date) }),
-                       let hit = series.first(where: { ChartDate.day($0.date) == sel }) {
+                    if let sel = selection.wrappedValue {
                         RuleMark(x: .value("Date", sel))
                             .foregroundStyle(.gray.opacity(0.4))
                             .annotation(position: .top, overflowResolution: .init(x: .fit, y: .disabled)) {
-                                ScrubReadout(date: sel, lines: ["\(fmt(hit.avg)) avg"])
+                                if let snapped = nearestDate(sel, in: series.map { ChartDate.day($0.date) }),
+                                   let hit = series.first(where: { ChartDate.day($0.date) == snapped }) {
+                                    ScrubReadout(date: snapped, lines: ["\(fmt(hit.avg)) avg"])
+                                }
                             }
                     }
                 }
                 .frame(height: 190)
-                .chartXSelection(value: $lineSelection)
+                .chartXSelection(value: selection)
                 if let latest = series.last {
                     Text("Latest avg \(fmt(latest.avg))  (range \(fmt(latest.min))–\(fmt(latest.max)))")
                         .font(.caption).foregroundStyle(.secondary)
@@ -83,14 +86,16 @@ struct BodyView: View {
                     .foregroundStyle(.red.opacity(0.15))
                     LineMark(x: .value("Date", ChartDate.day(day.date)), y: .value("Avg", day.avg))
                         .foregroundStyle(.red)
-                    if let sel = nearestDate(hrSelection, in: series.map { ChartDate.day($0.date) }),
-                       let hit = series.first(where: { ChartDate.day($0.date) == sel }) {
+                    if let sel = hrSelection {
                         RuleMark(x: .value("Date", sel))
                             .foregroundStyle(.gray.opacity(0.4))
                             .annotation(position: .top, overflowResolution: .init(x: .fit, y: .disabled)) {
-                                ScrubReadout(date: sel, lines: [
-                                    "min \(fmt(hit.min))", "avg \(fmt(hit.avg))", "max \(fmt(hit.max))",
-                                ])
+                                if let snapped = nearestDate(sel, in: series.map { ChartDate.day($0.date) }),
+                                   let hit = series.first(where: { ChartDate.day($0.date) == snapped }) {
+                                    ScrubReadout(date: snapped, lines: [
+                                        "min \(fmt(hit.min))", "avg \(fmt(hit.avg))", "max \(fmt(hit.max))",
+                                    ])
+                                }
                             }
                     }
                 }
