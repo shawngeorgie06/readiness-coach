@@ -12,11 +12,12 @@ struct TrainView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     if let response, !response.data.isEmpty {
-                        SectionCard(title: "Strain — last \(response.days) days") {
-                            Chart(response.data) { workout in
+                        weeklyCard(response.data)
+                        SectionCard(title: "Daily strain — last \(response.days) days") {
+                            Chart(dailyStrain(response.data)) { day in
                                 BarMark(
-                                    x: .value("Day", ChartDate.day(workout.startAt)),
-                                    y: .value("Strain", workout.strain)
+                                    x: .value("Day", day.day),
+                                    y: .value("Strain", day.strain)
                                 )
                                 .foregroundStyle(.orange)
                             }
@@ -24,6 +25,13 @@ struct TrainView: View {
                         }
 
                         SectionCard(title: "Workouts") {
+                            HStack(spacing: 6) {
+                                Text("Strain 0–21").font(.caption2).foregroundStyle(.secondary)
+                                InfoBadge(title: "Strain", message: "Strain rates how hard a session was, 0–21, from heart rate and duration.")
+                                Spacer()
+                                Text("HR zones").font(.caption2).foregroundStyle(.secondary)
+                                InfoBadge(title: "Heart-rate zones", message: "Zones are shares of your session spent at rising heart rates — Easy is a warm-up pace, Max is near your ceiling.")
+                            }
                             ForEach(response.data) { workout in
                                 WorkoutRow(workout: workout)
                                 if workout.id != response.data.last?.id { Divider() }
@@ -62,11 +70,71 @@ struct TrainView: View {
         }
     }
 
+    private static let isoParser: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private struct DayStrain: Identifiable {
+        let day: Date
+        let strain: Double
+        var id: Date { day }
+    }
+
+    /// One summed-strain bar per calendar day.
+    private func dailyStrain(_ workouts: [WorkoutDTO]) -> [DayStrain] {
+        let groups = Dictionary(grouping: workouts) { ChartDate.day($0.startAt) }
+        return groups.map { DayStrain(day: $0.key, strain: $0.value.reduce(0) { $0 + $1.strain }) }
+            .sorted { $0.day < $1.day }
+    }
+
+    private func weeklyWorkouts(_ workouts: [WorkoutDTO]) -> [WorkoutDTO] {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
+        return workouts.filter { (Self.isoParser.date(from: $0.startAt) ?? .distantPast) >= cutoff }
+    }
+
+    private func weekday(_ iso: String) -> String {
+        guard let date = Self.isoParser.date(from: iso) else { return "—" }
+        return date.formatted(.dateTime.weekday())
+    }
+
+    private func formatMinutes(_ minutes: Double) -> String {
+        let total = Int(minutes.rounded())
+        return total >= 60 ? "\(total / 60)h \(total % 60)m" : "\(total)m"
+    }
+
+    @ViewBuilder
+    private func weeklyCard(_ workouts: [WorkoutDTO]) -> some View {
+        let week = weeklyWorkouts(workouts)
+        if !week.isEmpty {
+            let totalStrain = week.reduce(0) { $0 + $1.strain }
+            let totalMin = week.reduce(0) { $0 + $1.durationMin }
+            let hardest = week.max { $0.strain < $1.strain }
+            SectionCard(title: "This week") {
+                Text("\(week.count) session\(week.count == 1 ? "" : "s") · \(formatMinutes(totalMin)) · \(Int(totalStrain.rounded())) total strain")
+                    .font(.subheadline.weight(.medium))
+                if let hardest {
+                    Text("Hardest: \(weekday(hardest.startAt)) (\(Int(hardest.strain.rounded())))")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
 }
 
 struct WorkoutRow: View {
     let workout: WorkoutDTO
     private let zoneColors: [Color] = [.gray, .blue, .green, .orange, .red]
+    private let zoneNames = ["Easy", "Light", "Moderate", "Hard", "Max"]
+
+    private func strainBand(_ strain: Double) -> String {
+        if strain < 8 { return "easy" }
+        if strain < 14 { return "moderately hard" }
+        if strain < 18 { return "hard" }
+        return "all-out"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -77,7 +145,7 @@ struct WorkoutRow: View {
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text("strain \(String(format: "%.1f", workout.strain))")
+                    Text("Strain \(Int(workout.strain.rounded())) · \(strainBand(workout.strain))")
                         .font(.subheadline.monospacedDigit())
                     if !hrText.isEmpty {
                         Text(hrText).font(.caption).foregroundStyle(.secondary)
@@ -104,8 +172,8 @@ struct WorkoutRow: View {
             }
             .frame(height: 8)
             .clipShape(Capsule())
-            Text("HR zones · " + zones.enumerated()
-                .map { "Z\($0.offset + 1) \(fmtMin($0.element))m" }
+            Text(zones.enumerated()
+                .map { "\(zoneNames[min($0.offset, 4)]) \(fmtMin($0.element))m" }
                 .joined(separator: "  "))
                 .font(.caption2).foregroundStyle(.secondary)
         }
