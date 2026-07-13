@@ -34,18 +34,24 @@ final class SyncService: ObservableObject {
 
         do {
             if HealthKitService.isAvailable {
-                let payload = try await health.fetchSamples(
-                    since: settings.lastSyncAt,
-                    userId: settings.userId
-                )
-                if !payload.isEmpty {
-                    uploadingCount = payload.samples.count
-                    let result = try await client.sync(payload)
-                    lastSyncSummary = "Synced \(result.samples) samples, \(result.workouts) workouts."
-                } else {
-                    lastSyncSummary = "No new HealthKit samples since last sync."
+                // A Health read/upload failure (no entitlement on Simulator, or
+                // partial permission) must not blank the server-computed score.
+                do {
+                    let payload = try await health.fetchSamples(
+                        since: settings.lastSyncAt,
+                        userId: settings.userId
+                    )
+                    if !payload.isEmpty {
+                        uploadingCount = payload.samples.count
+                        let result = try await client.sync(payload)
+                        lastSyncSummary = "Synced \(result.samples) samples, \(result.workouts) workouts."
+                    } else {
+                        lastSyncSummary = "No new HealthKit samples since last sync."
+                    }
+                    settings.lastSyncAt = Date()
+                } catch {
+                    lastSyncSummary = "Couldn't read Health data: \(readable(error))"
                 }
-                settings.lastSyncAt = Date()
             } else {
                 lastSyncSummary = "HealthKit unavailable — showing server data only."
             }
