@@ -121,7 +121,6 @@ struct TrainView: View {
             }
         }
     }
-
 }
 
 struct WorkoutRow: View {

@@ -79,7 +79,7 @@ struct SleepView: View {
             let recent = nights.suffix(7)
             let avg = recent.map(\.durationHours).reduce(0, +) / Double(max(recent.count, 1))
             SectionCard(title: "Last night") {
-                Text("You slept \(fmt(last.durationHours))h — \(durationQualifier(last.durationHours)) your 8h target.")
+                Text("You slept \(fmt(last.durationHours))h — \(durationQualifier(last.durationHours)) your \(Int(Self.needHours))h target.")
                     .font(.subheadline.weight(.medium))
                 if let bed = clockTime(last.sleepStart), let wake = clockTime(last.sleepEnd) {
                     Label("Asleep \(bed) → woke \(wake)", systemImage: "bed.double")
@@ -89,7 +89,7 @@ struct SleepView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 consistencyRow(nights)
                 HStack(spacing: 6) {
-                    Text("Deep + REM \(fmt(last.stages.deep + last.stages.rem))h — the recovery stages.")
+                    Text("Deep + REM \(fmt(last.restorativeHours))h — the recovery stages.")
                         .font(.caption).foregroundStyle(.secondary)
                     InfoBadge(title: "Sleep stages",
                               message: "Deep and REM are when your body and brain recover. Core is lighter sleep; Awake is brief wake-ups. Restorative = deep + REM.")
