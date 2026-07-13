@@ -10,9 +10,9 @@ const baseToday: TodayResponse = {
   decision: "push",
   calibrating: false,
   pillars: {
-    sleep: { score: 90, drivers: ["Full night"] },
-    recovery: { score: 78, drivers: ["HRV up"] },
-    load: { score: 70, drivers: ["Moderate week"] },
+    sleep: { score: 90, drivers: [{ text: "Full night" }] },
+    recovery: { score: 78, drivers: [{ text: "HRV up" }] },
+    load: { score: 70, drivers: [{ text: "Moderate week" }] },
   },
   overridesApplied: [],
   confidence: "high",

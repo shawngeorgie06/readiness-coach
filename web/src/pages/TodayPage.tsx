@@ -17,7 +17,7 @@ function PillarChip({ name, pillar }: { name: string; pillar: Pillar }) {
     <section className="pillar" aria-label={`${name} pillar score ${pillar.score}`}>
       <span>{name}</span>
       <strong>{pillar.score}</strong>
-      <p>{pillar.drivers[0] ?? "No driver available"}</p>
+      <p>{pillar.drivers[0]?.text ?? "No driver available"}</p>
     </section>
   );
 }
