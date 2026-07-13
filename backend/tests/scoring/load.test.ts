@@ -18,5 +18,7 @@ describe("scoreLoad", () => {
       acuteChronicRatio: 1.6,
     });
     expect(result.score).toBeLessThan(55);
+    expect(result.drivers.some((d) => d.text === "Training load spiking")).toBe(true);
+    expect(result.drivers.some((d) => d.text.includes("day yesterday"))).toBe(true);
   });
 });

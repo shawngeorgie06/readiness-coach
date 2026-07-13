@@ -51,9 +51,9 @@ describe("buildTemplateNote", () => {
       const note = await generateAdvisorNote({
         decision: "recover",
         pillars: {
-          sleep: { score: 20, drivers: ["Sleep 4.5h vs need 8h"] },
-          recovery: { score: 30, drivers: ["HRV -25% vs 30d baseline"] },
-          load: { score: 40, drivers: ["Yesterday strain 15.0"] },
+          sleep: { score: 20, drivers: [{ text: "Sleep 4.5h vs need 8h" }] },
+          recovery: { score: 30, drivers: [{ text: "HRV -25% vs 30d baseline" }] },
+          load: { score: 40, drivers: [{ text: "Yesterday strain 15.0" }] },
         },
         overridesApplied: ["Sleep below 5h"],
         missing: [],

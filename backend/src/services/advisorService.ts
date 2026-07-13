@@ -1,7 +1,12 @@
 import { z } from "zod";
 import { prisma } from "../db.js";
-import type { PillarScore } from "../scoring/types.js";
+import type { Driver, PillarScore } from "../scoring/types.js";
 import { createOpenAiCompatibleClient, type LlmClient } from "./llmClient.js";
+
+/** The advisor works in strings; prefer the exact `detail` (has the real numbers). */
+function driverText(driver: Driver): string {
+  return driver.detail ?? driver.text;
+}
 
 export type Decision = "push" | "maintain" | "recover";
 
@@ -65,9 +70,9 @@ export function buildTemplateNote(input: { decision: Decision; drivers: string[]
 
 function allDrivers(today: AdvisorContext): string[] {
   return [
-    ...today.pillars.sleep.drivers,
-    ...today.pillars.recovery.drivers,
-    ...today.pillars.load.drivers,
+    ...today.pillars.sleep.drivers.map(driverText),
+    ...today.pillars.recovery.drivers.map(driverText),
+    ...today.pillars.load.drivers.map(driverText),
     ...today.overridesApplied,
     ...today.missing.map((name) => `Missing ${name} data`),
   ];
@@ -77,7 +82,7 @@ function metricSummary(today: AdvisorContext) {
   return {
     decision: today.decision,
     pillars: Object.fromEntries(
-      Object.entries(today.pillars).map(([name, pillar]) => [name, { score: pillar.score, drivers: pillar.drivers }]),
+      Object.entries(today.pillars).map(([name, pillar]) => [name, { score: pillar.score, drivers: pillar.drivers.map(driverText) }]),
     ),
     overridesApplied: today.overridesApplied,
     missing: today.missing,

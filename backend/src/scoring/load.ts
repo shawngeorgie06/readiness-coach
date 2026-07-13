@@ -1,4 +1,4 @@
-import type { LoadInput, PillarScore } from "./types.js";
+import type { Driver, LoadInput, PillarScore } from "./types.js";
 
 function clamp(n: number, min = 0, max = 100): number {
   return Math.max(min, Math.min(max, n));
@@ -20,11 +20,27 @@ export function scoreLoad(input: LoadInput): PillarScore {
   }
 
   const raw = freshness * 0.55 + acrScore * 0.45;
-  const drivers: string[] = [];
-  drivers.push(`Yesterday strain ${input.yesterdayStrain.toFixed(1)}`);
-  drivers.push(`Acute:chronic ${input.acuteChronicRatio.toFixed(2)}`);
+  const drivers: Driver[] = [];
+  const yStrain = input.yesterdayStrain;
+  const strainText =
+    yStrain < 4 ? "Rest day yesterday"
+      : yStrain < 10 ? `Light day yesterday (strain ${yStrain.toFixed(0)})`
+        : `Hard day yesterday (strain ${yStrain.toFixed(0)})`;
+  drivers.push({
+    text: strainText,
+    detail: `Strain rates how hard training was, 0–21. Yesterday was ${yStrain.toFixed(1)}.`,
+  });
+  const balance =
+    input.acuteChronicRatio > 1.3 ? "ramping up" : input.acuteChronicRatio < 0.7 ? "backing off" : "balanced";
+  drivers.push({
+    text: `Training load ${balance}`,
+    detail: `Your last 7 days of training vs your usual 28-day level is ${input.acuteChronicRatio.toFixed(2)}× (0.8–1.3 is the healthy zone).`,
+  });
   if (input.acuteChronicRatio > 1.3) {
-    drivers.push("Training load spiked vs chronic baseline");
+    drivers.push({
+      text: "Training load spiking",
+      detail: `The last week is well above your norm (${input.acuteChronicRatio.toFixed(2)}×); injury risk rises above 1.3×.`,
+    });
   }
 
   return { score: Math.round(clamp(raw)), drivers };

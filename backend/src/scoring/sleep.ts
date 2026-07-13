@@ -1,4 +1,4 @@
-import type { PillarScore, SleepInput } from "./types.js";
+import type { Driver, PillarScore, SleepInput } from "./types.js";
 
 function clamp(n: number, min = 0, max = 100): number {
   return Math.max(min, Math.min(max, n));
@@ -24,19 +24,28 @@ export function scoreSleep(input: SleepInput): PillarScore {
     (100 - consistencyPenalty) * 0.1 -
     severeShortfallPenalty;
 
-  const drivers: string[] = [];
+  const drivers: Driver[] = [];
   if (durationRatio < 0.9) {
-    drivers.push(
-      `Sleep ${input.durationHours.toFixed(1)}h vs need ${input.needHours}h`,
-    );
+    drivers.push({
+      text: `${input.durationHours.toFixed(1)}h sleep · below your ${input.needHours}h target`,
+      detail: `You slept ${input.durationHours.toFixed(1)}h against your ${input.needHours}h nightly target.`,
+    });
   }
   if (input.sleepDebtHours >= 1) {
-    drivers.push(`Sleep debt ${input.sleepDebtHours.toFixed(1)}h`);
+    drivers.push({
+      text: `${input.sleepDebtHours.toFixed(0)}h catch-up owed this week`,
+      detail: `Total shortfall against your ${input.needHours}h nightly need across the last 7 nights.`,
+    });
   }
   if (input.consistencyStdHours >= 1) {
-    drivers.push("Inconsistent sleep timing/duration");
+    drivers.push({
+      text: "Irregular sleep schedule",
+      detail: `Your nightly sleep length swung about ${input.consistencyStdHours.toFixed(1)}h night-to-night this week; steadier timing improves recovery.`,
+    });
   }
-  if (drivers.length === 0) drivers.push("Sleep on target");
+  if (drivers.length === 0) {
+    drivers.push({ text: "Sleep on target", detail: "Duration, quality, and consistency all look good." });
+  }
 
   return { score: Math.round(clamp(raw)), drivers };
 }

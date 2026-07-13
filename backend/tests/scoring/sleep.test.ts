@@ -22,6 +22,8 @@ describe("scoreSleep", () => {
       consistencyStdHours: 1.5,
     });
     expect(result.score).toBeLessThanOrEqual(40);
+    expect(result.drivers.some((d) => d.text.includes("catch-up owed this week"))).toBe(true);
+    expect(result.drivers.every((d) => typeof d.text === "string")).toBe(true);
   });
 
   it("clamps score to 0-100", () => {
