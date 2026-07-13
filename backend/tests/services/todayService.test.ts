@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   countConsecutiveHighStrain,
   parseRequestedDate,
+  sleepBounds,
   sleepWindowForDate,
   summarizeSleep,
 } from "../../src/services/todayService.js";
@@ -45,5 +46,22 @@ describe("today aggregation helpers", () => {
   it("only accepts real YYYY-MM-DD dates", () => {
     expect(parseRequestedDate("2026-07-10")).toBe("2026-07-10");
     expect(() => parseRequestedDate("2026-02-30")).toThrow("date must be YYYY-MM-DD");
+  });
+
+  it("returns the earliest asleep start and latest asleep end in the window", () => {
+    const winStart = new Date("2026-07-11T16:00:00.000Z");
+    const winEnd = new Date("2026-07-12T16:00:00.000Z");
+    const bounds = sleepBounds([
+      { startAt: new Date("2026-07-12T04:12:00.000Z"), endAt: new Date("2026-07-12T05:00:00.000Z"), metadata: { stage: "core" } },
+      { startAt: new Date("2026-07-12T05:00:00.000Z"), endAt: new Date("2026-07-12T07:20:00.000Z"), metadata: { stage: "rem" } },
+      { startAt: new Date("2026-07-12T03:00:00.000Z"), endAt: new Date("2026-07-12T03:30:00.000Z"), metadata: { stage: "inBed" } },
+    ], winStart, winEnd);
+    expect(bounds.sleepStart).toBe("2026-07-12T04:12:00.000Z");
+    expect(bounds.sleepEnd).toBe("2026-07-12T07:20:00.000Z");
+  });
+
+  it("returns nulls when no asleep samples overlap the window", () => {
+    const bounds = sleepBounds([], new Date("2026-07-11T16:00:00.000Z"), new Date("2026-07-12T16:00:00.000Z"));
+    expect(bounds).toEqual({ sleepStart: null, sleepEnd: null });
   });
 });

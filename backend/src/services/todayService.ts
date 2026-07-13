@@ -121,6 +121,29 @@ export function summarizeSleepStages(
   return { deep: toHours(ms.deep), rem: toHours(ms.rem), core: toHours(ms.core), awake: toHours(ms.awake) };
 }
 
+/** Earliest asleep-sample start and latest asleep-sample end within a night. */
+export function sleepBounds(
+  samples: SleepSample[],
+  windowStart: Date,
+  windowEnd: Date,
+): { sleepStart: string | null; sleepEnd: string | null } {
+  let start: number | null = null;
+  let end: number | null = null;
+  for (const sample of samples) {
+    const stage = sleepStage(sample.metadata);
+    if (stage.includes("awake") || stage.includes("inbed")) continue;
+    const s = Math.max(sample.startAt.getTime(), windowStart.getTime());
+    const e = Math.min(sample.endAt.getTime(), windowEnd.getTime());
+    if (e <= s) continue;
+    if (start === null || s < start) start = s;
+    if (end === null || e > end) end = e;
+  }
+  return {
+    sleepStart: start === null ? null : new Date(start).toISOString(),
+    sleepEnd: end === null ? null : new Date(end).toISOString(),
+  };
+}
+
 /**
  * Last night runs from noon on the previous calendar day through noon today,
  * anchored on the server's LOCAL timezone (the user's) rather than UTC — so a
@@ -465,6 +488,7 @@ export async function getSleepDetails(userId: string, days: number, requestedDat
       return {
         date: day.toISOString().slice(0, 10),
         ...summarizeSleep(samples, window.start, window.end),
+        ...sleepBounds(samples, window.start, window.end),
         stages: summarizeSleepStages(samples, window.start, window.end),
       };
     }),
