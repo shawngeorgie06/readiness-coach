@@ -76,6 +76,8 @@ struct SleepDay: Codable, Identifiable {
     let date: String
     let durationHours: Double
     let restorativeHours: Double
+    let sleepStart: String?
+    let sleepEnd: String?
     let stages: SleepStages
     var id: String { date }
 }
