@@ -2,10 +2,28 @@ import { describe, expect, it } from "vitest";
 import {
   countConsecutiveHighStrain,
   parseRequestedDate,
+  sleepWindowForDate,
   summarizeSleep,
 } from "../../src/services/todayService.js";
 
+// Sleep-window anchoring is timezone-sensitive; pin the zone so the assertions
+// deterministically distinguish local-noon from the old UTC-noon behavior.
+process.env.TZ = "America/New_York";
+
 describe("today aggregation helpers", () => {
+  it("anchors the sleep window on local noon, not UTC noon", () => {
+    const { start, end } = sleepWindowForDate(new Date("2026-07-12T00:00:00.000Z"));
+    // Last night = local noon Jul 11 → local noon Jul 12 (a natural night boundary in the user's zone).
+    expect(end.getHours()).toBe(12);
+    expect(end.getDate()).toBe(12);
+    expect(start.getHours()).toBe(12);
+    expect(start.getDate()).toBe(11);
+    expect(end.getTime() - start.getTime()).toBe(24 * 60 * 60 * 1000);
+    // In America/New_York (EDT, −4) local noon is 16:00 UTC — proving it is NOT the old UTC noon (12:00 UTC).
+    expect(end.getUTCHours()).toBe(16);
+  });
+
+
   it("uses only asleep stages and calculates restorative sleep", () => {
     const start = new Date("2026-07-10T00:00:00.000Z");
     const end = new Date("2026-07-10T08:00:00.000Z");

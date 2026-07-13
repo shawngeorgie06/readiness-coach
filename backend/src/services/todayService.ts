@@ -121,9 +121,14 @@ export function summarizeSleepStages(
   return { deep: toHours(ms.deep), rem: toHours(ms.rem), core: toHours(ms.core), awake: toHours(ms.awake) };
 }
 
-/** Last night runs from noon on the previous calendar day through noon today. */
+/**
+ * Last night runs from noon on the previous calendar day through noon today,
+ * anchored on the server's LOCAL timezone (the user's) rather than UTC — so a
+ * late wake-up isn't truncated and the prior morning's nap isn't miscounted.
+ * `date` carries the requested calendar day as its UTC components.
+ */
 export function sleepWindowForDate(date: Date): { start: Date; end: Date } {
-  const end = new Date(date.getTime() + 12 * 60 * 60 * 1000);
+  const end = new Date(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 12, 0, 0, 0);
   const start = new Date(end.getTime() - DAY_MS);
   return { start, end };
 }
