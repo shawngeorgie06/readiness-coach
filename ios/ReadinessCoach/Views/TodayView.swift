@@ -9,6 +9,19 @@ struct TodayView: View {
     @State private var pillarInfo: PillarInfo?
     @State private var recent: [ReadinessPoint] = []
 
+    /// Maps raw missing-metric keys to human names for the banner.
+    static func friendlyMissing(_ keys: [String]) -> String {
+        let names = keys.map { key -> String in
+            switch key {
+            case "hrv": return "heart-rate variability"
+            case "resting_heart_rate": return "resting pulse"
+            case "sleep": return "sleep"
+            default: return key
+            }
+        }
+        return names.isEmpty ? "" : " (\(names.joined(separator: ", ")))"
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -78,7 +91,7 @@ struct TodayView: View {
         if today.isLowConfidence {
             banner(
                 "Low confidence",
-                "Missing \(today.missing.isEmpty ? "some signals" : today.missing.joined(separator: ", ")). The decision stays conservative.",
+                "Some data is missing today\(Self.friendlyMissing(today.missing)), so we're keeping the call cautious.",
                 color: .yellow,
                 icon: "exclamationmark.triangle",
                 infoTitle: "Low confidence",
@@ -208,9 +221,13 @@ struct PillarRow: View {
             }
             ProgressView(value: min(max(pillar.score / 100, 0), 1))
             if !pillar.drivers.isEmpty {
-                Text(pillar.drivers.joined(separator: " · "))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(pillar.drivers, id: \.self) { driver in
+                        Text(driver.text)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
         }
     }

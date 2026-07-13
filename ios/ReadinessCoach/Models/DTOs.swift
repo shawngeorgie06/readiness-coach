@@ -18,9 +18,14 @@ enum Decision: String, Codable, CaseIterable {
 
 // MARK: - Today
 
+struct Driver: Codable, Hashable {
+    let text: String
+    let detail: String?
+}
+
 struct PillarScore: Codable, Hashable {
     let score: Double
-    let drivers: [String]
+    let drivers: [Driver]
 }
 
 struct Pillars: Codable {

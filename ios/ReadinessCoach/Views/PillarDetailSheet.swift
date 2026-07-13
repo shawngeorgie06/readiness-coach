@@ -23,8 +23,17 @@ struct PillarDetailSheet: View {
                     Text(info.description).font(.body)
                     if !info.pillar.drivers.isEmpty {
                         Text("Today's drivers").font(.headline)
-                        ForEach(info.pillar.drivers, id: \.self) { d in
-                            Label(d, systemImage: "chevron.right.circle").font(.subheadline)
+                        ForEach(info.pillar.drivers, id: \.self) { driver in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Label(driver.text, systemImage: "chevron.right.circle")
+                                    .font(.subheadline)
+                                if let detail = driver.detail {
+                                    Text(detail)
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                        .padding(.leading, 26)
+                                }
+                            }
                         }
                     }
                 }.padding()
