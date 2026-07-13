@@ -47,7 +47,8 @@ struct TrendsView: View {
                 PointMark(x: .value("Date", ChartDate.day(point.date)), y: .value("Readiness", point.readiness))
                     .foregroundStyle(point.decision.tint)
                     .symbolSize(40)
-                if let sel = readinessSelection, let hit = points.first(where: { ChartDate.day($0.date) == sel }) {
+                if let sel = nearestDate(readinessSelection, in: points.map { ChartDate.day($0.date) }),
+                   let hit = points.first(where: { ChartDate.day($0.date) == sel }) {
                     RuleMark(x: .value("Date", sel))
                         .foregroundStyle(.gray.opacity(0.4))
                         .annotation(position: .top, overflowResolution: .init(x: .fit, y: .disabled)) {
@@ -57,7 +58,7 @@ struct TrendsView: View {
             }
             .chartYScale(domain: 0 ... 100)
             .frame(height: 200)
-            .chartScrub(dates: points.map { ChartDate.day($0.date) }, selected: $readinessSelection)
+            .chartXSelection(value: $readinessSelection)
             HStack(spacing: 14) {
                 ForEach(Decision.allCases, id: \.self) { decision in
                     Label(decision.title, systemImage: "circle.fill")
@@ -89,7 +90,8 @@ struct TrendsView: View {
                              series: .value("Pillar", "Load"))
                         .foregroundStyle(by: .value("Pillar", "Load"))
                 }
-                if let sel = pillarSelection, let hit = points.first(where: { ChartDate.day($0.date) == sel }) {
+                if let sel = nearestDate(pillarSelection, in: points.map { ChartDate.day($0.date) }),
+                   let hit = points.first(where: { ChartDate.day($0.date) == sel }) {
                     RuleMark(x: .value("Date", sel))
                         .foregroundStyle(.gray.opacity(0.4))
                         .annotation(position: .top, overflowResolution: .init(x: .fit, y: .disabled)) {
@@ -104,7 +106,7 @@ struct TrendsView: View {
             .chartForegroundStyleScale(domain: ["Sleep", "Recovery", "Load"], range: [.blue, .teal, .orange])
             .chartYScale(domain: 0 ... 100)
             .frame(height: 200)
-            .chartScrub(dates: points.map { ChartDate.day($0.date) }, selected: $pillarSelection)
+            .chartXSelection(value: $pillarSelection)
         }
     }
 

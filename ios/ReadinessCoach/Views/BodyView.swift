@@ -49,7 +49,8 @@ struct BodyView: View {
                         .foregroundStyle(color)
                     PointMark(x: .value("Date", ChartDate.day(day.date)), y: .value("Avg", day.avg))
                         .foregroundStyle(color).symbolSize(18)
-                    if let sel = lineSelection, let hit = series.first(where: { ChartDate.day($0.date) == sel }) {
+                    if let sel = nearestDate(lineSelection, in: series.map { ChartDate.day($0.date) }),
+                       let hit = series.first(where: { ChartDate.day($0.date) == sel }) {
                         RuleMark(x: .value("Date", sel))
                             .foregroundStyle(.gray.opacity(0.4))
                             .annotation(position: .top, overflowResolution: .init(x: .fit, y: .disabled)) {
@@ -58,7 +59,7 @@ struct BodyView: View {
                     }
                 }
                 .frame(height: 190)
-                .chartScrub(dates: series.map { ChartDate.day($0.date) }, selected: $lineSelection)
+                .chartXSelection(value: $lineSelection)
                 if let latest = series.last {
                     Text("Latest avg \(fmt(latest.avg))  (range \(fmt(latest.min))–\(fmt(latest.max)))")
                         .font(.caption).foregroundStyle(.secondary)
@@ -82,7 +83,8 @@ struct BodyView: View {
                     .foregroundStyle(.red.opacity(0.15))
                     LineMark(x: .value("Date", ChartDate.day(day.date)), y: .value("Avg", day.avg))
                         .foregroundStyle(.red)
-                    if let sel = hrSelection, let hit = series.first(where: { ChartDate.day($0.date) == sel }) {
+                    if let sel = nearestDate(hrSelection, in: series.map { ChartDate.day($0.date) }),
+                       let hit = series.first(where: { ChartDate.day($0.date) == sel }) {
                         RuleMark(x: .value("Date", sel))
                             .foregroundStyle(.gray.opacity(0.4))
                             .annotation(position: .top, overflowResolution: .init(x: .fit, y: .disabled)) {
@@ -93,7 +95,7 @@ struct BodyView: View {
                     }
                 }
                 .frame(height: 200)
-                .chartScrub(dates: series.map { ChartDate.day($0.date) }, selected: $hrSelection)
+                .chartXSelection(value: $hrSelection)
                 if let latest = series.last {
                     Text("Latest — min \(fmt(latest.min)) · avg \(fmt(latest.avg)) · max \(fmt(latest.max)) bpm")
                         .font(.caption).foregroundStyle(.secondary)
