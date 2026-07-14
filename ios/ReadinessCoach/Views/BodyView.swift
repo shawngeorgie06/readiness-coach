@@ -15,8 +15,16 @@ struct BodyView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     if let response, !response.daily.isEmpty {
-                        lineCard("HRV (SDNN, ms)", type: "hrv_sdnn", color: .teal, rows: response.daily, selection: $hrvSelection)
-                        lineCard("Resting heart rate (bpm)", type: "resting_heart_rate", color: .pink, rows: response.daily, selection: $rhrSelection)
+                        lineCard("Heart rate variability", type: "hrv_sdnn", color: .teal, unit: "ms",
+                                 goodDirection: .higher, threshold: 2,
+                                 badge: (title: "Heart rate variability",
+                                         message: "The beat-to-beat variation in your heart rate, a read on nervous-system recovery. Higher — and rising — generally means better recovered. Shown as SDNN in milliseconds."),
+                                 rows: response.daily, selection: $hrvSelection)
+                        lineCard("Resting heart rate", type: "resting_heart_rate", color: .pink, unit: "bpm",
+                                 goodDirection: .lower, threshold: 1.5,
+                                 badge: (title: "Resting heart rate",
+                                         message: "Your heart rate at rest. A lower resting heart rate usually signals better fitness and recovery."),
+                                 rows: response.daily, selection: $rhrSelection)
                         heartRateCard(response.daily)
                     } else if isLoading {
                         ProgressView().padding(.top, 60)
@@ -39,12 +47,28 @@ struct BodyView: View {
         }
     }
 
-    /// Daily-average line for a single metric type.
+    /// Daily-average line for a single metric type, with a plain-language trend summary.
     @ViewBuilder
-    private func lineCard(_ title: String, type: String, color: Color, rows: [BodyDaily], selection: Binding<Date?>) -> some View {
+    private func lineCard(_ title: String, type: String, color: Color, unit: String,
+                          goodDirection: GoodDirection, threshold: Double,
+                          badge: (title: String, message: String),
+                          rows: [BodyDaily], selection: Binding<Date?>) -> some View {
         let series = rows.filter { $0.type == type }.sorted { $0.date < $1.date }
         if !series.isEmpty {
             SectionCard(title: title) {
+                if let trend = metricTrend(values: series.map { $0.avg }, goodDirection: goodDirection, threshold: threshold) {
+                    HStack(spacing: 6) {
+                        Text("Averaging \(fmt(trend.recentAvg)) \(unit) — \(trend.phrase).")
+                            .font(.subheadline.weight(.medium))
+                        InfoBadge(title: badge.title, message: badge.message)
+                    }
+                } else if let latest = series.last {
+                    HStack(spacing: 6) {
+                        Text("Latest \(fmt(latest.avg)) \(unit).")
+                            .font(.subheadline.weight(.medium))
+                        InfoBadge(title: badge.title, message: badge.message)
+                    }
+                }
                 Chart(series) { day in
                     LineMark(x: .value("Date", ChartDate.day(day.date)), y: .value("Avg", day.avg))
                         .foregroundStyle(color)
@@ -76,7 +100,13 @@ struct BodyView: View {
     private func heartRateCard(_ rows: [BodyDaily]) -> some View {
         let series = rows.filter { $0.type == "heart_rate" }.sorted { $0.date < $1.date }
         if !series.isEmpty {
-            SectionCard(title: "Heart rate (bpm) — daily min · avg · max") {
+            SectionCard(title: "Heart rate — daily range") {
+                HStack(spacing: 6) {
+                    Text("The lowest, average, and highest heart rate each day.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    InfoBadge(title: "Daily heart rate",
+                              message: "The lowest, average, and highest heart rate recorded each day. Useful context, not a readiness score on its own.")
+                }
                 Chart(series) { day in
                     AreaMark(
                         x: .value("Date", ChartDate.day(day.date)),
