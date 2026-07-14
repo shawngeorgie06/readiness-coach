@@ -39,8 +39,26 @@ struct TrendsView: View {
 
     private var points: [ReadinessPoint]? { response?.data }
 
+    /// Plain-language readiness trend for the summary line.
+    private func readinessSummary(_ points: [ReadinessPoint]) -> String {
+        guard let trend = metricTrend(values: points.map { $0.readiness }, goodDirection: .higher, threshold: 2) else {
+            return "Not enough history yet to call a trend."
+        }
+        switch trend.direction {
+        case .up:   return "Your readiness is improving lately."
+        case .flat: return "Your readiness is holding steady lately."
+        case .down: return "Your readiness is sliding lately."
+        }
+    }
+
     private func readinessCard(_ points: [ReadinessPoint]) -> some View {
         SectionCard(title: "Readiness — last \(response?.days ?? 0) days") {
+            HStack(spacing: 6) {
+                Text(readinessSummary(points))
+                    .font(.subheadline.weight(.medium))
+                InfoBadge(title: "Readiness score",
+                          message: "A 0–100 daily score. 75+ means Push, 50–74 Maintain, under 50 Recover. The score decides; the coach only ever plays it safer.")
+            }
             Chart(points) { point in
                 LineMark(x: .value("Date", ChartDate.day(point.date)), y: .value("Readiness", point.readiness))
                     .foregroundStyle(.secondary)
@@ -77,6 +95,12 @@ struct TrendsView: View {
 
     private func pillarsCard(_ points: [ReadinessPoint]) -> some View {
         SectionCard(title: "Pillar scores over time") {
+            HStack(spacing: 6) {
+                Text("Sleep, Recovery, and Load are the three inputs to your readiness — watch which one is dragging the others down.")
+                    .font(.caption).foregroundStyle(.secondary)
+                InfoBadge(title: "Pillars",
+                          message: "Each pillar is scored 0–100. Your readiness is built from all three, so a low pillar here explains a low score on Today.")
+            }
             Chart {
                 ForEach(points) { point in
                     LineMark(x: .value("Date", ChartDate.day(point.date)),
