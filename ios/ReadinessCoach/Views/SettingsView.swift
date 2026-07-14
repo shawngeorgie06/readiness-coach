@@ -8,6 +8,8 @@ struct SettingsView: View {
     @State private var showResetConfirm = false
     @State private var actionMessage: String?
     @State private var isDeleting = false
+    @State private var notificationDenied = false
+    private let notifications = NotificationService()
 
     var body: some View {
         NavigationStack {
@@ -36,6 +38,44 @@ struct SettingsView: View {
                     if let summary = sync.lastSyncSummary {
                         Text(summary).font(.caption).foregroundStyle(.secondary)
                     }
+                }
+
+                Section("Daily readiness") {
+                    Toggle("Morning notification", isOn: Binding(
+                        get: { settings.notificationsEnabled },
+                        set: { isOn in
+                            if isOn {
+                                Task {
+                                    let granted = await notifications.requestAuthorization()
+                                    if granted {
+                                        settings.notificationsEnabled = true
+                                        notificationDenied = false
+                                        BackgroundRefreshService.schedule(for: settings)
+                                    } else {
+                                        settings.notificationsEnabled = false
+                                        notificationDenied = true
+                                    }
+                                }
+                            } else {
+                                settings.notificationsEnabled = false
+                                notificationDenied = false
+                                BackgroundRefreshService.cancel()
+                                notifications.cancelPending()
+                            }
+                        }
+                    ))
+
+                    if settings.notificationsEnabled {
+                        DatePicker("Time", selection: notificationTime, displayedComponents: .hourAndMinute)
+                    }
+
+                    if notificationDenied {
+                        Text("Turn on notifications for Readiness Coach in iOS Settings to use this.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+
+                    Text("Sent in the morning after your data syncs. iOS decides the exact time, so some mornings it may arrive late or not at all.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
 
                 Section("Data & privacy") {
@@ -95,6 +135,25 @@ struct SettingsView: View {
         } catch {
             actionMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
+    }
+
+    /// Bridges the stored hour/minute to a `DatePicker` Date, rescheduling on change.
+    private var notificationTime: Binding<Date> {
+        Binding(
+            get: {
+                Calendar.current.date(
+                    bySettingHour: settings.notificationHour,
+                    minute: settings.notificationMinute,
+                    second: 0, of: Date()
+                ) ?? Date()
+            },
+            set: { newDate in
+                let c = Calendar.current.dateComponents([.hour, .minute], from: newDate)
+                settings.notificationHour = c.hour ?? 7
+                settings.notificationMinute = c.minute ?? 0
+                BackgroundRefreshService.schedule(for: settings)
+            }
+        )
     }
 }
 
