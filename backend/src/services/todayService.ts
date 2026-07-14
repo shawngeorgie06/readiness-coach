@@ -68,6 +68,29 @@ function sleepStage(metadata: unknown): string {
     .replaceAll(" ", "") ?? "";
 }
 
+/** A sample resolved to its stage and clamped to the sleep window. */
+interface WindowedSample {
+  stage: string;
+  start: number;
+  end: number;
+  overlapMs: number;
+}
+
+/**
+ * Resolve each sample's stage once and clamp it to [windowStart, windowEnd].
+ * Every sleep aggregation shares this pass; each consumer applies its own
+ * stage filter and accumulation over the result.
+ */
+function windowedSamples(samples: SleepSample[], windowStart: Date, windowEnd: Date): WindowedSample[] {
+  const ws = windowStart.getTime();
+  const we = windowEnd.getTime();
+  return samples.map((sample) => {
+    const start = Math.max(sample.startAt.getTime(), ws);
+    const end = Math.min(sample.endAt.getTime(), we);
+    return { stage: sleepStage(sample.metadata), start, end, overlapMs: Math.max(0, end - start) };
+  });
+}
+
 /** Aggregate a sleep window while excluding HealthKit awake/in-bed intervals. */
 export function summarizeSleep(
   samples: SleepSample[],
@@ -77,13 +100,8 @@ export function summarizeSleep(
   let durationMs = 0;
   let restorativeMs = 0;
 
-  for (const sample of samples) {
-    const stage = sleepStage(sample.metadata);
+  for (const { stage, overlapMs } of windowedSamples(samples, windowStart, windowEnd)) {
     if (stage.includes("awake") || stage.includes("inbed")) continue;
-
-    const start = Math.max(sample.startAt.getTime(), windowStart.getTime());
-    const end = Math.min(sample.endAt.getTime(), windowEnd.getTime());
-    const overlapMs = Math.max(0, end - start);
     durationMs += overlapMs;
     if (stage.includes("deep") || stage.includes("rem")) restorativeMs += overlapMs;
   }
@@ -102,14 +120,8 @@ export function summarizeSleepStages(
 ): SleepStageHours {
   const ms: SleepStageHours = { deep: 0, rem: 0, core: 0, awake: 0 };
 
-  for (const sample of samples) {
-    const stage = sleepStage(sample.metadata);
-    if (stage.includes("inbed")) continue;
-
-    const start = Math.max(sample.startAt.getTime(), windowStart.getTime());
-    const end = Math.min(sample.endAt.getTime(), windowEnd.getTime());
-    const overlapMs = Math.max(0, end - start);
-    if (overlapMs === 0) continue;
+  for (const { stage, overlapMs } of windowedSamples(samples, windowStart, windowEnd)) {
+    if (stage.includes("inbed") || overlapMs === 0) continue;
 
     if (stage.includes("awake")) ms.awake += overlapMs;
     else if (stage.includes("deep")) ms.deep += overlapMs;
@@ -129,12 +141,8 @@ export function sleepBounds(
 ): { sleepStart: string | null; sleepEnd: string | null } {
   let start: number | null = null;
   let end: number | null = null;
-  for (const sample of samples) {
-    const stage = sleepStage(sample.metadata);
-    if (stage.includes("awake") || stage.includes("inbed")) continue;
-    const s = Math.max(sample.startAt.getTime(), windowStart.getTime());
-    const e = Math.min(sample.endAt.getTime(), windowEnd.getTime());
-    if (e <= s) continue;
+  for (const { stage, start: s, end: e, overlapMs } of windowedSamples(samples, windowStart, windowEnd)) {
+    if (stage.includes("awake") || stage.includes("inbed") || overlapMs === 0) continue;
     if (start === null || s < start) start = s;
     if (end === null || e > end) end = e;
   }

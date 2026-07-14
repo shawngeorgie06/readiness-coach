@@ -60,6 +60,17 @@ describe("today aggregation helpers", () => {
     expect(bounds.sleepEnd).toBe("2026-07-12T07:20:00.000Z");
   });
 
+  it("clamps sleep bounds to the window edges", () => {
+    const winStart = new Date("2026-07-11T16:00:00.000Z");
+    const winEnd = new Date("2026-07-12T16:00:00.000Z");
+    // A single asleep sample that spills past both edges of the window.
+    const bounds = sleepBounds([
+      { startAt: new Date("2026-07-11T14:00:00.000Z"), endAt: new Date("2026-07-12T18:00:00.000Z"), metadata: { stage: "core" } },
+    ], winStart, winEnd);
+    expect(bounds.sleepStart).toBe("2026-07-11T16:00:00.000Z");
+    expect(bounds.sleepEnd).toBe("2026-07-12T16:00:00.000Z");
+  });
+
   it("returns nulls when no asleep samples overlap the window", () => {
     const bounds = sleepBounds([], new Date("2026-07-11T16:00:00.000Z"), new Date("2026-07-12T16:00:00.000Z"));
     expect(bounds).toEqual({ sleepStart: null, sleepEnd: null });
