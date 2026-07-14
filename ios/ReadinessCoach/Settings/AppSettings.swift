@@ -12,6 +12,15 @@ final class AppSettings: ObservableObject {
     @Published var hasCompletedOnboarding: Bool {
         didSet { defaults.set(hasCompletedOnboarding, forKey: Keys.onboarded) }
     }
+    @Published var notificationsEnabled: Bool {
+        didSet { defaults.set(notificationsEnabled, forKey: Keys.notificationsEnabled) }
+    }
+    @Published var notificationHour: Int {
+        didSet { defaults.set(notificationHour, forKey: Keys.notificationHour) }
+    }
+    @Published var notificationMinute: Int {
+        didSet { defaults.set(notificationMinute, forKey: Keys.notificationMinute) }
+    }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -19,6 +28,9 @@ final class AppSettings: ObservableObject {
         self.apiToken = defaults.string(forKey: Keys.token) ?? ""
         self.userId = defaults.string(forKey: Keys.userId) ?? ""
         self.hasCompletedOnboarding = defaults.bool(forKey: Keys.onboarded)
+        self.notificationsEnabled = defaults.bool(forKey: Keys.notificationsEnabled)
+        self.notificationHour = (defaults.object(forKey: Keys.notificationHour) as? Int) ?? 7
+        self.notificationMinute = defaults.integer(forKey: Keys.notificationMinute)
     }
 
     /// Timestamp of the last successful sync; only newer samples are sent next time.
@@ -82,6 +94,9 @@ final class AppSettings: ObservableObject {
         static let userId = "userId"
         static let onboarded = "hasCompletedOnboarding"
         static let lastSync = "lastSyncAt"
+        static let notificationsEnabled = "notificationsEnabled"
+        static let notificationHour = "notificationHour"
+        static let notificationMinute = "notificationMinute"
     }
 }
 
