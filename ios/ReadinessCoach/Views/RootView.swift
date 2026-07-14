@@ -12,8 +12,12 @@ struct RootView: View {
             MainTabView()
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active { Task { await sync.autoSync(settings) } }
+                    else if phase == .background { BackgroundRefreshService.schedule(for: settings) }
                 }
-                .task { await sync.autoSync(settings) }
+                .task {
+                    await sync.autoSync(settings)
+                    BackgroundRefreshService.schedule(for: settings)
+                }
         } else {
             OnboardingView()
         }
