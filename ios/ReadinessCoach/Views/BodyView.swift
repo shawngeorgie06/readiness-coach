@@ -14,13 +14,15 @@ struct BodyView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
+                    header
                     if let response, !response.daily.isEmpty {
-                        lineCard("Heart rate variability", type: "hrv_sdnn", color: .teal, unit: "ms",
+                        vitals(response.daily)
+                        lineCard("Heart rate variability", type: "hrv_sdnn", color: Palette.mint, unit: "ms",
                                  goodDirection: .higher, threshold: 2,
                                  badge: (title: "Heart rate variability",
                                          message: "The beat-to-beat variation in your heart rate, a read on nervous-system recovery. Higher — and rising — generally means better recovered. Shown as SDNN in milliseconds."),
                                  rows: response.daily, selection: $hrvSelection)
-                        lineCard("Resting heart rate", type: "resting_heart_rate", color: .pink, unit: "bpm",
+                        lineCard("Resting heart rate", type: "resting_heart_rate", color: Palette.accent, unit: "bpm",
                                  goodDirection: .lower, threshold: 1.5,
                                  badge: (title: "Resting heart rate",
                                          message: "Your heart rate at rest. A lower resting heart rate usually signals better fitness and recovery."),
@@ -41,9 +43,42 @@ struct BodyView: View {
                 }
                 .padding()
             }
-            .navigationTitle("Body")
+            .screenBackground()
+            .toolbar(.hidden, for: .navigationBar)
             .task { await load() }
             .refreshable { await load() }
+        }
+    }
+
+    private var header: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                Eyebrow(text: "Signals")
+                Text("Body").font(.system(size: 30, weight: .bold, design: .rounded))
+                    .foregroundStyle(Palette.textPrimary)
+            }
+            Spacer()
+        }
+    }
+
+    /// Latest daily average for a metric type.
+    private func latest(_ rows: [BodyDaily], _ type: String) -> BodyDaily? {
+        rows.filter { $0.type == type }.sorted { $0.date < $1.date }.last
+    }
+
+    /// 2×2 grid of real vitals (prototype's Body vitals block).
+    @ViewBuilder
+    private func vitals(_ rows: [BodyDaily]) -> some View {
+        let rhr = latest(rows, "resting_heart_rate")
+        let hrv = latest(rows, "hrv_sdnn")
+        let hr = latest(rows, "heart_rate")
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+            if let rhr { MetricTile(label: "Resting HR", value: fmt(rhr.avg), unit: "bpm", fraction: 0, tone: .strain, showBar: false) }
+            if let hrv { MetricTile(label: "HRV", value: fmt(hrv.avg), unit: "ms", fraction: 0, tone: .recovery, showBar: false) }
+            if let hr {
+                MetricTile(label: "Avg HR", value: fmt(hr.avg), unit: "bpm", fraction: 0, tone: .sleep, showBar: false)
+                MetricTile(label: "Peak HR", value: fmt(hr.max), unit: "bpm", fraction: 0, tone: .strain, showBar: false)
+            }
         }
     }
 
@@ -113,9 +148,9 @@ struct BodyView: View {
                         yStart: .value("Min", day.min),
                         yEnd: .value("Max", day.max)
                     )
-                    .foregroundStyle(.red.opacity(0.15))
+                    .foregroundStyle(Palette.lavender.opacity(0.15))
                     LineMark(x: .value("Date", ChartDate.day(day.date)), y: .value("Avg", day.avg))
-                        .foregroundStyle(.red)
+                        .foregroundStyle(Palette.lavender)
                     if let sel = hrSelection {
                         RuleMark(x: .value("Date", sel))
                             .foregroundStyle(.gray.opacity(0.4))

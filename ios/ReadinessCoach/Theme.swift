@@ -152,6 +152,7 @@ struct MetricTile: View {
     var delta: String? = nil
     let fraction: Double
     let tone: Tone
+    var showBar = true
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(label).font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.textSecondary)
@@ -160,7 +161,7 @@ struct MetricTile: View {
                 if let unit { Text(unit).font(.system(size: 13, weight: .medium)).foregroundStyle(Palette.textSecondary) }
             }
             if let delta { Text(delta).font(.system(.caption2, design: .monospaced)).foregroundStyle(Palette.textSecondary) }
-            MetricBar(value: fraction, score: 0, height: 4, tint: tone.color)
+            if showBar { MetricBar(value: fraction, score: 0, height: 4, tint: tone.color) }
         }
         .frame(maxWidth: .infinity, minHeight: 108, alignment: .leading)
         .padding(14)
