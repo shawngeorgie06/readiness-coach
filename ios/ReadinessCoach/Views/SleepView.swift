@@ -7,10 +7,6 @@ struct SleepView: View {
     @State private var error: String?
     @State private var isLoading = false
 
-    private let stageColors: [(name: String, color: Color)] = [
-        ("Deep", .indigo), ("REM", .purple), ("Core", .blue), ("Awake", .orange),
-    ]
-
     private static let isoParser: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -45,8 +41,7 @@ struct SleepView: View {
                 VStack(spacing: 16) {
                     if let nights, !nights.isEmpty {
                         summaryCard(nights)
-                        totalCard(nights)
-                        stageCard(nights)
+                        SleepChartsSection()
                     } else if isLoading {
                         ProgressView().padding(.top, 60)
                     } else {
@@ -116,6 +111,52 @@ struct SleepView: View {
                           message: "Going to bed and waking at similar times helps recovery. This is how much your bedtime varied over the past week.")
             }
         }
+    }
+
+    private func load() async {
+        guard let client = settings.makeClient() else { return }
+        isLoading = true
+        error = nil
+        defer { isLoading = false }
+        do {
+            response = try await client.getSleep(days: 30)
+        } catch {
+            self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    private func fmt(_ value: Double) -> String { String(format: "%.1f", value) }
+}
+
+/// Total-sleep and stage-breakdown charts, shared by the Sleep tab and folded into
+/// Insights (`TrendsView`). Fetches its own `SleepDetailResponse` so callers need no
+/// extra plumbing.
+struct SleepChartsSection: View {
+    @EnvironmentObject private var settings: AppSettings
+    @State private var response: SleepDetailResponse?
+    @State private var error: String?
+    @State private var isLoading = false
+
+    private let stageColors: [(name: String, color: Color)] = [
+        ("Deep", .indigo), ("REM", .purple), ("Core", .blue), ("Awake", .orange),
+    ]
+
+    var body: some View {
+        Group {
+            if let nights, !nights.isEmpty {
+                totalCard(nights)
+                stageCard(nights)
+            } else if isLoading {
+                ProgressView().padding(.top, 20)
+            } else if let error {
+                ErrorCard(message: error) { Task { await load() } }
+            }
+        }
+        .task { await load() }
+    }
+
+    private var nights: [SleepDay]? {
+        response?.data.filter { $0.durationHours > 0 }
     }
 
     private func totalCard(_ nights: [SleepDay]) -> some View {

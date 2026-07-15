@@ -16,6 +16,7 @@ struct TrendsView: View {
                     if let points, !points.isEmpty {
                         readinessCard(points)
                         pillarsCard(points)
+                        SleepChartsSection()
                     } else if isLoading {
                         ProgressView().padding(.top, 60)
                     } else {

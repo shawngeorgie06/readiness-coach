@@ -31,12 +31,15 @@ struct RootView: View {
 struct MainTabView: View {
     var body: some View {
         TabView {
-            TodayView().tabItem { Label("Today", systemImage: "sun.max") }
-            SleepView().tabItem { Label("Sleep", systemImage: "bed.double") }
-            TrainView().tabItem { Label("Train", systemImage: "figure.run") }
-            BodyView().tabItem { Label("Body", systemImage: "heart") }
-            TrendsView().tabItem { Label("Trends", systemImage: "chart.line.uptrend.xyaxis") }
+            TodayView().tabItem { Label("Today", systemImage: "circle.circle.fill") }
+            TrendsView().tabItem { Label("Insights", systemImage: "chart.bar.fill") }
+            TrainView().tabItem { Label("Activity", systemImage: "bolt.fill") }
+            BodyView().tabItem { Label("Body", systemImage: "figure.stand") }
+            YouView().tabItem { Label("You", systemImage: "person.fill") }
         }
+        .toolbarBackground(Palette.canvas, for: .tabBar)
+        .toolbarBackground(.visible, for: .tabBar)
+        .tint(Palette.accent)
     }
 }
 
