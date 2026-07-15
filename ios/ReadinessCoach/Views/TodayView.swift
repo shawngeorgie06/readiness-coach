@@ -159,10 +159,11 @@ struct TodayView: View {
             Text("Last synced \(synced)")
                 .font(.caption2).foregroundStyle(Palette.textSecondary)
         }
-        Text("App update \(AppBuild.stamp)")
-            .font(.caption2)
+        Text(AppBuild.label)
+            .font(.caption.weight(.semibold))
             .foregroundStyle(Palette.accent)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("today-app-build")
         if !today.overridesApplied.isEmpty {
             Text("Overrides: \(today.overridesApplied.joined(separator: ", "))")
                 .font(.caption2)

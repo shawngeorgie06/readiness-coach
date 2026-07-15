@@ -17,10 +17,12 @@ struct YouView: View {
                     profileCard
                     preferencesCard
                     accountCard
-                    Text("Readiness Coach · v\(AppBuild.stamp)")
-                        .font(.caption2).foregroundStyle(Palette.textTertiary)
+                    Text("Readiness Coach · \(AppBuild.label)")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(Palette.accent)
                         .frame(maxWidth: .infinity)
                         .padding(.top, 4)
+                        .accessibilityIdentifier("app-build-label")
                 }
                 .padding()
             }
@@ -51,6 +53,9 @@ struct YouView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Readiness Coach").font(.system(size: 20, weight: .semibold, design: .rounded))
                     .foregroundStyle(Palette.textPrimary)
+                Text(AppBuild.label)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Palette.accent)
                 Text(settings.userId.isEmpty ? "Not configured" : settings.userId)
                     .font(.caption).foregroundStyle(Palette.textSecondary).lineLimit(1)
                 HStack(spacing: 8) {
