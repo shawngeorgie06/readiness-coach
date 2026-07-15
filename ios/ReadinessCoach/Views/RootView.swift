@@ -123,31 +123,53 @@ struct ReadinessRing: View {
     @State private var animated = false
 
     var body: some View {
-        let fraction = min(max(readiness / 100, 0), 1)
-        let color = Palette.decisionColor(decision)
-        ZStack {
-            Circle().stroke(Palette.textPrimary.opacity(0.08), lineWidth: 10)
-            // Soft glow behind the progress stroke — no layout-inflating shadow.
-            Circle().trim(from: 0, to: animated ? fraction : 0)
-                .stroke(color.opacity(0.35), style: StrokeStyle(lineWidth: 14, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-                .blur(radius: 6)
-                .allowsHitTesting(false)
-            Circle().trim(from: 0, to: animated ? fraction : 0)
-                .stroke(color, style: StrokeStyle(lineWidth: 10, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-            VStack(spacing: 2) {
-                Text("\(Int(readiness.rounded()))")
-                    .font(.system(size: 64, weight: .semibold, design: .rounded)).monospacedDigit()
-                    .foregroundStyle(Palette.textPrimary)
-                Eyebrow(text: "Score")
+        // Fit the ring to available width so stroke + score never spill past the hero card.
+        Color.clear
+            .aspectRatio(1, contentMode: .fit)
+            .frame(maxWidth: 200)
+            .overlay {
+                GeometryReader { geo in
+                    let side = min(geo.size.width, geo.size.height)
+                    let line = max(7, side * 0.05)
+                    // Stroke is centered on the path — inset so the full ring stays inside bounds.
+                    let inset = line / 2 + 2
+                    let color = Palette.decisionColor(decision)
+                    let fraction = min(max(readiness / 100, 0), 1)
+                    let fontSize = min(52, (side - inset * 2) * 0.34)
+
+                    ZStack {
+                        Circle()
+                            .stroke(Palette.textPrimary.opacity(0.08), lineWidth: line)
+                            .padding(inset)
+                        Circle()
+                            .trim(from: 0, to: animated ? fraction : 0)
+                            .stroke(color.opacity(0.28), style: StrokeStyle(lineWidth: line + 3, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                            .blur(radius: 3)
+                            .padding(inset)
+                            .allowsHitTesting(false)
+                        Circle()
+                            .trim(from: 0, to: animated ? fraction : 0)
+                            .stroke(color, style: StrokeStyle(lineWidth: line, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                            .padding(inset)
+                        VStack(spacing: 2) {
+                            Text("\(Int(readiness.rounded()))")
+                                .font(.system(size: fontSize, weight: .semibold, design: .rounded))
+                                .monospacedDigit()
+                                .minimumScaleFactor(0.5)
+                                .lineLimit(1)
+                                .foregroundStyle(Palette.textPrimary)
+                            Eyebrow(text: "Score")
+                        }
+                        .frame(maxWidth: max(40, side - inset * 2 - line * 2 - 12))
+                    }
+                    .frame(width: side, height: side)
+                }
             }
-        }
-        .frame(width: 210, height: 210)
-        .clipped()
-        .onAppear { withAnimation(.easeOut(duration: 0.9)) { animated = true } }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Readiness \(Int(readiness.rounded())), decision \(decision.title)")
+            .onAppear { withAnimation(.easeOut(duration: 0.9)) { animated = true } }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Readiness \(Int(readiness.rounded())), decision \(decision.title)")
     }
 }
 

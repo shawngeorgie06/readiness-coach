@@ -15,8 +15,8 @@ extension Color {
 /// labels cannot drift from MARKETING_VERSION.
 enum AppBuild {
     /// Fallback only if Info.plist keys are missing (previews / tests).
-    private static let fallbackMarketing = "1.1.4"
-    private static let fallbackBuild = "6"
+    private static let fallbackMarketing = "1.1.5"
+    private static let fallbackBuild = "7"
 
     static var marketing: String {
         (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String)
@@ -103,19 +103,27 @@ private struct CardModifier: ViewModifier {
 }
 
 private struct HeroCardModifier: ViewModifier {
+    private let radius: CGFloat = 32
+
     func body(content: Content) -> some View {
         content
             .padding(EdgeInsets(top: 22, leading: 18, bottom: 20, trailing: 18))
-            // Shadow lives on the background shape so it does not widen ScrollView contentSize.
             .background {
-                RoundedRectangle(cornerRadius: 32, style: .continuous)
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .fill(LinearGradient(colors: [Palette.surfaceHi, Palette.surface], startPoint: .top, endPoint: .bottom))
                     .overlay(
                         RadialGradient(colors: [Palette.accent.opacity(0.22), .clear],
                                        center: .top, startRadius: 0, endRadius: 240)
-                            .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+                            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
                     )
-                    .overlay(RoundedRectangle(cornerRadius: 32, style: .continuous).strokeBorder(Palette.accent.opacity(0.22), lineWidth: 1))
+                    .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(Palette.accent.opacity(0.22), lineWidth: 1))
+            }
+            // Keep ring / type from painting past the rounded hero box.
+            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+            // Shadow outside the clip so it still softens under the card.
+            .background {
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .fill(Color.clear)
                     .shadow(color: .black.opacity(0.34), radius: 18, y: 8)
             }
     }
