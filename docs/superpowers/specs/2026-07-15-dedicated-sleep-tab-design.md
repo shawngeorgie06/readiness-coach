@@ -1,7 +1,7 @@
 # Dedicated Sleep Tab — Design
 
 Date: 2026-07-15  
-Status: Draft for approval  
+Status: Approved — implementing  
 Branch target: `ios-app-tasks-10-12`
 
 ## Goal

@@ -7,7 +7,6 @@ struct TodayView: View {
 
     @State private var showAsk = false
     @State private var showSettings = false
-    @State private var showSleepDetail = false
     @State private var pillarInfo: PillarInfo?
     @State private var recent: [ReadinessPoint] = []
     @State private var hrv: Double?
@@ -65,9 +64,6 @@ struct TodayView: View {
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showAsk) { NavigationStack { AskCoachView() } }
             .sheet(isPresented: $showSettings) { NavigationStack { SettingsView() } }
-            .sheet(isPresented: $showSleepDetail) {
-                NavigationStack { SleepView(showsDismiss: true) }
-            }
             .sheet(item: $pillarInfo) { PillarDetailSheet(info: $0) }
             .task { await loadRecent(); await loadMiniStats() }
         }
@@ -277,7 +273,7 @@ struct TodayView: View {
                                    @ViewBuilder tile: () -> MetricTile) -> some View {
         Button {
             if opensSleep {
-                showSleepDetail = true
+                tabs.go(to: .sleep)
             } else {
                 pillarInfo = PillarInfo(name: name, weight: weight, description: description, pillar: pillar)
             }
@@ -288,7 +284,7 @@ struct TodayView: View {
         }
         .buttonStyle(.plain)
         .frame(maxWidth: .infinity)
-        .accessibilityHint(opensSleep ? "Opens sleep stages and history" : "Shows more about \(name)")
+        .accessibilityHint(opensSleep ? "Opens the Sleep tab" : "Shows more about \(name)")
     }
 
     private func advisor(_ note: AdvisorNote) -> some View {
