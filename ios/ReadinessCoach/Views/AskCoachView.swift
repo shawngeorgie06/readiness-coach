@@ -12,7 +12,7 @@ struct AskCoachView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
+            ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: 16) {
                     // The locked decision is always visible so the user sees the constraint
                     // the coach must respect — it can never be made more aggressive.
@@ -55,8 +55,10 @@ struct AskCoachView: View {
                         Text(error).font(.footnote).foregroundStyle(.red)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding()
             }
+            .verticalScrollLocked()
             .navigationTitle("Ask Coach")
             .task {
                 if sync.today == nil { await sync.refreshToday(settings) }

@@ -6,37 +6,16 @@ struct TrainView: View {
     @State private var response: TrainResponse?
     @State private var error: String?
     @State private var isLoading = false
+    @State private var strainSelection: Date?
 
     var body: some View {
         NavigationStack {
-            ScrollView {
+            ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 16) {
                     if let response, !response.data.isEmpty {
                         weeklyCard(response.data)
-                        SectionCard(title: "Daily strain — last \(response.days) days") {
-                            Chart(dailyStrain(response.data)) { day in
-                                BarMark(
-                                    x: .value("Day", day.day),
-                                    y: .value("Strain", day.strain)
-                                )
-                                .foregroundStyle(.orange)
-                            }
-                            .frame(height: 200)
-                        }
-
-                        SectionCard(title: "Workouts") {
-                            HStack(spacing: 6) {
-                                Text("Strain 0–21").font(.caption2).foregroundStyle(.secondary)
-                                InfoBadge(title: "Strain", message: "Strain rates how hard a session was, 0–21, from heart rate and duration.")
-                                Spacer()
-                                Text("HR zones").font(.caption2).foregroundStyle(.secondary)
-                                InfoBadge(title: "Heart-rate zones", message: "Zones are shares of your session spent at rising heart rates — Easy is a warm-up pace, Max is near your ceiling.")
-                            }
-                            ForEach(response.data) { workout in
-                                WorkoutRow(workout: workout)
-                                if workout.id != response.data.last?.id { Divider() }
-                            }
-                        }
+                        strainCard(response)
+                        workoutsCard(response)
                     } else if isLoading {
                         ProgressView().padding(.top, 60)
                     } else {
@@ -50,9 +29,11 @@ struct TrainView: View {
                         ErrorCard(message: error) { Task { await load() } }
                     }
                 }
+                .frame(maxWidth: .infinity)
                 .padding()
             }
-            .navigationTitle("Train")
+            .verticalScrollLocked()
+            .navigationTitle("Activity")
             .task { await load() }
             .refreshable { await load() }
         }
@@ -82,7 +63,6 @@ struct TrainView: View {
         var id: Date { day }
     }
 
-    /// One summed-strain bar per calendar day.
     private func dailyStrain(_ workouts: [WorkoutDTO]) -> [DayStrain] {
         let groups = Dictionary(grouping: workouts) { ChartDate.day($0.startAt) }
         return groups.map { DayStrain(day: $0.key, strain: $0.value.reduce(0) { $0 + $1.strain }) }
@@ -115,11 +95,71 @@ struct TrainView: View {
                 Text("\(week.count) session\(week.count == 1 ? "" : "s") · \(formatMinutes(totalMin)) · \(Int(totalStrain.rounded())) total strain")
                     .font(.subheadline.weight(.medium))
                 if let hardest {
-                    Text("Hardest: \(weekday(hardest.startAt)) (\(Int(hardest.strain.rounded())))")
+                    Text("Hardest: \(WorkoutSport.title(forKey: hardest.sport)) · \(weekday(hardest.startAt)) (\(Int(hardest.strain.rounded())))")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
         }
+    }
+
+    private func strainCard(_ response: TrainResponse) -> some View {
+        let series = dailyStrain(response.data)
+        let dates = series.map(\.day)
+        return SectionCard(title: "Daily strain — last \(response.days) days") {
+            Chart(series) { day in
+                BarMark(
+                    x: .value("Day", day.day),
+                    y: .value("Strain", day.strain)
+                )
+                .foregroundStyle(.orange)
+                if let sel = strainSelection {
+                    RuleMark(x: .value("Day", sel))
+                        .foregroundStyle(.secondary.opacity(0.45))
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                }
+            }
+            .chartXAxis {
+                AxisMarks(values: .automatic(desiredCount: min(6, series.count))) { _ in
+                    AxisGridLine()
+                    AxisValueLabel(format: .dateTime.month(.abbreviated).day())
+                }
+            }
+            .chartYAxisLabel("strain", position: .leading, alignment: .center)
+            .frame(height: 210)
+            .chartOverlay { proxy in
+                ChartDayScrubOverlay(proxy: proxy, dates: dates, selection: $strainSelection)
+            }
+            .clipped()
+
+            ScrubDetailBanner(
+                date: strainSelection,
+                placeholder: "Tap or drag a bar to see that day's strain",
+                lines: strainLines(for: strainSelection, in: series)
+            )
+        }
+    }
+
+    private func workoutsCard(_ response: TrainResponse) -> some View {
+        SectionCard(title: "Workouts") {
+            HStack(spacing: 6) {
+                Text("Strain 0–21").font(.caption2).foregroundStyle(.secondary)
+                InfoBadge(title: "Strain", message: "Strain rates how hard a session was, 0–21, from heart rate and duration.")
+                Spacer()
+                Text("HR zones").font(.caption2).foregroundStyle(.secondary)
+                InfoBadge(title: "Heart-rate zones", message: "Zones are shares of your session spent at rising heart rates — Easy is a warm-up pace, Max is near your ceiling.")
+            }
+            ForEach(response.data) { workout in
+                WorkoutRow(workout: workout)
+                if workout.id != response.data.last?.id { Divider() }
+            }
+        }
+    }
+
+    private func strainLines(for selection: Date?, in series: [DayStrain]) -> [String] {
+        guard let selection,
+              let hit = series.first(where: { $0.day == selection })
+        else { return [] }
+        return ["Daily strain \(Int(hit.strain.rounded()))"]
     }
 }
 
@@ -137,9 +177,16 @@ struct WorkoutRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: WorkoutSport.symbolName(forKey: workout.sport))
+                    .font(.title3)
+                    .foregroundStyle(.orange)
+                    .frame(width: 28, alignment: .center)
+                    .accessibilityHidden(true)
+
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(workout.sport.capitalized).font(.subheadline.weight(.semibold))
+                    Text(WorkoutSport.title(forKey: workout.sport))
+                        .font(.subheadline.weight(.semibold))
                     Text(subtitle).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -156,6 +203,8 @@ struct WorkoutRow: View {
             }
         }
         .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(WorkoutSport.title(forKey: workout.sport)), \(subtitle), strain \(Int(workout.strain.rounded()))")
     }
 
     private func zoneBar(_ zones: [Double]) -> some View {
@@ -171,6 +220,7 @@ struct WorkoutRow: View {
             }
             .frame(height: 8)
             .clipShape(Capsule())
+            .allowsHitTesting(false)
             Text(zones.enumerated()
                 .map { "\(zoneNames[min($0.offset, 4)]) \(fmtMin($0.element))m" }
                 .joined(separator: "  "))

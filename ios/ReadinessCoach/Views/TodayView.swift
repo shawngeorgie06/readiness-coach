@@ -24,7 +24,7 @@ struct TodayView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
+            ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 16) {
                     if let today = sync.today {
                         content(today)
@@ -45,8 +45,10 @@ struct TodayView: View {
                         }
                     }
                 }
+                .frame(maxWidth: .infinity)
                 .padding()
             }
+            .verticalScrollLocked()
             .navigationTitle("Today")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -158,8 +160,11 @@ struct TodayView: View {
             pillarInfo = PillarInfo(name: name, weight: weight, description: description, pillar: pillar)
         } label: {
             PillarRow(name: name, weight: weight, pillar: pillar)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityHint("Shows what \(name) measures and today's drivers")
     }
 
     private func advisor(_ note: AdvisorNote) -> some View {
@@ -218,8 +223,13 @@ struct PillarRow: View {
                 Spacer()
                 Text("\(Int(pillar.score.rounded()))")
                     .font(.subheadline.monospacedDigit())
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
             }
+            // ProgressView eats taps when the bar is full (common for Sleep at ~100).
             ProgressView(value: min(max(pillar.score / 100, 0), 1))
+                .allowsHitTesting(false)
             if !pillar.drivers.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(pillar.drivers, id: \.self) { driver in
@@ -228,6 +238,7 @@ struct PillarRow: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                .allowsHitTesting(false)
             }
         }
     }

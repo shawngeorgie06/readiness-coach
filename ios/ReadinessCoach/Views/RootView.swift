@@ -29,9 +29,9 @@ struct MainTabView: View {
         TabView {
             TodayView().tabItem { Label("Today", systemImage: "sun.max") }
             SleepView().tabItem { Label("Sleep", systemImage: "bed.double") }
-            TrainView().tabItem { Label("Train", systemImage: "figure.run") }
+            TrainView().tabItem { Label("Activity", systemImage: "figure.run") }
             BodyView().tabItem { Label("Body", systemImage: "heart") }
-            TrendsView().tabItem { Label("Trends", systemImage: "chart.line.uptrend.xyaxis") }
+            TrendsView().tabItem { Label("Insights", systemImage: "chart.line.uptrend.xyaxis") }
         }
     }
 }
