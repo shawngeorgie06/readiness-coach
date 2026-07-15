@@ -11,6 +11,8 @@ struct TodayView: View {
     @State private var hrv: Double?
     @State private var rhr: Double?
     @State private var sleepHours: Double?
+    @State private var strain: Double?
+    @State private var strainAvg: Double?
 
     /// Maps raw missing-metric keys to human names for the banner.
     static func friendlyMissing(_ keys: [String]) -> String {
@@ -29,6 +31,7 @@ struct TodayView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
+                    header
                     if let today = sync.today {
                         content(today)
                     } else if sync.isLoadingToday || sync.isSyncing {
@@ -51,33 +54,46 @@ struct TodayView: View {
                 .padding()
             }
             .screenBackground()
-            .navigationTitle("Today")
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { showSettings = true } label: { Image(systemName: "gearshape") }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showAsk = true } label: { Image(systemName: "bubble.left.and.text.bubble.right") }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Task { await sync.syncNow(settings); await loadRecent(); await loadMiniStats() }
-                    } label: {
-                        if sync.isSyncing {
-                            ProgressView()
-                        } else {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                    }
-                    .disabled(sync.isSyncing)
-                }
-            }
+            .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showAsk) { NavigationStack { AskCoachView() } }
             .sheet(isPresented: $showSettings) { NavigationStack { SettingsView() } }
             .sheet(item: $pillarInfo) { PillarDetailSheet(info: $0) }
             .refreshable { await sync.syncNow(settings); await loadRecent(); await loadMiniStats() }
             .task { await loadRecent(); await loadMiniStats() }
         }
+    }
+
+    /// Big in-content header matching the prototype's screen-head (date + "Today" + actions).
+    private var header: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                Eyebrow(text: Date().formatted(.dateTime.weekday(.wide).month().day()))
+                Text("Today")
+                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                    .foregroundStyle(Palette.textPrimary)
+            }
+            Spacer()
+            HStack(spacing: 8) {
+                iconButton("gearshape") { showSettings = true }
+                iconButton("bubble.left.and.text.bubble.right") { showAsk = true }
+                iconButton(sync.isSyncing ? "hourglass" : "arrow.clockwise") {
+                    Task { await sync.syncNow(settings); await loadRecent(); await loadMiniStats() }
+                }
+            }
+        }
+    }
+
+    private func iconButton(_ system: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: system)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(Palette.textPrimary)
+                .frame(width: 40, height: 40)
+                .background(Palette.surface, in: Circle())
+                .overlay(Circle().strokeBorder(Palette.strokeSoft, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .disabled(sync.isSyncing && system == "hourglass")
     }
 
     @ViewBuilder
@@ -174,24 +190,39 @@ struct TodayView: View {
 
     /// 2-column grid of Load / Recovery / Sleep tiles, each showing its real pillar score
     /// (0–100, higher is better) so the tile number always matches its PillarDetailSheet.
+    /// 2×2 grid matching the prototype: real Strain (0–21) and Sleep (hours) alongside the
+    /// Recovery and Load pillar scores (which drill into their detail sheets, same number).
     private func metricTiles(_ pillars: Pillars) -> some View {
         LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-            metricTileButton("Load", "25%",
-                "Recent training strain and the acute:chronic ratio — how hard you've pushed lately vs your norm.",
-                pillars.load) {
-                MetricTile(label: "Load", value: "\(Int(pillars.load.score.rounded()))", fraction: pillars.load.score / 100, tone: .strain)
-            }
+            MetricTile(label: "Strain",
+                       value: strain.map { fmt1($0) } ?? "—", unit: "/21",
+                       delta: strainDelta, fraction: (strain ?? 0) / 21, tone: .strain)
             metricTileButton("Recovery", "40%",
                 "HRV and resting heart rate vs your 30-day baseline — the strongest readiness signal.",
                 pillars.recovery) {
-                MetricTile(label: "Recovery", value: "\(Int(pillars.recovery.score.rounded()))", fraction: pillars.recovery.score / 100, tone: .recovery)
+                MetricTile(label: "Recovery", value: "\(Int(pillars.recovery.score.rounded()))",
+                           delta: "40% of readiness", fraction: pillars.recovery.score / 100, tone: .recovery)
             }
-            metricTileButton("Sleep", "35%",
-                "Last night's duration and quality vs your ~8h need, plus recent sleep debt and consistency.",
-                pillars.sleep) {
-                MetricTile(label: "Sleep", value: "\(Int(pillars.sleep.score.rounded()))", fraction: pillars.sleep.score / 100, tone: .sleep)
+            MetricTile(label: "Sleep",
+                       value: sleepHours.map { fmt1($0) } ?? "—", unit: "h",
+                       delta: sleepDelta, fraction: (sleepHours ?? 0) / 8, tone: .sleep)
+            metricTileButton("Load", "25%",
+                "Recent training strain and the acute:chronic ratio — how hard you've pushed lately vs your norm.",
+                pillars.load) {
+                MetricTile(label: "Load", value: "\(Int(pillars.load.score.rounded()))",
+                           delta: "25% of readiness", fraction: pillars.load.score / 100, tone: .strain)
             }
         }
+    }
+
+    private func fmt1(_ v: Double) -> String { String(format: "%.1f", v) }
+    private var strainDelta: String? {
+        guard let strain, let strainAvg, strainAvg > 0 else { return nil }
+        return String(format: "%+.1f vs 7d avg", strain - strainAvg)
+    }
+    private var sleepDelta: String? {
+        guard let sleepHours else { return nil }
+        return String(format: "%+.1fh vs 8h", sleepHours - 8)
     }
 
     private func metricTileButton(_ name: String, _ weight: String, _ description: String, _ pillar: PillarScore,
@@ -250,11 +281,18 @@ struct TodayView: View {
         guard let client = settings.makeClient() else { return }
         async let body = try? client.getBody(days: 7)
         async let sleep = try? client.getSleep(days: 2)
+        async let train = try? client.getTrain(days: 7)
         if let b = await body {
             hrv = b.daily.filter { $0.type == "hrv_sdnn" }.sorted { $0.date < $1.date }.last?.avg
             rhr = b.daily.filter { $0.type == "resting_heart_rate" }.sorted { $0.date < $1.date }.last?.avg
         }
         if let s = await sleep { sleepHours = s.data.filter { $0.durationHours > 0 }.last?.durationHours }
+        if let t = await train {
+            let sorted = t.data.sorted { $0.startAt < $1.startAt }
+            strain = sorted.last?.strain
+            let all = t.data.map(\.strain)
+            strainAvg = all.isEmpty ? nil : all.reduce(0, +) / Double(all.count)
+        }
     }
 }
 
