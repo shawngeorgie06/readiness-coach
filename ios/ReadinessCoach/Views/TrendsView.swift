@@ -11,6 +11,7 @@ struct TrendsView: View {
     @State private var isLoading = false
     @State private var rangeIndex = 1
     @State private var pillarSelection: Date?
+    @State private var pillars: Pillars?
 
     private let rangeLabels = ["7d", "30d", "90d"]
     private let rangeDays = [7, 30, 90]
@@ -23,6 +24,7 @@ struct TrendsView: View {
                     SegmentedRange(rangeLabels, selection: $rangeIndex)
                     if let points, !points.isEmpty {
                         trendCard(points)
+                        insightCards()
                         pillarsCard(points)
                         SleepChartsSection()
                     } else if isLoading {
@@ -102,6 +104,37 @@ struct TrendsView: View {
         .frame(height: 130)
     }
 
+    // MARK: - Insight cards (real, from the pillar drivers)
+
+    @ViewBuilder
+    private func insightCards() -> some View {
+        if let pillars {
+            insightCard("Sleep", .sleep, pillars.sleep)
+            insightCard("Recovery", .good, pillars.recovery)
+            insightCard("Load", .accent, pillars.load)
+        }
+    }
+
+    private func insightCard(_ name: String, _ tone: Pill.Tone, _ pillar: PillarScore) -> some View {
+        let driver = pillar.drivers.first
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Pill(name, tone: tone)
+                Spacer()
+                Text("Score \(Int(pillar.score.rounded()))")
+                    .font(.system(.caption2, design: .monospaced)).foregroundStyle(Palette.textTertiary)
+            }
+            Text(driver?.text ?? "No data yet")
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                .foregroundStyle(Palette.textPrimary)
+            if let detail = driver?.detail {
+                Text(detail).font(.callout).foregroundStyle(Palette.textSecondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card()
+    }
+
     // MARK: - Pillar trends (real, restyled to the Aether palette)
 
     private func pillarsCard(_ points: [ReadinessPoint]) -> some View {
@@ -166,5 +199,6 @@ struct TrendsView: View {
         } catch {
             self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
+        pillars = try? await client.getToday().pillars
     }
 }

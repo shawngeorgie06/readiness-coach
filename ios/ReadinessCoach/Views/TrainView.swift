@@ -77,11 +77,12 @@ struct TrainView: View {
             ForEach(workouts) { w in
                 AetherListRow(systemImage: icon(w.sport), tone: rowTone(w.sport),
                               title: prettySport(w.sport),
-                              subtitle: "\(weekday(w.startAt)) · \(Int(w.durationMin.rounded())) min") {
+                              subtitle: rowSubtitle(w)) {
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text(fmt(w.strain)).font(.system(.subheadline, design: .monospaced).weight(.semibold))
+                        Text(fmt(w.strain)).font(.system(size: 18, weight: .semibold, design: .rounded))
                             .foregroundStyle(Palette.textPrimary)
-                        Text("strain").font(.caption2).foregroundStyle(Palette.textSecondary)
+                        Text("strain · \(Int(w.durationMin.rounded()))m")
+                            .font(.caption2).foregroundStyle(Palette.textSecondary)
                     }
                 }
                 if w.id != workouts.last?.id {
@@ -139,6 +140,13 @@ struct TrainView: View {
         if s.contains("strength") || s.contains("function") || s.contains("traditional") || s.contains("lift") { return "Strength" }
         if s.contains("yoga") || s.contains("mind") || s.contains("flex") || s.contains("cool") || s.contains("breath") { return "Recovery" }
         return "Other"
+    }
+
+    private func rowSubtitle(_ w: WorkoutDTO) -> String {
+        var parts = [weekday(w.startAt)]
+        if let cal = w.calories { parts.append("\(Int(cal.rounded())) kcal") }
+        if let hr = w.avgHrBpm { parts.append("\(Int(hr.rounded())) bpm") }
+        return parts.joined(separator: " · ")
     }
 
     private func prettySport(_ sport: String) -> String {

@@ -9,12 +9,14 @@ struct BodyView: View {
     @State private var hrvSelection: Date?
     @State private var rhrSelection: Date?
     @State private var hrSelection: Date?
+    @State private var pillars: Pillars?
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
                     header
+                    if let pillars { readoutCard(pillars) }
                     if let response, !response.daily.isEmpty {
                         vitals(response.daily)
                         lineCard("Heart rate variability", type: "hrv_sdnn", color: Palette.mint, unit: "ms",
@@ -59,6 +61,24 @@ struct BodyView: View {
             }
             Spacer()
         }
+    }
+
+    /// Real "Readout" card (honest substitute for the prototype's muscle heat-map),
+    /// built from the recovery pillar's top driver.
+    @ViewBuilder
+    private func readoutCard(_ pillars: Pillars) -> some View {
+        let driver = pillars.recovery.drivers.first
+        VStack(alignment: .leading, spacing: 10) {
+            Eyebrow(text: "Readout")
+            Text(driver?.text ?? "Recovery signals")
+                .font(.system(size: 20, weight: .semibold, design: .rounded))
+                .foregroundStyle(Palette.textPrimary)
+            if let detail = driver?.detail {
+                Text(detail).font(.callout).foregroundStyle(Palette.textSecondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card()
     }
 
     /// Latest daily average for a metric type.
@@ -184,6 +204,7 @@ struct BodyView: View {
         } catch {
             self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
+        pillars = try? await client.getToday().pillars
     }
 
     private func fmt(_ value: Double) -> String {
