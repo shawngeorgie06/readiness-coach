@@ -44,7 +44,7 @@ enum WorkoutSport {
         let lowered = key.lowercased()
         if lowered.hasPrefix("hk_"), let raw = UInt(lowered.dropFirst(3)),
            let type = HKWorkoutActivityType(rawValue: raw) {
-            return titleFromKey(key(for: type))
+            return titleFromKey(Self.key(for: type))
         }
         return titleFromKey(lowered)
     }
