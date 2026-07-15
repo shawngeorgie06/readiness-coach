@@ -108,10 +108,15 @@ struct ReadinessRing: View {
         let color = Palette.decisionColor(decision)
         ZStack {
             Circle().stroke(Palette.textPrimary.opacity(0.08), lineWidth: 10)
+            // Soft glow behind the progress stroke — no layout-inflating shadow.
+            Circle().trim(from: 0, to: animated ? fraction : 0)
+                .stroke(color.opacity(0.35), style: StrokeStyle(lineWidth: 14, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .blur(radius: 6)
+                .allowsHitTesting(false)
             Circle().trim(from: 0, to: animated ? fraction : 0)
                 .stroke(color, style: StrokeStyle(lineWidth: 10, lineCap: .round))
                 .rotationEffect(.degrees(-90))
-                .shadow(color: color.opacity(0.5), radius: 12)
             VStack(spacing: 2) {
                 Text("\(Int(readiness.rounded()))")
                     .font(.system(size: 64, weight: .semibold, design: .rounded)).monospacedDigit()
@@ -120,6 +125,7 @@ struct ReadinessRing: View {
             }
         }
         .frame(width: 210, height: 210)
+        .clipped()
         .onAppear { withAnimation(.easeOut(duration: 0.9)) { animated = true } }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Readiness \(Int(readiness.rounded())), decision \(decision.title)")

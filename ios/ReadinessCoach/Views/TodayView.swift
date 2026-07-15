@@ -29,9 +29,13 @@ struct TodayView: View {
 
     var body: some View {
         NavigationStack {
-            // Identical scroll shell to Insights / Activity / Body — those tabs do not
-            // rubber-band left/right. Do not use VerticalPageScroll or Charts here.
-            ScrollView(.vertical, showsIndicators: true) {
+            // Today has unique wide chrome (hero + ring shadows). Pin width and
+            // continuously clamp horizontal UIScrollView offset — other tabs don't need this.
+            WidthPinnedVerticalScroll(onRefresh: {
+                await sync.syncNow(settings)
+                await loadRecent()
+                await loadMiniStats()
+            }) {
                 VStack(spacing: 16) {
                     header
                     if let today = sync.today {
@@ -53,16 +57,13 @@ struct TodayView: View {
                         }
                     }
                 }
-                .pageWidthLocked()
                 .padding()
             }
-            .verticalScrollLocked()
             .screenBackground()
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showAsk) { NavigationStack { AskCoachView() } }
             .sheet(isPresented: $showSettings) { NavigationStack { SettingsView() } }
             .sheet(item: $pillarInfo) { PillarDetailSheet(info: $0) }
-            .refreshable { await sync.syncNow(settings); await loadRecent(); await loadMiniStats() }
             .task { await loadRecent(); await loadMiniStats() }
         }
     }
@@ -150,7 +151,6 @@ struct TodayView: View {
         }
         .frame(maxWidth: .infinity)
         .heroCard()
-        .clipped()
 
         if let count = sync.uploadingCount {
             Label("Uploading \(count) samples…", systemImage: "arrow.up.circle")
@@ -205,36 +205,40 @@ struct TodayView: View {
         .background(Palette.surfaceHi, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
-    /// 2×2 grid: Strain + Sleep + Recovery + Load — all tappable for detail.
+    /// 2×2 grid without LazyVGrid (avoids occasional width overflows in ScrollView).
     private func metricTiles(_ pillars: Pillars) -> some View {
-        LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-            metricTileButton("Strain", "training load",
-                "Yesterday’s workout strain on a 0–21 scale (from heart rate and duration). Higher means a harder session. This feeds the Load pillar.",
-                PillarScore(score: min(100, (strain ?? 0) / 21 * 100),
-                            drivers: [Driver(text: strain.map { String(format: "Strain %.1f / 21" , $0) } ?? "No recent workout",
-                                             detail: strainDelta ?? "Sync workouts from Apple Health to populate strain.")])) {
-                MetricTile(label: "Strain",
-                           value: strain.map { fmt1($0) } ?? "—", unit: "/21",
-                           delta: strainDelta, fraction: (strain ?? 0) / 21, tone: .strain)
+        VStack(spacing: 12) {
+            HStack(spacing: 12) {
+                metricTileButton("Strain", "training load",
+                    "Yesterday’s workout strain on a 0–21 scale (from heart rate and duration). Higher means a harder session. This feeds the Load pillar.",
+                    PillarScore(score: min(100, (strain ?? 0) / 21 * 100),
+                                drivers: [Driver(text: strain.map { String(format: "Strain %.1f / 21" , $0) } ?? "No recent workout",
+                                                 detail: strainDelta ?? "Sync workouts from Apple Health to populate strain.")])) {
+                    MetricTile(label: "Strain",
+                               value: strain.map { fmt1($0) } ?? "—", unit: "/21",
+                               delta: strainDelta, fraction: (strain ?? 0) / 21, tone: .strain)
+                }
+                metricTileButton("Recovery", "40%",
+                    "HRV and resting heart rate vs your 30-day baseline — the strongest readiness signal.",
+                    pillars.recovery) {
+                    MetricTile(label: "Recovery", value: "\(Int(pillars.recovery.score.rounded()))",
+                               delta: "40% of readiness", fraction: pillars.recovery.score / 100, tone: .recovery)
+                }
             }
-            metricTileButton("Recovery", "40%",
-                "HRV and resting heart rate vs your 30-day baseline — the strongest readiness signal.",
-                pillars.recovery) {
-                MetricTile(label: "Recovery", value: "\(Int(pillars.recovery.score.rounded()))",
-                           delta: "40% of readiness", fraction: pillars.recovery.score / 100, tone: .recovery)
-            }
-            metricTileButton("Sleep", "35%",
-                "Last night's duration and quality vs your ~8h need, plus recent sleep debt and consistency.",
-                pillars.sleep) {
-                MetricTile(label: "Sleep",
-                           value: sleepHours.map { fmt1($0) } ?? "—", unit: "h",
-                           delta: sleepDelta, fraction: (sleepHours ?? 0) / 8, tone: .sleep)
-            }
-            metricTileButton("Load", "25%",
-                "Recent training strain and the acute:chronic ratio — how hard you've pushed lately vs your norm.",
-                pillars.load) {
-                MetricTile(label: "Load", value: "\(Int(pillars.load.score.rounded()))",
-                           delta: "25% of readiness", fraction: pillars.load.score / 100, tone: .strain)
+            HStack(spacing: 12) {
+                metricTileButton("Sleep", "35%",
+                    "Last night's duration and quality vs your ~8h need, plus recent sleep debt and consistency.",
+                    pillars.sleep) {
+                    MetricTile(label: "Sleep",
+                               value: sleepHours.map { fmt1($0) } ?? "—", unit: "h",
+                               delta: sleepDelta, fraction: (sleepHours ?? 0) / 8, tone: .sleep)
+                }
+                metricTileButton("Load", "25%",
+                    "Recent training strain and the acute:chronic ratio — how hard you've pushed lately vs your norm.",
+                    pillars.load) {
+                    MetricTile(label: "Load", value: "\(Int(pillars.load.score.rounded()))",
+                               delta: "25% of readiness", fraction: pillars.load.score / 100, tone: .strain)
+                }
             }
         }
     }
@@ -255,9 +259,11 @@ struct TodayView: View {
             pillarInfo = PillarInfo(name: name, weight: weight, description: description, pillar: pillar)
         } label: {
             tile()
+                .frame(maxWidth: .infinity)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .frame(maxWidth: .infinity)
         .accessibilityHint("Shows more about \(name)")
     }
 
@@ -265,17 +271,23 @@ struct TodayView: View {
         SectionCard(title: "Strict advisor") {
             if !note.why.isEmpty {
                 ForEach(note.why, id: \.self) { line in
-                    Label(line, systemImage: "checkmark.circle")
-                        .font(.subheadline)
-                        .labelStyle(.titleAndIcon)
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "checkmark.circle")
+                        Text(line)
+                            .font(.subheadline)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
             }
             Text(note.prescription)
                 .font(.subheadline.weight(.medium))
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 4)
             Text("If ignored: \(note.ifIgnored)")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             Text(note.source == "llm" ? "Written by coach model" : "Template note")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)

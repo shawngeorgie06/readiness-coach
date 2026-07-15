@@ -98,11 +98,16 @@ extension View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .clipped()
     }
+
+    /// Pins a continuous UIKit clamp that zeros horizontal offset and content width.
+    func killHorizontalScroll() -> some View {
+        self.background(HorizontalScrollKiller())
+    }
 }
 
-/// Vertical-only page scroll. Pins content width to the viewport so Charts / wide
-/// layouts can’t grow `contentSize` and let the page rubber-band left/right.
-struct VerticalPageScroll<Content: View>: View {
+/// Vertical ScrollView whose content is forced to the viewport width so children
+/// cannot grow `contentSize` sideways. Used by Today (unique wide chrome/shadows).
+struct WidthPinnedVerticalScroll<Content: View>: View {
     var onRefresh: (() async -> Void)? = nil
     @ViewBuilder var content: Content
 
@@ -111,47 +116,91 @@ struct VerticalPageScroll<Content: View>: View {
             let scroll = ScrollView(.vertical, showsIndicators: true) {
                 content
                     .frame(width: geo.size.width, alignment: .topLeading)
+                    .clipped()
             }
             .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
-            .background(HorizontalScrollKiller())
+            .killHorizontalScroll()
 
-            if let onRefresh {
-                scroll.refreshable { await onRefresh() }
-            } else {
-                scroll
+            Group {
+                if let onRefresh {
+                    scroll.refreshable { await onRefresh() }
+                } else {
+                    scroll
+                }
             }
+            .frame(width: geo.size.width, height: geo.size.height)
         }
     }
 }
 
-/// Walks up to the hosting UIScrollView and keeps contentSize.width == bounds.width.
-private struct HorizontalScrollKiller: UIViewRepresentable {
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView(frame: .zero)
-        view.isUserInteractionEnabled = false
-        view.backgroundColor = .clear
-        return view
+/// Continuously clamps every ancestor UIScrollView: no horizontal bounce, content
+/// width == bounds width, contentOffset.x == 0. Survives SwiftUI re-layouts that
+/// briefly re-widen contentSize (shadows / GeometryReader / refreshable).
+struct HorizontalScrollKiller: UIViewRepresentable {
+    func makeUIView(context: Context) -> ClampHostView {
+        ClampHostView()
     }
 
-    func updateUIView(_ uiView: UIView, context: Context) {
-        DispatchQueue.main.async {
-            Self.lock(from: uiView)
+    func updateUIView(_ uiView: ClampHostView, context: Context) {
+        uiView.clampNow()
+    }
+}
+
+final class ClampHostView: UIView {
+    private var displayLink: CADisplayLink?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        backgroundColor = .clear
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil {
+            if displayLink == nil {
+                let link = CADisplayLink(target: self, selector: #selector(tick))
+                link.add(to: .main, forMode: .common)
+                displayLink = link
+            }
+            clampNow()
+        } else {
+            displayLink?.invalidate()
+            displayLink = nil
         }
     }
 
-    private static func lock(from view: UIView) {
-        var node: UIView? = view
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        clampNow()
+    }
+
+    @objc private func tick() { clampNow() }
+
+    func clampNow() {
+        var node: UIView? = self
         while let current = node {
             if let scroll = current as? UIScrollView {
-                scroll.alwaysBounceHorizontal = false
-                scroll.isDirectionalLockEnabled = true
-                scroll.showsHorizontalScrollIndicator = false
-                if scroll.contentSize.width > scroll.bounds.width, scroll.bounds.width > 0 {
-                    scroll.contentSize.width = scroll.bounds.width
-                }
-                return
+                Self.lock(scroll)
             }
             node = current.superview
+        }
+    }
+
+    private static func lock(_ scroll: UIScrollView) {
+        scroll.alwaysBounceHorizontal = false
+        scroll.isDirectionalLockEnabled = true
+        scroll.showsHorizontalScrollIndicator = false
+        let width = scroll.bounds.width
+        guard width > 0 else { return }
+        if abs(scroll.contentSize.width - width) > 0.5 {
+            scroll.contentSize.width = width
+        }
+        if abs(scroll.contentOffset.x) > 0.05 {
+            scroll.contentOffset.x = 0
         }
     }
 }

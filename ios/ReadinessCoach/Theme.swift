@@ -15,8 +15,8 @@ extension Color {
 /// labels cannot drift from MARKETING_VERSION.
 enum AppBuild {
     /// Fallback only if Info.plist keys are missing (previews / tests).
-    private static let fallbackMarketing = "1.1.2"
-    private static let fallbackBuild = "4"
+    private static let fallbackMarketing = "1.1.3"
+    private static let fallbackBuild = "5"
 
     static var marketing: String {
         (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String)
@@ -93,9 +93,12 @@ private struct CardModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .padding(16)
-            .background(Palette.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Palette.strokeSoft, lineWidth: 1))
-            .shadow(color: .black.opacity(0.34), radius: 14, y: 6)
+            .background {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(Palette.surface)
+                    .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Palette.strokeSoft, lineWidth: 1))
+                    .shadow(color: .black.opacity(0.34), radius: 14, y: 6)
+            }
     }
 }
 
@@ -103,7 +106,8 @@ private struct HeroCardModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .padding(EdgeInsets(top: 22, leading: 18, bottom: 20, trailing: 18))
-            .background(
+            // Shadow lives on the background shape so it does not widen ScrollView contentSize.
+            .background {
                 RoundedRectangle(cornerRadius: 32, style: .continuous)
                     .fill(LinearGradient(colors: [Palette.surfaceHi, Palette.surface], startPoint: .top, endPoint: .bottom))
                     .overlay(
@@ -111,10 +115,9 @@ private struct HeroCardModifier: ViewModifier {
                                        center: .top, startRadius: 0, endRadius: 240)
                             .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
                     )
-            )
-            .overlay(RoundedRectangle(cornerRadius: 32, style: .continuous).strokeBorder(Palette.accent.opacity(0.22), lineWidth: 1))
-            .compositingGroup()
-            .shadow(color: .black.opacity(0.34), radius: 18, y: 8)
+                    .overlay(RoundedRectangle(cornerRadius: 32, style: .continuous).strokeBorder(Palette.accent.opacity(0.22), lineWidth: 1))
+                    .shadow(color: .black.opacity(0.34), radius: 18, y: 8)
+            }
     }
 }
 
