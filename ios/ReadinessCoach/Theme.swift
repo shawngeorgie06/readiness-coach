@@ -10,9 +10,29 @@ extension Color {
     }
 }
 
-/// Bump when shipping device-visible UI fixes. Shown on Today + You.
+/// Device-visible build label. Prefer what Xcode actually installed
+/// (`CFBundleShortVersionString` / `CFBundleVersion`) so the You/Today
+/// labels cannot drift from MARKETING_VERSION.
 enum AppBuild {
-    static let stamp = "1.1.1"
+    /// Fallback only if Info.plist keys are missing (previews / tests).
+    private static let fallbackMarketing = "1.1.2"
+    private static let fallbackBuild = "4"
+
+    static var marketing: String {
+        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String)
+            .flatMap { $0.isEmpty ? nil : $0 } ?? fallbackMarketing
+    }
+
+    static var build: String {
+        (Bundle.main.infoDictionary?["CFBundleVersion"] as? String)
+            .flatMap { $0.isEmpty ? nil : $0 } ?? fallbackBuild
+    }
+
+    /// e.g. "1.1.2" — keep short for inline UI.
+    static var stamp: String { marketing }
+
+    /// e.g. "v1.1.2 (4)" — hard to miss on You / Settings.
+    static var label: String { "v\(marketing) (\(build))" }
 }
 
 /// Aether — warm, human, approachable dark. Every token explicit.

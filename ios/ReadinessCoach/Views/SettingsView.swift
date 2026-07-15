@@ -78,6 +78,10 @@ struct SettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
+                Section("About") {
+                    LabeledContent("Version", value: AppBuild.label)
+                }
+
                 Section("Data & privacy") {
                     Button("Delete local settings", role: .destructive) {
                         showResetConfirm = true

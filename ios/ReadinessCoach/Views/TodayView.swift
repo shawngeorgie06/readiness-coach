@@ -29,11 +29,9 @@ struct TodayView: View {
 
     var body: some View {
         NavigationStack {
-            VerticalPageScroll(onRefresh: {
-                await sync.syncNow(settings)
-                await loadRecent()
-                await loadMiniStats()
-            }) {
+            // Identical scroll shell to Insights / Activity / Body — those tabs do not
+            // rubber-band left/right. Do not use VerticalPageScroll or Charts here.
+            ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 16) {
                     header
                     if let today = sync.today {
@@ -55,14 +53,16 @@ struct TodayView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 16)
+                .pageWidthLocked()
+                .padding()
             }
+            .verticalScrollLocked()
             .screenBackground()
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showAsk) { NavigationStack { AskCoachView() } }
             .sheet(isPresented: $showSettings) { NavigationStack { SettingsView() } }
             .sheet(item: $pillarInfo) { PillarDetailSheet(info: $0) }
+            .refreshable { await sync.syncNow(settings); await loadRecent(); await loadMiniStats() }
             .task { await loadRecent(); await loadMiniStats() }
         }
     }
@@ -127,12 +127,16 @@ struct TodayView: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
                     Eyebrow(text: "Readiness", color: Palette.accent)
-                    Text("Calibrated from sleep, HRV & load").font(.caption).foregroundStyle(Palette.textSecondary)
+                    Text("Calibrated from sleep, HRV & load")
+                        .font(.caption)
+                        .foregroundStyle(Palette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer()
+                Spacer(minLength: 8)
                 Pill(today.decision.title, tone: pillTone(today.decision))
             }
             ReadinessRing(readiness: today.readiness, decision: today.decision)
+                .frame(maxWidth: .infinity)
             Text(today.decision.meaning).font(.system(.body, design: .rounded))
                 .foregroundStyle(Palette.textSecondary)
                 .multilineTextAlignment(.center)
@@ -146,6 +150,7 @@ struct TodayView: View {
         }
         .frame(maxWidth: .infinity)
         .heroCard()
+        .clipped()
 
         if let count = sync.uploadingCount {
             Label("Uploading \(count) samples…", systemImage: "arrow.up.circle")
@@ -154,10 +159,11 @@ struct TodayView: View {
             Text("Last synced \(synced)")
                 .font(.caption2).foregroundStyle(Palette.textSecondary)
         }
-        Text("App update \(AppBuild.stamp)")
-            .font(.caption2)
+        Text(AppBuild.label)
+            .font(.caption.weight(.semibold))
             .foregroundStyle(Palette.accent)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("today-app-build")
         if !today.overridesApplied.isEmpty {
             Text("Overrides: \(today.overridesApplied.joined(separator: ", "))")
                 .font(.caption2)
