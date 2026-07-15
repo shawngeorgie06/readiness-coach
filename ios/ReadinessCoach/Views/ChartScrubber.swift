@@ -107,10 +107,6 @@ enum ScrollLockBootstrap {
     }
 }
 
-enum AppBuild {
-    static let stamp = "1.1.0"
-}
-
 enum ChartStyle {
     static let smooth: InterpolationMethod = .catmullRom
 }

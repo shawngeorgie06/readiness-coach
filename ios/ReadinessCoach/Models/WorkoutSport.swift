@@ -1,6 +1,7 @@
 import Foundation
 import HealthKit
 
+/// Maps HealthKit activity types to API keys + display titles/symbols.
 enum WorkoutSport {
     static func key(for type: HKWorkoutActivityType) -> String {
         switch type {
@@ -24,22 +25,16 @@ enum WorkoutSport {
         case .crossTraining: return "cross_training"
         case .mixedMetabolicCardioTraining: return "mixed_cardio"
         case .jumpRope: return "jump_rope"
-        case .dance, .danceInspiredTraining, .socialDance, .cardioDance: return "dance"
+        case .dance: return "dance"
         case .boxing: return "boxing"
         case .kickboxing: return "kickboxing"
         case .martialArts: return "martial_arts"
         case .soccer: return "soccer"
         case .basketball: return "basketball"
         case .tennis: return "tennis"
-        case .pickleball: return "pickleball"
         case .golf: return "golf"
-        case .americanFootball: return "football"
-        case .baseball: return "baseball"
-        case .volleyball: return "volleyball"
         case .climbing: return "climbing"
         case .preparationAndRecovery: return "recovery"
-        case .trackAndField: return "track"
-        case .waterFitness, .waterPolo, .waterSports: return "water"
         case .other: return "other"
         default: return "hk_\(type.rawValue)"
         }
@@ -76,22 +71,16 @@ enum WorkoutSport {
         case "cross_training": return "Cross Training"
         case "mixed_cardio": return "Mixed Cardio"
         case "jump_rope": return "Jump Rope"
-        case "dance", "cardio_dance", "social_dance": return "Dance"
+        case "dance": return "Dance"
         case "boxing": return "Boxing"
         case "kickboxing": return "Kickboxing"
         case "martial_arts": return "Martial Arts"
         case "soccer": return "Soccer"
         case "basketball": return "Basketball"
-        case "tennis": return "Tennis"
-        case "pickleball": return "Pickleball"
+        case "tennis", "pickleball": return "Tennis"
         case "golf": return "Golf"
-        case "football", "american_football": return "Football"
-        case "baseball": return "Baseball"
-        case "volleyball": return "Volleyball"
         case "climbing": return "Climbing"
         case "recovery", "preparation_and_recovery": return "Recovery"
-        case "track": return "Track & Field"
-        case "water": return "Water Sports"
         case "other", "hk_3000": return "Custom Workout"
         default:
             return key
@@ -113,14 +102,13 @@ enum WorkoutSport {
         case "elliptical": return "figure.elliptical"
         case "stairs", "stair_climbing": return "figure.stairs"
         case "strength", "traditional_strength", "functional_strength": return "dumbbell.fill"
-        case "core": return "figure.core.training"
-        case "hiit": return "flame.fill"
+        case "core", "hiit": return "flame.fill"
         case "yoga", "pilates", "flexibility", "cooldown", "mind_body", "recovery":
             return "figure.mind.and.body"
         case "cross_training", "mixed_cardio": return "figure.mixed.cardio"
         case "dance": return "figure.dance"
         case "boxing", "kickboxing", "martial_arts": return "figure.boxing"
-        default: return "figure.strengthtraining.traditional"
+        default: return "dumbbell.fill"
         }
     }
 

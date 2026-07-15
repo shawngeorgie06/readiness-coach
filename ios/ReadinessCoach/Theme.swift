@@ -10,6 +10,11 @@ extension Color {
     }
 }
 
+/// Bump when shipping device-visible UI fixes. Shown on Today + You.
+enum AppBuild {
+    static let stamp = "1.1.0"
+}
+
 /// Aether — warm, human, approachable dark. Every token explicit.
 enum Palette {
     static let canvas     = Color(hex: 0x150E0A)
