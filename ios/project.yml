@@ -33,3 +33,19 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         ENABLE_PREVIEWS: YES
+        # Physical device required for HealthKit; leave team empty so each
+        # developer picks Signing & Capabilities → Team in Xcode.
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+        SUPPORTS_MACCATALYST: NO
+    info:
+      path: Info.plist
+      properties:
+        NSHealthShareUsageDescription: Readiness Coach reads your heart rate, HRV, sleep, and workouts to compute readiness and coaching.
+        NSHealthUpdateUsageDescription: Readiness Coach does not write health data.
+        NSLocalNetworkUsageDescription: Readiness Coach reaches your Mac on the local network so the phone can sync Health data to your readiness API. Use your Mac’s LAN IP (not localhost).
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        UIBackgroundModes: [fetch]
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.readinesscoach.morningReadiness

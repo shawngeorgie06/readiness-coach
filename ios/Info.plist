@@ -39,6 +39,8 @@
 	<string>Readiness Coach reads your heart rate, HRV, sleep, and workouts to compute readiness and coaching.</string>
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>Readiness Coach does not write health data.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Readiness Coach reaches your Mac on the local network so the phone can sync Health data to your readiness API. Use your Mac’s LAN IP (not localhost).</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<!-- Permits plaintext HTTP only to loopback and RFC-1918 private LAN

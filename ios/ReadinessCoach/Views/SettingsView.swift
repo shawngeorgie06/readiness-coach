@@ -14,10 +14,19 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Connection") {
-                    LabeledField(label: "API URL", text: $settings.apiBaseURL, keyboard: .URL)
+                Section {
+                    LabeledField(
+                        label: "API URL",
+                        text: $settings.apiBaseURL,
+                        keyboard: .URL,
+                        placeholder: "http://192.168.x.x:4000"
+                    )
                     LabeledField(label: "API token", text: $settings.apiToken, secure: true)
                     LabeledField(label: "User ID", text: $settings.userId)
+                } header: {
+                    Text("Connection")
+                } footer: {
+                    Text("Physical iPhone: use your Mac’s Wi‑Fi IP and port (not localhost). Allow Local Network access if prompted.")
                 }
 
                 Section("Sync") {
@@ -162,18 +171,19 @@ struct LabeledField: View {
     @Binding var text: String
     var secure = false
     var keyboard: UIKeyboardType = .default
+    var placeholder: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label).font(.caption).foregroundStyle(.secondary)
             Group {
                 if secure {
-                    SecureField(label, text: $text)
+                    SecureField(placeholder ?? label, text: $text)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .font(.body.monospaced())
                 } else {
-                    TextField(label, text: $text)
+                    TextField(placeholder ?? label, text: $text)
                         .keyboardType(keyboard)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)

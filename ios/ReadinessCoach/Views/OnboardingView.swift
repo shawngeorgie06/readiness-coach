@@ -22,13 +22,29 @@ struct OnboardingView: View {
                     header
 
                     SectionCard(title: "1 · Connect your API") {
-                        LabeledField(label: "API URL", text: $settings.apiBaseURL, keyboard: .URL)
+                        LabeledField(
+                            label: "API URL",
+                            text: $settings.apiBaseURL,
+                            keyboard: .URL,
+                            placeholder: "http://192.168.x.x:4000"
+                        )
                         LabeledField(label: "API token", text: $settings.apiToken, secure: true)
                         DisclosureGroup("Advanced") {
                             LabeledField(label: "User ID", text: $settings.userId)
                                 .padding(.top, 4)
                         }
                         .font(.subheadline)
+
+                        if usesLoopbackURL {
+                            Label(
+                                "localhost / 127.0.0.1 only works in the Simulator. On a physical iPhone use your Mac’s LAN IP (e.g. http://192.168.1.20:4000).",
+                                systemImage: "iphone.gen3.badge.location"
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                        }
+
                         Button {
                             Task { await testConnection() }
                         } label: {
@@ -41,7 +57,7 @@ struct OnboardingView: View {
                         }
                         .buttonStyle(.bordered)
                         .disabled(isTesting || !settings.isConfigured)
-                        Text("The score is computed on your API. Point this at your backend and use a private bearer token.")
+                        Text("On a physical phone, the backend must be reachable on your Wi‑Fi. Use the Mac LAN IP — not localhost — and allow Local Network access when iOS asks.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
 
@@ -101,6 +117,15 @@ struct OnboardingView: View {
         case .some(false): return "xmark.circle.fill"
         case nil: return "bolt.horizontal.circle"
         }
+    }
+
+    /// True when the API URL targets the phone/Mac loopback — unreachable from a
+    /// physical iPhone talking to a backend on the developer's Mac.
+    private var usesLoopbackURL: Bool {
+        guard let host = URL(string: settings.apiBaseURL.trimmingCharacters(in: .whitespaces))?
+            .host?
+            .lowercased() else { return false }
+        return host == "localhost" || host == "127.0.0.1" || host == "::1"
     }
 
     private func testConnection() async {
