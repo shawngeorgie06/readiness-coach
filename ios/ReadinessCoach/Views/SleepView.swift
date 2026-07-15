@@ -1,8 +1,14 @@
 import SwiftUI
 import Charts
 
+/// Full sleep detail — last-night summary, stage charts, consistency.
+/// Presented as a sheet from Insights / Today (not a sixth tab).
 struct SleepView: View {
     @EnvironmentObject private var settings: AppSettings
+    @Environment(\.dismiss) private var dismiss
+
+    var showsDismiss = true
+
     @State private var response: SleepDetailResponse?
     @State private var error: String?
     @State private var isLoading = false
@@ -36,31 +42,55 @@ struct SleepView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
-                    if let nights, !nights.isEmpty {
-                        summaryCard(nights)
-                        SleepChartsSection()
-                    } else if isLoading {
-                        ProgressView().padding(.top, 60)
-                    } else {
-                        ContentUnavailableCompat(
-                            title: "No sleep data",
-                            message: "Sync from the Today tab to load sleep history.",
-                            systemImage: "bed.double"
-                        )
-                    }
-                    if let error {
-                        ErrorCard(message: error) { Task { await load() } }
-                    }
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(spacing: 16) {
+                header
+                if let nights, !nights.isEmpty {
+                    summaryCard(nights)
+                    SleepChartsSection()
+                } else if isLoading {
+                    ProgressView().padding(.top, 60)
+                } else {
+                    ContentUnavailableCompat(
+                        title: "No sleep data",
+                        message: "Sync from the Today tab to load sleep history. Apple Watch stages appear after HealthKit sync.",
+                        systemImage: "bed.double"
+                    )
                 }
-                .padding()
+                if let error {
+                    ErrorCard(message: error) { Task { await load() } }
+                }
             }
-            .navigationTitle("Sleep")
-            .task { await load() }
-            .refreshable { await load() }
+            .pageWidthLocked()
+            .padding()
         }
+        .verticalScrollLocked()
+        .screenBackground()
+        .navigationTitle("Sleep")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if showsDismiss {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .task { await load() }
+        .refreshable { await load() }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Eyebrow(text: "Rest", color: Palette.lavender)
+            Text("Sleep detail")
+                .font(.system(size: 28, weight: .bold, design: .rounded))
+                .foregroundStyle(Palette.textPrimary)
+            Text("Duration, stages (deep · REM · core · awake), and consistency.")
+                .font(.caption)
+                .foregroundStyle(Palette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// Nights that actually have sleep recorded.
@@ -76,20 +106,49 @@ struct SleepView: View {
             SectionCard(title: "Last night") {
                 Text("You slept \(fmt(last.durationHours))h — \(durationQualifier(last.durationHours)) your \(Int(Self.needHours))h target.")
                     .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Palette.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
                 if let bed = clockTime(last.sleepStart), let wake = clockTime(last.sleepEnd) {
                     Label("Asleep \(bed) → woke \(wake)", systemImage: "bed.double")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(Palette.textSecondary)
                 }
                 Text("vs your \(recent.count)-day average of \(fmt(avg))h.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(Palette.textSecondary)
                 consistencyRow(nights)
-                HStack(spacing: 6) {
-                    Text("Deep + REM \(fmt(last.restorativeHours))h — the recovery stages.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    InfoBadge(title: "Sleep stages",
-                              message: "Deep and REM are when your body and brain recover. Core is lighter sleep; Awake is brief wake-ups. Restorative = deep + REM.")
-                }
+                stageBreakdown(last)
             }
+        }
+    }
+
+    private func stageBreakdown(_ last: SleepDay) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Text("Stages")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Palette.textSecondary)
+                InfoBadge(title: "Sleep stages",
+                          message: "Deep and REM are when your body and brain recover. Core is lighter sleep; Awake is brief wake-ups. Restorative = deep + REM.")
+            }
+            stageRow("Deep", last.stages.deep, Palette.lavender)
+            stageRow("REM", last.stages.rem, Color.purple)
+            stageRow("Core", last.stages.core, Color.blue)
+            stageRow("Awake", last.stages.awake, Palette.warn)
+            Text("Restorative (deep + REM): \(fmt(last.restorativeHours))h")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(Palette.textPrimary)
+                .padding(.top, 2)
+        }
+        .padding(.top, 4)
+    }
+
+    private func stageRow(_ name: String, _ hours: Double, _ color: Color) -> some View {
+        HStack {
+            Circle().fill(color).frame(width: 8, height: 8)
+            Text(name).font(.subheadline).foregroundStyle(Palette.textPrimary)
+            Spacer()
+            Text("\(fmt(hours))h")
+                .font(.subheadline.monospacedDigit().weight(.semibold))
+                .foregroundStyle(Palette.textPrimary)
         }
     }
 
@@ -106,7 +165,8 @@ struct SleepView: View {
                 : std <= 90 ? "a little irregular" : "irregular"
             HStack(spacing: 6) {
                 Text("Schedule: \(label) (±\(std) min this week).")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(Palette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 InfoBadge(title: "Sleep consistency",
                           message: "Going to bed and waking at similar times helps recovery. This is how much your bedtime varied over the past week.")
             }
@@ -128,9 +188,7 @@ struct SleepView: View {
     private func fmt(_ value: Double) -> String { String(format: "%.1f", value) }
 }
 
-/// Total-sleep and stage-breakdown charts, shared by the Sleep tab and folded into
-/// Insights (`TrendsView`). Fetches its own `SleepDetailResponse` so callers need no
-/// extra plumbing.
+/// Total-sleep and stage-breakdown charts for the Sleep detail screen.
 struct SleepChartsSection: View {
     @EnvironmentObject private var settings: AppSettings
     @State private var response: SleepDetailResponse?
@@ -138,7 +196,7 @@ struct SleepChartsSection: View {
     @State private var isLoading = false
 
     private let stageColors: [(name: String, color: Color)] = [
-        ("Deep", .indigo), ("REM", .purple), ("Core", .blue), ("Awake", .orange),
+        ("Deep", Palette.lavender), ("REM", .purple), ("Core", .blue), ("Awake", Palette.warn),
     ]
 
     var body: some View {
@@ -166,16 +224,17 @@ struct SleepChartsSection: View {
                     x: .value("Date", ChartDate.day(day.date)),
                     y: .value("Hours", day.durationHours)
                 )
-                .foregroundStyle(.blue.opacity(0.5))
+                .foregroundStyle(Palette.lavender.opacity(0.45))
                 BarMark(
                     x: .value("Date", ChartDate.day(day.date)),
                     y: .value("Restorative", day.restorativeHours)
                 )
-                .foregroundStyle(.indigo)
+                .foregroundStyle(Palette.lavender)
             }
             .frame(height: 200)
-            Text("Blue is total sleep; darker is deep + REM (restorative).")
-                .font(.caption).foregroundStyle(.secondary)
+            Text("Light bars are total sleep; solid is deep + REM (restorative).")
+                .font(.caption).foregroundStyle(Palette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -183,22 +242,23 @@ struct SleepChartsSection: View {
         SectionCard(title: "Stages by night") {
             Chart {
                 ForEach(nights) { day in
-                    stageBar(day, "Deep", day.stages.deep, .indigo)
-                    stageBar(day, "REM", day.stages.rem, .purple)
-                    stageBar(day, "Core", day.stages.core, .blue)
-                    stageBar(day, "Awake", day.stages.awake, .orange)
+                    stageBar(day, "Deep", day.stages.deep)
+                    stageBar(day, "REM", day.stages.rem)
+                    stageBar(day, "Core", day.stages.core)
+                    stageBar(day, "Awake", day.stages.awake)
                 }
             }
             .chartForegroundStyleScale(domain: stageColors.map(\.name), range: stageColors.map(\.color))
             .frame(height: 220)
             if let latest = nights.last {
                 Text("Last night — deep \(fmt(latest.stages.deep))h · REM \(fmt(latest.stages.rem))h · core \(fmt(latest.stages.core))h · awake \(fmt(latest.stages.awake))h")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(Palette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
 
-    private func stageBar(_ day: SleepDay, _ name: String, _ hours: Double, _ color: Color) -> some ChartContent {
+    private func stageBar(_ day: SleepDay, _ name: String, _ hours: Double) -> some ChartContent {
         BarMark(
             x: .value("Date", ChartDate.day(day.date)),
             y: .value("Hours", hours)

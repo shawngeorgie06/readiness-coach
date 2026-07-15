@@ -7,6 +7,7 @@ struct TodayView: View {
 
     @State private var showAsk = false
     @State private var showSettings = false
+    @State private var showSleepDetail = false
     @State private var pillarInfo: PillarInfo?
     @State private var recent: [ReadinessPoint] = []
     @State private var hrv: Double?
@@ -64,6 +65,9 @@ struct TodayView: View {
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showAsk) { NavigationStack { AskCoachView() } }
             .sheet(isPresented: $showSettings) { NavigationStack { SettingsView() } }
+            .sheet(isPresented: $showSleepDetail) {
+                NavigationStack { SleepView(showsDismiss: true) }
+            }
             .sheet(item: $pillarInfo) { PillarDetailSheet(info: $0) }
             .task { await loadRecent(); await loadMiniStats() }
         }
@@ -242,7 +246,8 @@ struct TodayView: View {
             HStack(spacing: 12) {
                 metricTileButton("Sleep", "35%",
                     "Last night's duration and quality vs your ~8h need, plus recent sleep debt and consistency.",
-                    pillars.sleep) {
+                    pillars.sleep,
+                    opensSleep: true) {
                     MetricTile(label: "Sleep",
                                value: sleepHours.map { fmt1($0) } ?? "—", unit: "h",
                                delta: sleepDelta, fraction: (sleepHours ?? 0) / 8, tone: .sleep)
@@ -268,9 +273,14 @@ struct TodayView: View {
     }
 
     private func metricTileButton(_ name: String, _ weight: String, _ description: String, _ pillar: PillarScore,
+                                   opensSleep: Bool = false,
                                    @ViewBuilder tile: () -> MetricTile) -> some View {
         Button {
-            pillarInfo = PillarInfo(name: name, weight: weight, description: description, pillar: pillar)
+            if opensSleep {
+                showSleepDetail = true
+            } else {
+                pillarInfo = PillarInfo(name: name, weight: weight, description: description, pillar: pillar)
+            }
         } label: {
             tile()
                 .frame(maxWidth: .infinity)
@@ -278,7 +288,7 @@ struct TodayView: View {
         }
         .buttonStyle(.plain)
         .frame(maxWidth: .infinity)
-        .accessibilityHint("Shows more about \(name)")
+        .accessibilityHint(opensSleep ? "Opens sleep stages and history" : "Shows more about \(name)")
     }
 
     private func advisor(_ note: AdvisorNote) -> some View {
