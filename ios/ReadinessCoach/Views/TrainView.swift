@@ -7,6 +7,7 @@ struct TrainView: View {
     @State private var error: String?
     @State private var isLoading = false
     @State private var strainSelection: Date?
+    @State private var selectedWorkout: WorkoutDTO?
 
     var body: some View {
         NavigationStack {
@@ -29,11 +30,14 @@ struct TrainView: View {
                         ErrorCard(message: error) { Task { await load() } }
                     }
                 }
-                .frame(maxWidth: .infinity)
+                .pageWidthLocked()
                 .padding()
             }
             .verticalScrollLocked()
             .navigationTitle("Activity")
+            .sheet(item: $selectedWorkout) { workout in
+                WorkoutDetailSheet(workout: workout)
+            }
             .task { await load() }
             .refreshable { await load() }
         }
@@ -133,23 +137,33 @@ struct TrainView: View {
 
             ScrubDetailBanner(
                 date: strainSelection,
-                placeholder: "Tap or drag a bar to see that day's strain",
-                lines: strainLines(for: strainSelection, in: series)
+                placeholder: "Tap a bar to see that day's total strain",
+                lines: strainLines(for: strainSelection, in: series),
+                note: "Strain 0–21 rates how hard training was that day from heart rate and duration."
             )
+        }
+        .onAppear {
+            if strainSelection == nil, let last = dates.last {
+                strainSelection = last
+            }
         }
     }
 
     private func workoutsCard(_ response: TrainResponse) -> some View {
         SectionCard(title: "Workouts") {
             HStack(spacing: 6) {
+                Text("Tap a workout for full details").font(.caption).foregroundStyle(.secondary)
+                Spacer()
                 Text("Strain 0–21").font(.caption2).foregroundStyle(.secondary)
                 InfoBadge(title: "Strain", message: "Strain rates how hard a session was, 0–21, from heart rate and duration.")
-                Spacer()
-                Text("HR zones").font(.caption2).foregroundStyle(.secondary)
-                InfoBadge(title: "Heart-rate zones", message: "Zones are shares of your session spent at rising heart rates — Easy is a warm-up pace, Max is near your ceiling.")
             }
             ForEach(response.data) { workout in
-                WorkoutRow(workout: workout)
+                Button {
+                    selectedWorkout = workout
+                } label: {
+                    WorkoutRow(workout: workout)
+                }
+                .buttonStyle(.plain)
                 if workout.id != response.data.last?.id { Divider() }
             }
         }
@@ -187,24 +201,31 @@ struct WorkoutRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(WorkoutSport.title(forKey: workout.sport))
                         .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
                     Text(subtitle).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 2) {
                     Text("Strain \(Int(workout.strain.rounded())) · \(strainBand(workout.strain))")
                         .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(.primary)
                     if !hrText.isEmpty {
                         Text(hrText).font(.caption).foregroundStyle(.secondary)
                     }
                 }
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
             }
             if let zones = workout.hrZonesMin, zones.contains(where: { $0 > 0 }) {
                 zoneBar(zones)
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(WorkoutSport.title(forKey: workout.sport)), \(subtitle), strain \(Int(workout.strain.rounded()))")
+        .accessibilityHint("Shows full workout details")
     }
 
     private func zoneBar(_ zones: [Double]) -> some View {
@@ -243,5 +264,72 @@ struct WorkoutRow: View {
 
     private func fmtMin(_ value: Double) -> String {
         value == value.rounded() ? String(Int(value)) : String(format: "%.1f", value)
+    }
+}
+
+struct WorkoutDetailSheet: View {
+    let workout: WorkoutDTO
+    @Environment(\.dismiss) private var dismiss
+
+    private static let isoParser: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Label(WorkoutSport.title(forKey: workout.sport),
+                          systemImage: WorkoutSport.symbolName(forKey: workout.sport))
+                        .font(.headline)
+                    Text(WorkoutSport.detailBlurb(forKey: workout.sport))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Session") {
+                    LabeledContent("When", value: whenText)
+                    LabeledContent("Duration", value: "\(Int(workout.durationMin.rounded())) min")
+                    if let cal = workout.calories {
+                        LabeledContent("Calories", value: "\(Int(cal.rounded())) kcal")
+                    }
+                }
+
+                Section("Effort") {
+                    LabeledContent("Strain", value: "\(Int(workout.strain.rounded())) / 21")
+                    if let avg = workout.avgHrBpm {
+                        LabeledContent("Avg heart rate", value: "\(Int(avg.rounded())) bpm")
+                    }
+                    if let max = workout.maxHrBpm {
+                        LabeledContent("Max heart rate", value: "\(Int(max.rounded())) bpm")
+                    }
+                }
+
+                if let zones = workout.hrZonesMin, zones.contains(where: { $0 > 0 }) {
+                    Section("Heart-rate zones") {
+                        let names = ["Easy", "Light", "Moderate", "Hard", "Max"]
+                        ForEach(Array(zones.enumerated()), id: \.offset) { index, minutes in
+                            if minutes > 0 {
+                                LabeledContent(names[min(index, 4)], value: String(format: "%.0f min", minutes))
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Workout")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private var whenText: String {
+        guard let start = Self.isoParser.date(from: workout.startAt) else { return workout.startAt }
+        return start.formatted(.dateTime.weekday(.wide).month().day().hour().minute())
     }
 }

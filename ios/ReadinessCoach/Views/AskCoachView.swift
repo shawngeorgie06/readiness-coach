@@ -56,6 +56,7 @@ struct AskCoachView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .pageWidthLocked()
                 .padding()
             }
             .verticalScrollLocked()

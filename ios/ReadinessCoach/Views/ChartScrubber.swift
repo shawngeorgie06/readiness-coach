@@ -1,8 +1,8 @@
 import SwiftUI
 import Charts
+import UIKit
 
-/// Snaps a continuously-selected x-date (from chart scrubbing) to the nearest
-/// plotted date, so the marker and readout land on a real data point.
+/// Snaps a continuously-selected x-date to the nearest plotted day.
 func nearestDate(_ target: Date?, in dates: [Date]) -> Date? {
     guard let target else { return nil }
     return dates.min(by: {
@@ -10,8 +10,6 @@ func nearestDate(_ target: Date?, in dates: [Date]) -> Date? {
     })
 }
 
-/// Floating readout drawn at the selected point (kept thin — prefer
-/// `ScrubDetailBanner` below the chart for the main copy so redraws stay light).
 struct ScrubReadout: View {
     let date: Date
     let lines: [String]
@@ -26,22 +24,27 @@ struct ScrubReadout: View {
     }
 }
 
-/// Detail block under a chart. Prefer this over heavy in-chart annotations —
-/// updating a Label is much cheaper than rebuilding Chart annotations while scrubbing.
+/// Detail under a chart: weekday + readable numbers + optional plain-language note.
 struct ScrubDetailBanner: View {
     let date: Date?
     let placeholder: String
     let lines: [String]
+    var note: String? = nil
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             if let date {
-                Text(date, format: .dateTime.weekday(.wide).month(.abbreviated).day())
+                Text(date, format: .dateTime.weekday(.wide).month(.wide).day().year())
                     .font(.subheadline.weight(.semibold))
                 ForEach(lines, id: \.self) { line in
                     Text(line)
                         .font(.subheadline.monospacedDigit())
-                        .foregroundStyle(.primary)
+                }
+                if let note, !note.isEmpty {
+                    Text(note)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             } else {
                 Text(placeholder)
@@ -50,13 +53,14 @@ struct ScrubDetailBanner: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, 4)
+        .padding(12)
+        .background(Color(.tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        .padding(.top, 6)
         .accessibilityElement(children: .combine)
     }
 }
 
-/// Transparent overlay that maps finger x → nearest plotted day.
-/// `minimumDistance: 0` so a tap (not only a drag) selects a day.
+/// Finger → day mapping. Publishes only when the day changes (keeps scrubbing smooth).
 struct ChartDayScrubOverlay: View {
     let proxy: ChartProxy
     let dates: [Date]
@@ -67,13 +71,12 @@ struct ChartDayScrubOverlay: View {
             Rectangle()
                 .fill(Color.clear)
                 .contentShape(Rectangle())
-                .gesture(
+                .highPriorityGesture(
                     DragGesture(minimumDistance: 0)
                         .onChanged { value in
                             guard let raw: Date = proxy.value(atX: value.location.x),
                                   let snapped = nearestDate(raw, in: dates)
                             else { return }
-                            // Only publish when the day changes — avoids laggy full redraws.
                             if snapped != selection {
                                 var t = Transaction()
                                 t.disablesAnimations = true
@@ -86,9 +89,32 @@ struct ChartDayScrubOverlay: View {
 }
 
 extension View {
-    /// Keeps ScrollViews vertical-only so chart scrubbing can't shove the page off-center.
+    /// Vertical scrolling only — blocks the left/right page drift on Today and elsewhere.
     func verticalScrollLocked() -> some View {
         self
             .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            .scrollClipDisabled(false)
+            .clipped()
     }
+
+    /// Pin content to the screen width so charts can’t widen the page and enable sideways drag.
+    func pageWidthLocked() -> some View {
+        self
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .clipped()
+    }
+}
+
+enum ScrollLockBootstrap {
+    /// Call once at launch. Directional lock + no horizontal bounce on every UIScrollView.
+    static func apply() {
+        UIScrollView.appearance().alwaysBounceHorizontal = false
+        UIScrollView.appearance().isDirectionalLockEnabled = true
+        UIScrollView.appearance().contentInsetAdjustmentBehavior = .automatic
+    }
+}
+
+/// Shared smooth line styling used across Insights / Body / Activity charts.
+enum ChartStyle {
+    static let smooth: InterpolationMethod = .catmullRom
 }

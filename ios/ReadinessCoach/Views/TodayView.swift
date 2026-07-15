@@ -46,6 +46,7 @@ struct TodayView: View {
                     }
                 }
                 .frame(maxWidth: .infinity)
+                .pageWidthLocked()
                 .padding()
             }
             .verticalScrollLocked()
@@ -111,10 +112,13 @@ struct TodayView: View {
             if let count = sync.uploadingCount {
                 Label("Uploading \(count) samples…", systemImage: "arrow.up.circle")
                     .font(.caption).foregroundStyle(.secondary)
-            } else if let synced = settings.lastSyncRelativeText {
+            } else             if let synced = settings.lastSyncRelativeText {
                 Text("Last synced \(synced)")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Text("App update \(AppBuild.stamp) · pull main & Run to install")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
             if !today.overridesApplied.isEmpty {
                 Text("Overrides: \(today.overridesApplied.joined(separator: ", "))")
                     .font(.caption)

@@ -57,13 +57,27 @@ enum WorkoutSport {
         case .waterFitness, .waterPolo, .waterSports: return "water"
         case .wheelchairRunPace, .wheelchairWalkPace: return "wheelchair"
         case .other: return "other"
-        default: return "other"
+        default:
+            return "hk_\(type.rawValue)"
         }
     }
 
-    /// Plain-language label for lists (Activity / Train).
+    /// Prefer a Human HealthKit type; fall back to raw-value keys from older syncs.
     static func title(forKey key: String) -> String {
-        switch key.lowercased() {
+        let lowered = key.lowercased()
+        if lowered.hasPrefix("hk_"), let raw = UInt(lowered.dropFirst(3)),
+           let type = HKWorkoutActivityType(rawValue: raw) {
+            return title(for: type)
+        }
+        return titleFromKey(lowered)
+    }
+
+    static func title(for type: HKWorkoutActivityType) -> String {
+        titleFromKey(key(for: type))
+    }
+
+    private static func titleFromKey(_ key: String) -> String {
+        switch key {
         case "running": return "Running"
         case "walking": return "Walking"
         case "cycling": return "Cycling"
@@ -114,8 +128,12 @@ enum WorkoutSport {
         case "track": return "Track & Field"
         case "water": return "Water Sports"
         case "wheelchair": return "Wheelchair"
-        case "other": return "Workout"
+        case "other", "hk_3000":
+            return "Custom Workout"
         default:
+            if key.hasPrefix("hk_") {
+                return "Workout"
+            }
             return key
                 .replacingOccurrences(of: "_", with: " ")
                 .split(separator: " ")
@@ -125,7 +143,16 @@ enum WorkoutSport {
     }
 
     static func symbolName(forKey key: String) -> String {
-        switch key.lowercased() {
+        let lowered = key.lowercased()
+        let resolved: String = {
+            if lowered.hasPrefix("hk_"), let raw = UInt(lowered.dropFirst(3)),
+               let type = HKWorkoutActivityType(rawValue: raw) {
+                return key(for: type)
+            }
+            return lowered
+        }()
+
+        switch resolved {
         case "running": return "figure.run"
         case "walking": return "figure.walk"
         case "cycling": return "bicycle"
@@ -155,7 +182,17 @@ enum WorkoutSport {
         case "climbing": return "figure.climbing"
         case "water": return "drop.fill"
         case "wheelchair": return "figure.roll"
-        default: return "figure.walk"
+        default: return "figure.strengthtraining.traditional"
+        }
+    }
+
+    static func detailBlurb(forKey key: String) -> String {
+        let title = title(forKey: key)
+        switch key.lowercased() {
+        case "other", "hk_3000":
+            return "Apple Health recorded this as a generic workout (no specific sport). Duration, heart rate, calories, and strain below still come from that session."
+        default:
+            return "Pulled from Apple Health as \(title). Heart rate, calories, and strain are measured for this session."
         }
     }
 }

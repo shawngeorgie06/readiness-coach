@@ -75,7 +75,7 @@ struct SleepView: View {
                         ErrorCard(message: error) { Task { await load() } }
                     }
                 }
-                .frame(maxWidth: .infinity)
+                .pageWidthLocked()
                 .padding()
             }
             .verticalScrollLocked()
