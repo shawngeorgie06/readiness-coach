@@ -17,7 +17,7 @@ struct YouView: View {
                     profileCard
                     preferencesCard
                     accountCard
-                    Text("Readiness Coach · v1.0")
+                    Text("Readiness Coach · v\(AppBuild.stamp)")
                         .font(.caption2).foregroundStyle(Palette.textTertiary)
                         .frame(maxWidth: .infinity)
                         .padding(.top, 4)
