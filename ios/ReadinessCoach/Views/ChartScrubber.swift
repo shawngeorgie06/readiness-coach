@@ -100,6 +100,62 @@ extension View {
     }
 }
 
+/// Vertical-only page scroll. Pins content width to the viewport so Charts / wide
+/// layouts can’t grow `contentSize` and let the page rubber-band left/right.
+struct VerticalPageScroll<Content: View>: View {
+    var onRefresh: (() async -> Void)? = nil
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        GeometryReader { geo in
+            let scroll = ScrollView(.vertical, showsIndicators: true) {
+                content
+                    .frame(width: geo.size.width, alignment: .topLeading)
+            }
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            .background(HorizontalScrollKiller())
+
+            if let onRefresh {
+                scroll.refreshable { await onRefresh() }
+            } else {
+                scroll
+            }
+        }
+    }
+}
+
+/// Walks up to the hosting UIScrollView and keeps contentSize.width == bounds.width.
+private struct HorizontalScrollKiller: UIViewRepresentable {
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(frame: .zero)
+        view.isUserInteractionEnabled = false
+        view.backgroundColor = .clear
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        DispatchQueue.main.async {
+            Self.lock(from: uiView)
+        }
+    }
+
+    private static func lock(from view: UIView) {
+        var node: UIView? = view
+        while let current = node {
+            if let scroll = current as? UIScrollView {
+                scroll.alwaysBounceHorizontal = false
+                scroll.isDirectionalLockEnabled = true
+                scroll.showsHorizontalScrollIndicator = false
+                if scroll.contentSize.width > scroll.bounds.width, scroll.bounds.width > 0 {
+                    scroll.contentSize.width = scroll.bounds.width
+                }
+                return
+            }
+            node = current.superview
+        }
+    }
+}
+
 enum ScrollLockBootstrap {
     static func apply() {
         UIScrollView.appearance().alwaysBounceHorizontal = false

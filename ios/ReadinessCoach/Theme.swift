@@ -12,7 +12,7 @@ extension Color {
 
 /// Bump when shipping device-visible UI fixes. Shown on Today + You.
 enum AppBuild {
-    static let stamp = "1.1.0"
+    static let stamp = "1.1.1"
 }
 
 /// Aether — warm, human, approachable dark. Every token explicit.
@@ -93,6 +93,7 @@ private struct HeroCardModifier: ViewModifier {
                     )
             )
             .overlay(RoundedRectangle(cornerRadius: 32, style: .continuous).strokeBorder(Palette.accent.opacity(0.22), lineWidth: 1))
+            .compositingGroup()
             .shadow(color: .black.opacity(0.34), radius: 18, y: 8)
     }
 }

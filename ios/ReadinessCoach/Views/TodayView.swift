@@ -29,7 +29,11 @@ struct TodayView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView(.vertical, showsIndicators: true) {
+            VerticalPageScroll(onRefresh: {
+                await sync.syncNow(settings)
+                await loadRecent()
+                await loadMiniStats()
+            }) {
                 VStack(spacing: 16) {
                     header
                     if let today = sync.today {
@@ -51,16 +55,14 @@ struct TodayView: View {
                         }
                     }
                 }
-                .pageWidthLocked()
-                .padding()
+                .padding(.horizontal, 16)
+                .padding(.vertical, 16)
             }
-            .verticalScrollLocked()
             .screenBackground()
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showAsk) { NavigationStack { AskCoachView() } }
             .sheet(isPresented: $showSettings) { NavigationStack { SettingsView() } }
             .sheet(item: $pillarInfo) { PillarDetailSheet(info: $0) }
-            .refreshable { await sync.syncNow(settings); await loadRecent(); await loadMiniStats() }
             .task { await loadRecent(); await loadMiniStats() }
         }
     }
@@ -132,7 +134,10 @@ struct TodayView: View {
             }
             ReadinessRing(readiness: today.readiness, decision: today.decision)
             Text(today.decision.meaning).font(.system(.body, design: .rounded))
-                .foregroundStyle(Palette.textSecondary).multilineTextAlignment(.center)
+                .foregroundStyle(Palette.textSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity)
             HStack(spacing: 8) {
                 miniStat("HRV", hrv.map { "\(Int($0.rounded()))" } ?? "—", "ms")
                 miniStat("RHR", rhr.map { "\(Int($0.rounded()))" } ?? "—", "bpm")
@@ -149,9 +154,10 @@ struct TodayView: View {
             Text("Last synced \(synced)")
                 .font(.caption2).foregroundStyle(Palette.textSecondary)
         }
-        Text("App update \(AppBuild.stamp) — if You still says v1.0, this build isn’t installed")
+        Text("App update \(AppBuild.stamp)")
             .font(.caption2)
             .foregroundStyle(Palette.accent)
+            .frame(maxWidth: .infinity, alignment: .leading)
         if !today.overridesApplied.isEmpty {
             Text("Overrides: \(today.overridesApplied.joined(separator: ", "))")
                 .font(.caption2)
@@ -272,14 +278,20 @@ struct TodayView: View {
 
     private func banner(_ title: String, _ message: String, color: Color, icon: String,
                         infoTitle: String, infoMessage: String) -> some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .top, spacing: 8) {
             Image(systemName: icon).font(.caption).foregroundStyle(color)
-            Text(title).font(.caption.weight(.semibold)).foregroundStyle(color)
-            Text(message).font(.caption2).foregroundStyle(Palette.textSecondary).lineLimit(2)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.caption.weight(.semibold)).foregroundStyle(color)
+                Text(message)
+                    .font(.caption2)
+                    .foregroundStyle(Palette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Spacer(minLength: 4)
             InfoBadge(title: infoTitle, message: infoMessage)
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(color.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(color.opacity(0.22), lineWidth: 1))
     }
