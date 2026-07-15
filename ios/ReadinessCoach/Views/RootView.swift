@@ -8,19 +8,23 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        if settings.isReady {
-            MainTabView()
-                .onChange(of: scenePhase) { _, phase in
-                    if phase == .active { Task { await sync.autoSync(settings) } }
-                    else if phase == .background { BackgroundRefreshService.schedule(for: settings) }
-                }
-                .task {
-                    await sync.autoSync(settings)
-                    BackgroundRefreshService.schedule(for: settings)
-                }
-        } else {
-            OnboardingView()
+        Group {
+            if settings.isReady {
+                MainTabView()
+                    .onChange(of: scenePhase) { _, phase in
+                        if phase == .active { Task { await sync.autoSync(settings) } }
+                        else if phase == .background { BackgroundRefreshService.schedule(for: settings) }
+                    }
+                    .task {
+                        await sync.autoSync(settings)
+                        BackgroundRefreshService.schedule(for: settings)
+                    }
+            } else {
+                OnboardingView()
+            }
         }
+        .preferredColorScheme(.dark)
+        .tint(Palette.accent)
     }
 }
 
@@ -54,13 +58,7 @@ enum ChartDate {
 // MARK: - Shared UI
 
 extension Decision {
-    var tint: Color {
-        switch self {
-        case .push: return .green
-        case .maintain: return .yellow
-        case .recover: return .red
-        }
-    }
+    var tint: Color { Palette.decisionColor(self) }
 
     var systemImage: String {
         switch self {
@@ -98,25 +96,26 @@ struct DecisionChip: View {
 struct ReadinessRing: View {
     let readiness: Double
     let decision: Decision
+    @State private var animated = false
 
     var body: some View {
+        let fraction = min(max(readiness / 100, 0), 1)
+        let color = Palette.decisionColor(decision)
         ZStack {
-            Circle()
-                .stroke(Color.secondary.opacity(0.15), lineWidth: 14)
-            Circle()
-                .trim(from: 0, to: min(max(readiness / 100, 0), 1))
-                .stroke(decision.tint, style: StrokeStyle(lineWidth: 14, lineCap: .round))
+            Circle().stroke(Palette.textPrimary.opacity(0.08), lineWidth: 10)
+            Circle().trim(from: 0, to: animated ? fraction : 0)
+                .stroke(color, style: StrokeStyle(lineWidth: 10, lineCap: .round))
                 .rotationEffect(.degrees(-90))
+                .shadow(color: color.opacity(0.5), radius: 12)
             VStack(spacing: 2) {
                 Text("\(Int(readiness.rounded()))")
-                    .font(.system(size: 44, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                Text("readiness")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 64, weight: .semibold, design: .rounded)).monospacedDigit()
+                    .foregroundStyle(Palette.textPrimary)
+                Eyebrow(text: "Score")
             }
         }
-        .frame(width: 160, height: 160)
+        .frame(width: 210, height: 210)
+        .onAppear { withAnimation(.easeOut(duration: 0.9)) { animated = true } }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Readiness \(Int(readiness.rounded())), decision \(decision.title)")
     }
@@ -128,12 +127,10 @@ struct SectionCard<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(title)
-                .font(.headline)
+            Eyebrow(text: title)
             content
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16))
+        .card()
     }
 }
