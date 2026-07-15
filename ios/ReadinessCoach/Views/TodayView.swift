@@ -109,8 +109,6 @@ struct TodayView: View {
                     Eyebrow(text: "Readiness")
                     Text("Calibrated from sleep, HRV & load").font(.caption).foregroundStyle(Palette.textSecondary)
                 }
-                Spacer()
-                Pill(today.decision.title, tone: today.decision == .push ? .good : today.decision == .maintain ? .warn : .accent)
             }
             ReadinessRing(readiness: today.readiness, decision: today.decision)
             DecisionChip(decision: today.decision)
@@ -169,28 +167,24 @@ struct TodayView: View {
         .background(Palette.surfaceHi, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
-    /// 2-column grid of Strain / Recovery / Sleep-debt tiles derived from the pillar scores.
-    /// Strain and Sleep debt are framed as "cost" metrics, so they're the inverse of the
-    /// (higher-is-better) load/sleep pillar scores; Recovery reads directly off its score.
+    /// 2-column grid of Load / Recovery / Sleep tiles, each showing its real pillar score
+    /// (0–100, higher is better) so the tile number always matches its PillarDetailSheet.
     private func metricTiles(_ pillars: Pillars) -> some View {
-        let strain = min(max(100 - pillars.load.score, 0), 100)
-        let sleepDebt = min(max(100 - pillars.sleep.score, 0), 100)
-        let recovery = min(max(pillars.recovery.score, 0), 100)
-        return LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
             metricTileButton("Load", "25%",
                 "Recent training strain and the acute:chronic ratio — how hard you've pushed lately vs your norm.",
                 pillars.load) {
-                MetricTile(label: "Strain", value: "\(Int(strain.rounded()))", fraction: strain / 100, tone: .strain)
+                MetricTile(label: "Load", value: "\(Int(pillars.load.score.rounded()))", fraction: pillars.load.score / 100, tone: .strain)
             }
             metricTileButton("Recovery", "40%",
                 "HRV and resting heart rate vs your 30-day baseline — the strongest readiness signal.",
                 pillars.recovery) {
-                MetricTile(label: "Recovery", value: "\(Int(recovery.rounded()))", fraction: recovery / 100, tone: .recovery)
+                MetricTile(label: "Recovery", value: "\(Int(pillars.recovery.score.rounded()))", fraction: pillars.recovery.score / 100, tone: .recovery)
             }
             metricTileButton("Sleep", "35%",
                 "Last night's duration and quality vs your ~8h need, plus recent sleep debt and consistency.",
                 pillars.sleep) {
-                MetricTile(label: "Sleep debt", value: "\(Int(sleepDebt.rounded()))", fraction: sleepDebt / 100, tone: .sleep)
+                MetricTile(label: "Sleep", value: "\(Int(pillars.sleep.score.rounded()))", fraction: pillars.sleep.score / 100, tone: .sleep)
             }
         }
     }
