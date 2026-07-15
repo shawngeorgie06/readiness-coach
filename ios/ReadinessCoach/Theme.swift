@@ -118,6 +118,8 @@ private struct HeroCardModifier: ViewModifier {
                     .overlay(RoundedRectangle(cornerRadius: 32, style: .continuous).strokeBorder(Palette.accent.opacity(0.22), lineWidth: 1))
                     .shadow(color: .black.opacity(0.34), radius: 18, y: 8)
             }
+            // Keep ring / type from painting past the rounded hero box.
+            .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
     }
 }
 
