@@ -104,6 +104,7 @@ export async function applySync(
         strain,
       },
       update: {
+        sport: workout.sport,
         durationMin: workout.durationMin,
         avgHrBpm: workout.avgHrBpm,
         calories: workout.calories,

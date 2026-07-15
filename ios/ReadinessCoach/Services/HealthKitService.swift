@@ -138,7 +138,7 @@ final class HealthKitService {
             result.append(
                 SyncWorkout(
                     hkUuid: workout.uuid.uuidString,
-                    sport: Self.sport(for: workout.workoutActivityType),
+                    sport: WorkoutSport.key(for: workout.workoutActivityType),
                     startAt: DateFormatting.iso(workout.startDate),
                     endAt: DateFormatting.iso(workout.endDate),
                     durationMin: workout.duration / 60,
@@ -184,24 +184,6 @@ final class HealthKitService {
                 }
             }
             store.execute(query)
-        }
-    }
-
-    private static func sport(for type: HKWorkoutActivityType) -> String {
-        switch type {
-        case .running: return "running"
-        case .walking: return "walking"
-        case .cycling: return "cycling"
-        case .hiking: return "hiking"
-        case .swimming: return "swimming"
-        case .rowing: return "rowing"
-        case .elliptical: return "elliptical"
-        case .traditionalStrengthTraining, .functionalStrengthTraining: return "strength"
-        case .highIntensityIntervalTraining: return "hiit"
-        case .yoga: return "yoga"
-        case .coreTraining: return "core"
-        case .crossTraining: return "cross_training"
-        default: return "other"
         }
     }
 }

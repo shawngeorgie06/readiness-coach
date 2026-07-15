@@ -29,7 +29,7 @@ struct TodayView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
+            ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 16) {
                     header
                     if let today = sync.today {
@@ -51,8 +51,10 @@ struct TodayView: View {
                         }
                     }
                 }
+                .pageWidthLocked()
                 .padding()
             }
+            .verticalScrollLocked()
             .screenBackground()
             .toolbar(.hidden, for: .navigationBar)
             .sheet(isPresented: $showAsk) { NavigationStack { AskCoachView() } }
@@ -147,6 +149,9 @@ struct TodayView: View {
             Text("Last synced \(synced)")
                 .font(.caption2).foregroundStyle(Palette.textSecondary)
         }
+        Text("App update \(AppBuild.stamp)")
+            .font(.caption2)
+            .foregroundStyle(Palette.textTertiary)
         if !today.overridesApplied.isEmpty {
             Text("Overrides: \(today.overridesApplied.joined(separator: ", "))")
                 .font(.caption2)
@@ -188,24 +193,31 @@ struct TodayView: View {
         .background(Palette.surfaceHi, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
-    /// 2-column grid of Load / Recovery / Sleep tiles, each showing its real pillar score
-    /// (0–100, higher is better) so the tile number always matches its PillarDetailSheet.
-    /// 2×2 grid matching the prototype: real Strain (0–21) and Sleep (hours) alongside the
-    /// Recovery and Load pillar scores (which drill into their detail sheets, same number).
+    /// 2×2 grid: Strain + Sleep + Recovery + Load — all tappable for detail.
     private func metricTiles(_ pillars: Pillars) -> some View {
         LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-            MetricTile(label: "Strain",
-                       value: strain.map { fmt1($0) } ?? "—", unit: "/21",
-                       delta: strainDelta, fraction: (strain ?? 0) / 21, tone: .strain)
+            metricTileButton("Strain", "training load",
+                "Yesterday’s workout strain on a 0–21 scale (from heart rate and duration). Higher means a harder session. This feeds the Load pillar.",
+                PillarScore(score: min(100, (strain ?? 0) / 21 * 100),
+                            drivers: [Driver(text: strain.map { String(format: "Strain %.1f / 21" , $0) } ?? "No recent workout",
+                                             detail: strainDelta ?? "Sync workouts from Apple Health to populate strain.")])) {
+                MetricTile(label: "Strain",
+                           value: strain.map { fmt1($0) } ?? "—", unit: "/21",
+                           delta: strainDelta, fraction: (strain ?? 0) / 21, tone: .strain)
+            }
             metricTileButton("Recovery", "40%",
                 "HRV and resting heart rate vs your 30-day baseline — the strongest readiness signal.",
                 pillars.recovery) {
                 MetricTile(label: "Recovery", value: "\(Int(pillars.recovery.score.rounded()))",
                            delta: "40% of readiness", fraction: pillars.recovery.score / 100, tone: .recovery)
             }
-            MetricTile(label: "Sleep",
-                       value: sleepHours.map { fmt1($0) } ?? "—", unit: "h",
-                       delta: sleepDelta, fraction: (sleepHours ?? 0) / 8, tone: .sleep)
+            metricTileButton("Sleep", "35%",
+                "Last night's duration and quality vs your ~8h need, plus recent sleep debt and consistency.",
+                pillars.sleep) {
+                MetricTile(label: "Sleep",
+                           value: sleepHours.map { fmt1($0) } ?? "—", unit: "h",
+                           delta: sleepDelta, fraction: (sleepHours ?? 0) / 8, tone: .sleep)
+            }
             metricTileButton("Load", "25%",
                 "Recent training strain and the acute:chronic ratio — how hard you've pushed lately vs your norm.",
                 pillars.load) {
@@ -231,8 +243,10 @@ struct TodayView: View {
             pillarInfo = PillarInfo(name: name, weight: weight, description: description, pillar: pillar)
         } label: {
             tile()
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityHint("Shows more about \(name)")
     }
 
     private func advisor(_ note: AdvisorNote) -> some View {

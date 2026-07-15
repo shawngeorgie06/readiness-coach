@@ -8,12 +8,17 @@ struct ReadinessSparkline: View {
             LineMark(x: .value("Date", ChartDate.day(point.date)),
                      y: .value("Readiness", point.readiness))
                 .foregroundStyle(.secondary)
+                .interpolationMethod(ChartStyle.smooth)
             PointMark(x: .value("Date", ChartDate.day(point.date)),
                       y: .value("Readiness", point.readiness))
                 .foregroundStyle(point.decision.tint).symbolSize(24)
         }
         .chartYScale(domain: 0 ... 100)
         .chartXAxis(.hidden).chartYAxis(.hidden)
+        .chartLegend(.hidden)
+        .frame(maxWidth: .infinity)
         .frame(height: 56)
+        .clipped()
+        .allowsHitTesting(false)
     }
 }

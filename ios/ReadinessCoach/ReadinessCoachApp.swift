@@ -6,6 +6,10 @@ struct ReadinessCoachApp: App {
     @StateObject private var sync = SyncService()
     private let notifications = NotificationService()
 
+    init() {
+        ScrollLockBootstrap.apply()
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()
