@@ -1,49 +1,32 @@
 import SwiftUI
-import Charts
 
+/// Activity tab — matches the Aether prototype's Activities panel: screen-head,
+/// filter chips, a workout list, and a weekly-load card. All real workout data.
 struct TrainView: View {
     @EnvironmentObject private var settings: AppSettings
     @State private var response: TrainResponse?
     @State private var error: String?
     @State private var isLoading = false
+    @State private var filter = "All"
+
+    private let filters = ["All", "Run", "Strength", "Recovery"]
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
+                    header
                     if let response, !response.data.isEmpty {
+                        chips
                         weeklyCard(response.data)
-                        SectionCard(title: "Daily strain — last \(response.days) days") {
-                            Chart(dailyStrain(response.data)) { day in
-                                BarMark(
-                                    x: .value("Day", day.day),
-                                    y: .value("Strain", day.strain)
-                                )
-                                .foregroundStyle(.orange)
-                            }
-                            .frame(height: 200)
-                        }
-
-                        SectionCard(title: "Workouts") {
-                            HStack(spacing: 6) {
-                                Text("Strain 0–21").font(.caption2).foregroundStyle(.secondary)
-                                InfoBadge(title: "Strain", message: "Strain rates how hard a session was, 0–21, from heart rate and duration.")
-                                Spacer()
-                                Text("HR zones").font(.caption2).foregroundStyle(.secondary)
-                                InfoBadge(title: "Heart-rate zones", message: "Zones are shares of your session spent at rising heart rates — Easy is a warm-up pace, Max is near your ceiling.")
-                            }
-                            ForEach(response.data) { workout in
-                                WorkoutRow(workout: workout)
-                                if workout.id != response.data.last?.id { Divider() }
-                            }
-                        }
+                        workoutList(filtered(response.data))
                     } else if isLoading {
                         ProgressView().padding(.top, 60)
                     } else {
                         ContentUnavailableCompat(
                             title: "No workouts",
                             message: "Sync from the Today tab to load training history.",
-                            systemImage: "figure.run"
+                            systemImage: "bolt.fill"
                         )
                     }
                     if let error {
@@ -52,11 +35,86 @@ struct TrainView: View {
                 }
                 .padding()
             }
-            .navigationTitle("Train")
+            .screenBackground()
+            .toolbar(.hidden, for: .navigationBar)
             .task { await load() }
             .refreshable { await load() }
         }
     }
+
+    private var header: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                Eyebrow(text: "Log")
+                Text("Activity").font(.system(size: 30, weight: .bold, design: .rounded))
+                    .foregroundStyle(Palette.textPrimary)
+            }
+            Spacer()
+        }
+    }
+
+    private var chips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(filters, id: \.self) { f in
+                    Button { filter = f } label: {
+                        Text(f)
+                            .font(.system(size: 13, weight: .semibold))
+                            .padding(.horizontal, 14).padding(.vertical, 8)
+                            .foregroundStyle(filter == f ? Palette.accent : Palette.textSecondary)
+                            .background(
+                                Capsule().fill(filter == f ? Palette.accent.opacity(0.16) : .clear)
+                                    .overlay(Capsule().strokeBorder(filter == f ? Palette.accent.opacity(0.35) : Palette.stroke, lineWidth: 1))
+                            )
+                    }.buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private func workoutList(_ workouts: [WorkoutDTO]) -> some View {
+        VStack(spacing: 0) {
+            ForEach(workouts) { w in
+                AetherListRow(systemImage: icon(w.sport), tone: rowTone(w.sport),
+                              title: prettySport(w.sport),
+                              subtitle: "\(weekday(w.startAt)) · \(Int(w.durationMin.rounded())) min") {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(fmt(w.strain)).font(.system(.subheadline, design: .monospaced).weight(.semibold))
+                            .foregroundStyle(Palette.textPrimary)
+                        Text("strain").font(.caption2).foregroundStyle(Palette.textSecondary)
+                    }
+                }
+                if w.id != workouts.last?.id {
+                    Divider().overlay(Palette.strokeSoft).padding(.leading, 14)
+                }
+            }
+        }
+        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Palette.strokeSoft, lineWidth: 1))
+    }
+
+    @ViewBuilder
+    private func weeklyCard(_ workouts: [WorkoutDTO]) -> some View {
+        let week = weeklyWorkouts(workouts)
+        if !week.isEmpty {
+            let totalStrain = week.reduce(0) { $0 + $1.strain }
+            let totalMin = week.reduce(0) { $0 + $1.durationMin }
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Eyebrow(text: "This week")
+                    Spacer()
+                    Text(fmt(totalStrain)).font(.system(size: 20, weight: .bold, design: .rounded))
+                        .foregroundStyle(Palette.accent)
+                }
+                Text("\(week.count) session\(week.count == 1 ? "" : "s") · \(formatMinutes(totalMin)) · cumulative strain this week")
+                    .font(.caption).foregroundStyle(Palette.textSecondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .card()
+        }
+    }
+
+    // MARK: - Data
 
     private func load() async {
         guard let client = settings.makeClient() else { return }
@@ -70,24 +128,46 @@ struct TrainView: View {
         }
     }
 
+    private func filtered(_ workouts: [WorkoutDTO]) -> [WorkoutDTO] {
+        let sorted = workouts.sorted { $0.startAt > $1.startAt }
+        return filter == "All" ? sorted : sorted.filter { category($0.sport) == filter }
+    }
+
+    private func category(_ sport: String) -> String {
+        let s = sport.lowercased()
+        if s.contains("run") || s.contains("walk") || s.contains("cycl") || s.contains("ride") { return "Run" }
+        if s.contains("strength") || s.contains("function") || s.contains("traditional") || s.contains("lift") { return "Strength" }
+        if s.contains("yoga") || s.contains("mind") || s.contains("flex") || s.contains("cool") || s.contains("breath") { return "Recovery" }
+        return "Other"
+    }
+
+    private func prettySport(_ sport: String) -> String {
+        sport.replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .capitalized
+    }
+
+    private func icon(_ sport: String) -> String {
+        switch category(sport) {
+        case "Run": return "figure.run"
+        case "Strength": return "dumbbell.fill"
+        case "Recovery": return "figure.mind.and.body"
+        default: return "bolt.fill"
+        }
+    }
+
+    private func rowTone(_ sport: String) -> AetherRowTone {
+        switch category(sport) {
+        case "Recovery": return .mint
+        default: return .accent
+        }
+    }
+
     private static let isoParser: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return f
     }()
-
-    private struct DayStrain: Identifiable {
-        let day: Date
-        let strain: Double
-        var id: Date { day }
-    }
-
-    /// One summed-strain bar per calendar day.
-    private func dailyStrain(_ workouts: [WorkoutDTO]) -> [DayStrain] {
-        let groups = Dictionary(grouping: workouts) { ChartDate.day($0.startAt) }
-        return groups.map { DayStrain(day: $0.key, strain: $0.value.reduce(0) { $0 + $1.strain }) }
-            .sorted { $0.day < $1.day }
-    }
 
     private func weeklyWorkouts(_ workouts: [WorkoutDTO]) -> [WorkoutDTO] {
         let cutoff = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
@@ -104,94 +184,7 @@ struct TrainView: View {
         return total >= 60 ? "\(total / 60)h \(total % 60)m" : "\(total)m"
     }
 
-    @ViewBuilder
-    private func weeklyCard(_ workouts: [WorkoutDTO]) -> some View {
-        let week = weeklyWorkouts(workouts)
-        if !week.isEmpty {
-            let totalStrain = week.reduce(0) { $0 + $1.strain }
-            let totalMin = week.reduce(0) { $0 + $1.durationMin }
-            let hardest = week.max { $0.strain < $1.strain }
-            SectionCard(title: "This week") {
-                Text("\(week.count) session\(week.count == 1 ? "" : "s") · \(formatMinutes(totalMin)) · \(Int(totalStrain.rounded())) total strain")
-                    .font(.subheadline.weight(.medium))
-                if let hardest {
-                    Text("Hardest: \(weekday(hardest.startAt)) (\(Int(hardest.strain.rounded())))")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-        }
-    }
-}
-
-struct WorkoutRow: View {
-    let workout: WorkoutDTO
-    private let zoneColors: [Color] = [.gray, .blue, .green, .orange, .red]
-    private let zoneNames = ["Easy", "Light", "Moderate", "Hard", "Max"]
-
-    private func strainBand(_ strain: Double) -> String {
-        if strain < 8 { return "easy" }
-        if strain < 14 { return "moderately hard" }
-        if strain < 18 { return "hard" }
-        return "all-out"
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(workout.sport.capitalized).font(.subheadline.weight(.semibold))
-                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("Strain \(Int(workout.strain.rounded())) · \(strainBand(workout.strain))")
-                        .font(.subheadline.monospacedDigit())
-                    if !hrText.isEmpty {
-                        Text(hrText).font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-            }
-            if let zones = workout.hrZonesMin, zones.contains(where: { $0 > 0 }) {
-                zoneBar(zones)
-            }
-        }
-        .padding(.vertical, 2)
-    }
-
-    private func zoneBar(_ zones: [Double]) -> some View {
-        let total = max(zones.reduce(0, +), 0.001)
-        return VStack(alignment: .leading, spacing: 3) {
-            GeometryReader { geo in
-                HStack(spacing: 1) {
-                    ForEach(Array(zones.enumerated()), id: \.offset) { index, minutes in
-                        zoneColors[min(index, 4)]
-                            .frame(width: max(0, geo.size.width * (minutes / total)))
-                    }
-                }
-            }
-            .frame(height: 8)
-            .clipShape(Capsule())
-            Text(zones.enumerated()
-                .map { "\(zoneNames[min($0.offset, 4)]) \(fmtMin($0.element))m" }
-                .joined(separator: "  "))
-                .font(.caption2).foregroundStyle(.secondary)
-        }
-    }
-
-    private var hrText: String {
-        var parts: [String] = []
-        if let avg = workout.avgHrBpm { parts.append("\(Int(avg.rounded())) avg") }
-        if let max = workout.maxHrBpm { parts.append("\(Int(max.rounded())) max") }
-        return parts.isEmpty ? "" : parts.joined(separator: " · ") + " bpm"
-    }
-
-    private var subtitle: String {
-        var parts = ["\(Int(workout.durationMin.rounded())) min"]
-        if let cal = workout.calories { parts.append("\(Int(cal.rounded())) kcal") }
-        return parts.joined(separator: " · ")
-    }
-
-    private func fmtMin(_ value: Double) -> String {
+    private func fmt(_ value: Double) -> String {
         value == value.rounded() ? String(Int(value)) : String(format: "%.1f", value)
     }
 }

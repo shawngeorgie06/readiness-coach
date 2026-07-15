@@ -169,12 +169,15 @@ struct MetricTile: View {
     }
 }
 
+/// Icon tint for `AetherListRow` (top-level so it isn't reparented per generic specialization).
+enum AetherRowTone { case neutral, accent, mint, sleep
+    var fg: Color { switch self { case .neutral: return Palette.textSecondary; case .accent: return Palette.accent; case .mint: return Palette.mint; case .sleep: return Palette.lavender } }
+    var bg: Color { switch self { case .neutral: return Palette.elevated; default: return fg.opacity(0.16) } }
+}
+
 struct AetherListRow<Trailing: View>: View {
-    enum ListTone { case neutral, accent, mint, sleep
-        var fg: Color { switch self { case .neutral: return Palette.textSecondary; case .accent: return Palette.accent; case .mint: return Palette.mint; case .sleep: return Palette.lavender } }
-        var bg: Color { switch self { case .neutral: return Palette.elevated; default: return fg.opacity(0.16) } } }
     let systemImage: String
-    var tone: ListTone = .neutral
+    var tone: AetherRowTone = .neutral
     let title: String
     var subtitle: String? = nil
     @ViewBuilder var trailing: () -> Trailing

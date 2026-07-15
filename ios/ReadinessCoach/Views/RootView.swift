@@ -29,13 +29,15 @@ struct RootView: View {
 }
 
 struct MainTabView: View {
+    // Optional preselected tab (used for testing/screenshots): SIMCTL_CHILD_START_TAB=n.
+    @State private var selection = ProcessInfo.processInfo.environment["START_TAB"].flatMap { Int($0) } ?? 0
     var body: some View {
-        TabView {
-            TodayView().tabItem { Label("Today", systemImage: "circle.circle.fill") }
-            TrendsView().tabItem { Label("Insights", systemImage: "chart.bar.fill") }
-            TrainView().tabItem { Label("Activity", systemImage: "bolt.fill") }
-            BodyView().tabItem { Label("Body", systemImage: "figure.stand") }
-            YouView().tabItem { Label("You", systemImage: "person.fill") }
+        TabView(selection: $selection) {
+            TodayView().tag(0).tabItem { Label("Today", systemImage: "circle.circle.fill") }
+            TrendsView().tag(1).tabItem { Label("Insights", systemImage: "chart.bar.fill") }
+            TrainView().tag(2).tabItem { Label("Activity", systemImage: "bolt.fill") }
+            BodyView().tag(3).tabItem { Label("Body", systemImage: "figure.stand") }
+            YouView().tag(4).tabItem { Label("You", systemImage: "person.fill") }
         }
         .toolbarBackground(Palette.canvas, for: .tabBar)
         .toolbarBackground(.visible, for: .tabBar)
