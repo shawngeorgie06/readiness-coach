@@ -1,7 +1,12 @@
 import { z } from "zod";
 import { prisma } from "../db.js";
-import type { PillarScore } from "../scoring/types.js";
+import type { Driver, PillarScore } from "../scoring/types.js";
 import { createOpenAiCompatibleClient, type LlmClient } from "./llmClient.js";
+
+/** The advisor works in strings; prefer the exact `detail` (has the real numbers). */
+function driverText(driver: Driver): string {
+  return driver.detail ?? driver.text;
+}
 
 export type Decision = "push" | "maintain" | "recover";
 
@@ -65,9 +70,9 @@ export function buildTemplateNote(input: { decision: Decision; drivers: string[]
 
 function allDrivers(today: AdvisorContext): string[] {
   return [
-    ...today.pillars.sleep.drivers,
-    ...today.pillars.recovery.drivers,
-    ...today.pillars.load.drivers,
+    ...today.pillars.sleep.drivers.map(driverText),
+    ...today.pillars.recovery.drivers.map(driverText),
+    ...today.pillars.load.drivers.map(driverText),
     ...today.overridesApplied,
     ...today.missing.map((name) => `Missing ${name} data`),
   ];
@@ -77,7 +82,7 @@ function metricSummary(today: AdvisorContext) {
   return {
     decision: today.decision,
     pillars: Object.fromEntries(
-      Object.entries(today.pillars).map(([name, pillar]) => [name, { score: pillar.score, drivers: pillar.drivers }]),
+      Object.entries(today.pillars).map(([name, pillar]) => [name, { score: pillar.score, drivers: pillar.drivers.map(driverText) }]),
     ),
     overridesApplied: today.overridesApplied,
     missing: today.missing,
@@ -94,11 +99,25 @@ function configuredLlm(): LlmClient | undefined {
   });
 }
 
-const ADVISOR_SYSTEM_PROMPT = [
+const ADVISOR_BASE_PROMPT = [
   "You are a strict readiness advisor for recomp/general fitness.",
   "Use only the supplied metrics. No diagnosis, cheerleading, or invented data.",
   "The deterministic decision is locked: you may be more conservative but never more aggressive.",
-  "Return JSON only with decision, why (2-4 evidence-backed strings), prescription, and ifIgnored.",
+].join(" ");
+
+const ADVISOR_SYSTEM_PROMPT =
+  `${ADVISOR_BASE_PROMPT} Return JSON only with decision, why (2-4 evidence-backed strings), prescription, and ifIgnored.`;
+
+const COACH_SYSTEM_PROMPT = [
+  ADVISOR_BASE_PROMPT,
+  "Answer the user's question in plain prose paragraphs — no JSON, no bullet lists.",
+  "Be specific and thorough, not vague:",
+  "directly answer the question first;",
+  "justify it by citing the actual pillar scores and their drivers with the real numbers (e.g. HRV %, sleep hours, sleep debt, acute:chronic ratio);",
+  "explain what those signals mean for training today;",
+  "give a concrete prescription of what to do and what to avoid, with rough intensity/duration;",
+  "and state what would need to change for the decision to improve.",
+  "Name the locked decision and never recommend training more aggressive than it allows.",
 ].join(" ");
 
 /** Generate a structured note, returning the deterministic template whenever cloud generation is unavailable or invalid. */
@@ -108,6 +127,7 @@ export async function generateAdvisorNote(today: AdvisorContext, llm: LlmClient 
 
   try {
     const content = await llm.chat({
+      json: true,
       messages: [
         { role: "system", content: ADVISOR_SYSTEM_PROMPT },
         { role: "user", content: JSON.stringify(metricSummary(today)) },
@@ -177,7 +197,7 @@ export async function askCoach(question: string, today: AdvisorContext, llm: Llm
       messages: [
         {
           role: "system",
-          content: `${ADVISOR_SYSTEM_PROMPT} Answer the question directly in plain text. State and obey the locked decision.`,
+          content: COACH_SYSTEM_PROMPT,
         },
         { role: "user", content: JSON.stringify({ question, today: metricSummary(today) }) },
       ],

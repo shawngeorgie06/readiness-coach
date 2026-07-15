@@ -44,19 +44,27 @@ describe("buildTemplateNote", () => {
   });
 
   it("uses a conservative fallback when no LLM client is configured", async () => {
-    const note = await generateAdvisorNote({
-      decision: "recover",
-      pillars: {
-        sleep: { score: 20, drivers: ["Sleep 4.5h vs need 8h"] },
-        recovery: { score: 30, drivers: ["HRV -25% vs 30d baseline"] },
-        load: { score: 40, drivers: ["Yesterday strain 15.0"] },
-      },
-      overridesApplied: ["Sleep below 5h"],
-      missing: [],
-    });
+    // Force the no-LLM path regardless of any ambient LLM_API_KEY in the env.
+    const previousKey = process.env.LLM_API_KEY;
+    delete process.env.LLM_API_KEY;
+    try {
+      const note = await generateAdvisorNote({
+        decision: "recover",
+        pillars: {
+          sleep: { score: 20, drivers: [{ text: "Sleep 4.5h vs need 8h" }] },
+          recovery: { score: 30, drivers: [{ text: "HRV -25% vs 30d baseline" }] },
+          load: { score: 40, drivers: [{ text: "Yesterday strain 15.0" }] },
+        },
+        overridesApplied: ["Sleep below 5h"],
+        missing: [],
+      });
 
-    expect(note.source).toBe("template");
-    expect(note.decision).toBe("recover");
+      expect(note.source).toBe("template");
+      expect(note.decision).toBe("recover");
+    } finally {
+      if (previousKey === undefined) delete process.env.LLM_API_KEY;
+      else process.env.LLM_API_KEY = previousKey;
+    }
   });
 });
 

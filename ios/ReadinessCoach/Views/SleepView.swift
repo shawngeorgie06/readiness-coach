@@ -1,0 +1,265 @@
+import SwiftUI
+import Charts
+
+struct SleepView: View {
+    @EnvironmentObject private var settings: AppSettings
+    @State private var response: SleepDetailResponse?
+    @State private var error: String?
+    @State private var isLoading = false
+    @State private var rangeDays = 30
+    @State private var totalSelection: Date?
+    @State private var stageSelection: Date?
+
+    private let ranges = [7, 30, 90]
+
+    private let stageColors: [(name: String, color: Color)] = [
+        ("Deep", .indigo), ("REM", .purple), ("Core", .blue), ("Awake", .orange),
+    ]
+
+    private static let isoParser: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private static let needHours = 8.0
+
+    private func clockTime(_ iso: String?) -> String? {
+        guard let iso, let date = Self.isoParser.date(from: iso) else { return nil }
+        return date.formatted(.dateTime.hour().minute())
+    }
+
+    private func bedMinutes(_ iso: String?) -> Int? {
+        guard let iso, let date = Self.isoParser.date(from: iso) else { return nil }
+        let c = Calendar.current.dateComponents([.hour, .minute], from: date)
+        guard let h = c.hour, let m = c.minute else { return nil }
+        return h * 60 + m
+    }
+
+    private func durationQualifier(_ hours: Double) -> String {
+        if hours < 6 { return "well below" }
+        if hours < 7.5 { return "a bit below" }
+        if hours <= 8.5 { return "right on" }
+        return "above"
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(spacing: 16) {
+                    Picker("Range", selection: $rangeDays) {
+                        ForEach(ranges, id: \.self) { days in
+                            Text("\(days)D").tag(days)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: rangeDays) { _, _ in
+                        totalSelection = nil; stageSelection = nil
+                        Task { await load() }
+                    }
+
+                    if let nights, !nights.isEmpty {
+                        summaryCard(nights)
+                        totalCard(nights)
+                        stageCard(nights)
+                    } else if isLoading {
+                        ProgressView().padding(.top, 60)
+                    } else {
+                        ContentUnavailableCompat(
+                            title: "No sleep data",
+                            message: "Sync from the Today tab to load sleep history.",
+                            systemImage: "bed.double"
+                        )
+                    }
+                    if let error {
+                        ErrorCard(message: error) { Task { await load() } }
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+            }
+            .verticalScrollLocked()
+            .navigationTitle("Sleep")
+            .task { await load() }
+            .refreshable { await load() }
+        }
+    }
+
+    private var nights: [SleepDay]? {
+        response?.data.filter { $0.durationHours > 0 }
+    }
+
+    @ViewBuilder
+    private func summaryCard(_ nights: [SleepDay]) -> some View {
+        if let last = nights.last {
+            let recent = nights.suffix(7)
+            let avg = recent.map(\.durationHours).reduce(0, +) / Double(max(recent.count, 1))
+            SectionCard(title: "Last night") {
+                Text("You slept \(fmt(last.durationHours))h — \(durationQualifier(last.durationHours)) your \(Int(Self.needHours))h target.")
+                    .font(.subheadline.weight(.medium))
+                if let bed = clockTime(last.sleepStart), let wake = clockTime(last.sleepEnd) {
+                    Label("Asleep \(bed) → woke \(wake)", systemImage: "bed.double")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Text("vs your \(recent.count)-day average of \(fmt(avg))h.")
+                    .font(.caption).foregroundStyle(.secondary)
+                consistencyRow(nights)
+                HStack(spacing: 6) {
+                    Text("Deep + REM \(fmt(last.restorativeHours))h — the recovery stages.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    InfoBadge(title: "Sleep stages",
+                              message: "Deep and REM are when your body and brain recover. Core is lighter sleep; Awake is brief wake-ups. Restorative = deep + REM.")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func consistencyRow(_ nights: [SleepDay]) -> some View {
+        let mins = nights.suffix(7).compactMap { bedMinutes($0.sleepStart) }
+            .map { ($0 + 720) % 1440 }
+        if mins.count >= 3 {
+            let mean = Double(mins.reduce(0, +)) / Double(mins.count)
+            let variance = mins.map { pow(Double($0) - mean, 2) }.reduce(0, +) / Double(mins.count)
+            let std = Int(variance.squareRoot().rounded())
+            let label = std <= 30 ? "very consistent"
+                : std <= 60 ? "fairly consistent"
+                : std <= 90 ? "a little irregular" : "irregular"
+            HStack(spacing: 6) {
+                Text("Schedule: \(label) (±\(std) min this week).")
+                    .font(.caption).foregroundStyle(.secondary)
+                InfoBadge(title: "Sleep consistency",
+                          message: "Going to bed and waking at similar times helps recovery. This is how much your bedtime varied over the past week.")
+            }
+        }
+    }
+
+    private func totalCard(_ nights: [SleepDay]) -> some View {
+        let dates = nights.map { ChartDate.day($0.date) }
+        return SectionCard(title: "Total sleep — last \(response?.days ?? rangeDays) days") {
+            Chart(nights) { day in
+                BarMark(
+                    x: .value("Date", ChartDate.day(day.date)),
+                    y: .value("Hours", day.durationHours)
+                )
+                .foregroundStyle(.blue.opacity(0.5))
+                BarMark(
+                    x: .value("Date", ChartDate.day(day.date)),
+                    y: .value("Restorative", day.restorativeHours)
+                )
+                .foregroundStyle(.indigo)
+                if let sel = totalSelection {
+                    RuleMark(x: .value("Date", sel))
+                        .foregroundStyle(.secondary.opacity(0.45))
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                }
+            }
+            .chartXAxis {
+                AxisMarks(values: .automatic(desiredCount: min(6, nights.count))) { _ in
+                    AxisGridLine()
+                    AxisValueLabel(format: .dateTime.month(.abbreviated).day())
+                }
+            }
+            .chartYAxisLabel("hours", position: .leading, alignment: .center)
+            .frame(height: 210)
+            .chartOverlay { proxy in
+                ChartDayScrubOverlay(proxy: proxy, dates: dates, selection: $totalSelection)
+            }
+            .clipped()
+
+            ScrubDetailBanner(
+                date: totalSelection,
+                placeholder: "Tap or drag a night to see hours slept",
+                lines: totalLines(for: totalSelection, in: nights)
+            )
+
+            Text("Blue is total sleep; darker is deep + REM (restorative).")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func stageCard(_ nights: [SleepDay]) -> some View {
+        let dates = nights.map { ChartDate.day($0.date) }
+        return SectionCard(title: "Stages by night") {
+            Chart {
+                ForEach(nights) { day in
+                    stageBar(day, "Deep", day.stages.deep, .indigo)
+                    stageBar(day, "REM", day.stages.rem, .purple)
+                    stageBar(day, "Core", day.stages.core, .blue)
+                    stageBar(day, "Awake", day.stages.awake, .orange)
+                }
+                if let sel = stageSelection {
+                    RuleMark(x: .value("Date", sel))
+                        .foregroundStyle(.secondary.opacity(0.45))
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                }
+            }
+            .chartForegroundStyleScale(domain: stageColors.map(\.name), range: stageColors.map(\.color))
+            .chartXAxis {
+                AxisMarks(values: .automatic(desiredCount: min(6, nights.count))) { _ in
+                    AxisGridLine()
+                    AxisValueLabel(format: .dateTime.month(.abbreviated).day())
+                }
+            }
+            .chartYAxisLabel("hours", position: .leading, alignment: .center)
+            .frame(height: 230)
+            .chartOverlay { proxy in
+                ChartDayScrubOverlay(proxy: proxy, dates: dates, selection: $stageSelection)
+            }
+            .clipped()
+
+            ScrubDetailBanner(
+                date: stageSelection,
+                placeholder: "Tap or drag to see deep · REM · core · awake",
+                lines: stageLines(for: stageSelection, in: nights)
+            )
+
+            if stageSelection == nil, let latest = nights.last {
+                Text("Last night — deep \(fmt(latest.stages.deep))h · REM \(fmt(latest.stages.rem))h · core \(fmt(latest.stages.core))h · awake \(fmt(latest.stages.awake))h")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func stageBar(_ day: SleepDay, _ name: String, _ hours: Double, _ color: Color) -> some ChartContent {
+        BarMark(
+            x: .value("Date", ChartDate.day(day.date)),
+            y: .value("Hours", hours)
+        )
+        .foregroundStyle(by: .value("Stage", name))
+    }
+
+    private func totalLines(for selection: Date?, in nights: [SleepDay]) -> [String] {
+        guard let selection,
+              let hit = nights.first(where: { ChartDate.day($0.date) == selection })
+        else { return [] }
+        return [
+            "Total \(fmt(hit.durationHours))h",
+            "Restorative (deep + REM) \(fmt(hit.restorativeHours))h",
+        ]
+    }
+
+    private func stageLines(for selection: Date?, in nights: [SleepDay]) -> [String] {
+        guard let selection,
+              let hit = nights.first(where: { ChartDate.day($0.date) == selection })
+        else { return [] }
+        return [
+            "Deep \(fmt(hit.stages.deep))h · REM \(fmt(hit.stages.rem))h",
+            "Core \(fmt(hit.stages.core))h · Awake \(fmt(hit.stages.awake))h",
+        ]
+    }
+
+    private func load() async {
+        guard let client = settings.makeClient() else { return }
+        isLoading = true
+        error = nil
+        defer { isLoading = false }
+        do {
+            response = try await client.getSleep(days: rangeDays)
+        } catch {
+            self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    private func fmt(_ value: Double) -> String { String(format: "%.1f", value) }
+}

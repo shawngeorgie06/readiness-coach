@@ -29,9 +29,16 @@ export interface LoadInput {
   acuteChronicRatio: number;
 }
 
+export type Driver = {
+  /** Concise, plain-language card line, e.g. "3h catch-up owed this week". */
+  text: string;
+  /** Exact explanation with units/timeframe for the tap sheet. */
+  detail?: string;
+};
+
 export interface PillarScore {
   score: number; // 0-100
-  drivers: string[];
+  drivers: Driver[];
 }
 
 export interface ReadinessResult {

@@ -1,4 +1,4 @@
-import type { PillarScore, RecoveryInput } from "./types.js";
+import type { Driver, PillarScore, RecoveryInput } from "./types.js";
 
 function clamp(n: number, min = 0, max = 100): number {
   return Math.max(min, Math.min(max, n));
@@ -27,13 +27,23 @@ export function scoreRecovery(input: RecoveryInput): PillarScore {
   }
 
   const raw = hrvScore * 0.55 + rhrScore * 0.3 + overnightScore * 0.15;
-  const drivers: string[] = [];
+  const drivers: Driver[] = [];
   const hrvPct = hrvDelta * 100;
-  drivers.push(
-    `HRV ${hrvPct >= 0 ? "+" : ""}${hrvPct.toFixed(0)}% vs 30d baseline`
-  );
-  if (rhrDelta > 0.03) drivers.push("Resting HR elevated vs baseline");
-  if (hrvDelta >= 0 && rhrDelta <= 0) drivers.push("Recovery markers stable");
+  const hrvQualifier =
+    hrvDelta >= 0.05 ? "above your normal" : hrvDelta <= -0.05 ? "below your normal" : "normal for you";
+  drivers.push({
+    text: `HRV ${input.hrvMs.toFixed(0)}ms · ${hrvQualifier}`,
+    detail: `Heart-rate variability is ${input.hrvMs.toFixed(0)}ms vs your 30-day average of ${input.hrvBaseline30dMs.toFixed(0)}ms (${hrvPct >= 0 ? "+" : ""}${hrvPct.toFixed(0)}%). Higher usually means more recovered.`,
+  });
+  if (rhrDelta > 0.03) {
+    drivers.push({
+      text: `Resting pulse ${input.restingHrBpm.toFixed(0)} · elevated`,
+      detail: `Resting heart rate ${input.restingHrBpm.toFixed(0)} bpm is above your ${input.restingHrBaseline30dBpm.toFixed(0)} bpm baseline — often a sign of fatigue or oncoming illness.`,
+    });
+  }
+  if (hrvDelta >= 0 && rhrDelta <= 0) {
+    drivers.push({ text: "Recovery steady", detail: "HRV and resting pulse are both in your normal range." });
+  }
 
   return { score: Math.round(clamp(raw)), drivers };
 }

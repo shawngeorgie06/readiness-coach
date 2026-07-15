@@ -20,5 +20,7 @@ describe("scoreRecovery", () => {
       restingHrBaseline30dBpm: 54,
     });
     expect(result.score).toBeLessThanOrEqual(45);
+    expect(result.drivers[0].text).toMatch(/^HRV \d+ms · below your normal$/);
+    expect(result.drivers.some((d) => d.text.includes("Resting pulse"))).toBe(true);
   });
 });

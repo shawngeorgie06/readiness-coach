@@ -1,0 +1,51 @@
+# XcodeGen spec — a deterministic fallback for regenerating the Xcode project.
+# The checked-in ReadinessCoach.xcodeproj is the primary artifact; use this only
+# if you prefer to regenerate it (e.g. on an older Xcode that predates
+# file-system-synchronized groups) with:
+#
+#   brew install xcodegen
+#   cd ios && xcodegen generate && open ReadinessCoach.xcodeproj
+#
+name: ReadinessCoach
+options:
+  bundleIdPrefix: com.readinesscoach
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  ReadinessCoach:
+    type: application
+    platform: iOS
+    sources:
+      - ReadinessCoach
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.readinesscoach.ReadinessCoach
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Info.plist
+        CODE_SIGN_ENTITLEMENTS: ReadinessCoach.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        ENABLE_PREVIEWS: YES
+        # Physical device required for HealthKit; leave team empty so each
+        # developer picks Signing & Capabilities → Team in Xcode.
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+        SUPPORTS_MACCATALYST: NO
+    info:
+      path: Info.plist
+      properties:
+        NSHealthShareUsageDescription: Readiness Coach reads your heart rate, HRV, sleep, and workouts to compute readiness and coaching.
+        NSHealthUpdateUsageDescription: Readiness Coach does not write health data.
+        NSLocalNetworkUsageDescription: Readiness Coach reaches your Mac on the local network so the phone can sync Health data to your readiness API. Use your Mac’s LAN IP (not localhost).
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        UIBackgroundModes: [fetch]
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.readinesscoach.morningReadiness

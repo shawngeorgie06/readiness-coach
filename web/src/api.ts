@@ -2,7 +2,7 @@ export type Decision = "push" | "maintain" | "recover";
 
 export interface Pillar {
   score: number;
-  drivers: string[];
+  drivers: { text: string; detail?: string }[];
 }
 
 export interface AdvisorNote {

@@ -21,7 +21,13 @@ Watch → HealthKit → iPhone app → your API → readiness score (Push / Main
 
 ## Status
 
-Design and implementation plan are checked in. Implementation starts at Task 1 of the plan (backend scaffold + scoring TDD).
+Backend + web (Tasks 1–9) and the SwiftUI iPhone app under [`ios/`](ios/) are
+implemented. **HealthKit only works on a physical iPhone** — open
+`ios/ReadinessCoach.xcodeproj` in Xcode, pick your phone (not Simulator), set
+your Signing Team, and run. Full steps: [`ios/README.md`](ios/README.md).
+
+API bind note: `npm run dev` listens on `0.0.0.0` so the phone can reach your Mac
+over Wi‑Fi. In the app, use `http://<Mac-LAN-IP>:4000` — never `localhost` on device.
 
 ## Local setup (after implementation begins)
 
