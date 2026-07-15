@@ -23,10 +23,13 @@ struct SettingsView: View {
                     )
                     LabeledField(label: "API token", text: $settings.apiToken, secure: true)
                     LabeledField(label: "User ID", text: $settings.userId)
+                    Text("App update \(AppBuild.stamp)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 } header: {
                     Text("Connection")
                 } footer: {
-                    Text("Physical iPhone: use your Mac’s Wi‑Fi IP and port (not localhost). Allow Local Network access if prompted.")
+                    Text("Physical iPhone: use your Mac’s Wi‑Fi IP and port (not localhost). After updating from GitHub, Clean Build Folder then Run, and tap Sync so workout names refresh.")
                 }
 
                 Section("Sync") {

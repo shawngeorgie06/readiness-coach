@@ -44,7 +44,7 @@ struct TrendsView: View {
                         ErrorCard(message: error) { Task { await load() } }
                     }
                 }
-                .frame(maxWidth: .infinity)
+                .pageWidthLocked()
                 .padding()
             }
             .verticalScrollLocked()
@@ -76,10 +76,14 @@ struct TrendsView: View {
                 InfoBadge(title: "Readiness score",
                           message: "A 0–100 daily score. 75+ means Push, 50–74 Maintain, under 50 Recover. The score decides; the coach only ever plays it safer.")
             }
+            Text("Tap any day on the chart to see the date, score, decision, and what changed vs the day before.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
             Chart(points) { point in
                 LineMark(x: .value("Date", ChartDate.day(point.date)), y: .value("Readiness", point.readiness))
                     .foregroundStyle(.secondary)
-                    .interpolationMethod(.catmullRom)
+                    .interpolationMethod(ChartStyle.smooth)
                 PointMark(x: .value("Date", ChartDate.day(point.date)), y: .value("Readiness", point.readiness))
                     .foregroundStyle(point.decision.tint)
                     .symbolSize(40)
@@ -94,14 +98,12 @@ struct TrendsView: View {
                 AxisMarks(values: [0, 25, 50, 75, 100]) { value in
                     AxisGridLine()
                     AxisValueLabel {
-                        if let n = value.as(Double.self) {
-                            Text("\(Int(n))")
-                        }
+                        if let n = value.as(Double.self) { Text("\(Int(n))") }
                     }
                 }
             }
             .chartXAxis {
-                AxisMarks(values: .automatic(desiredCount: min(6, points.count))) { value in
+                AxisMarks(values: .automatic(desiredCount: min(6, points.count))) { _ in
                     AxisGridLine()
                     AxisValueLabel(format: .dateTime.month(.abbreviated).day())
                 }
@@ -114,8 +116,9 @@ struct TrendsView: View {
 
             ScrubDetailBanner(
                 date: readinessSelection,
-                placeholder: "Tap or drag the chart to inspect a day",
-                lines: readinessLines(for: readinessSelection, in: points)
+                placeholder: "Tap a point to inspect that day",
+                lines: readinessLines(for: readinessSelection, in: points),
+                note: readinessNote(for: readinessSelection, in: points)
             )
 
             HStack(spacing: 14) {
@@ -125,9 +128,10 @@ struct TrendsView: View {
                         .labelStyle(.titleAndIcon)
                 }
             }
-            if readinessSelection == nil, let latest = points.last {
-                Text("Latest \(Int(latest.readiness.rounded())) · \(latest.decision.title)")
-                    .font(.caption).foregroundStyle(.secondary)
+        }
+        .onAppear {
+            if readinessSelection == nil, let last = dates.last {
+                readinessSelection = last
             }
         }
     }
@@ -136,10 +140,10 @@ struct TrendsView: View {
         let dates = points.map { ChartDate.day($0.date) }
         return SectionCard(title: "Pillar scores over time") {
             HStack(spacing: 6) {
-                Text("Sleep, Recovery, and Load are the three inputs to your readiness — watch which one is dragging the others down.")
+                Text("Sleep, Recovery, and Load feed readiness. Tap a day to see each pillar’s score.")
                     .font(.caption).foregroundStyle(.secondary)
                 InfoBadge(title: "Pillars",
-                          message: "Each pillar is scored 0–100. Your readiness is built from all three, so a low pillar here explains a low score on Today.")
+                          message: "Sleep (35%): rest quality. Recovery (40%): HRV + resting heart rate vs your baseline. Load (25%): recent training strain. A weak pillar usually explains a weak readiness day.")
             }
             Chart {
                 ForEach(points) { point in
@@ -147,17 +151,17 @@ struct TrendsView: View {
                              y: .value("Score", point.sleepScore),
                              series: .value("Pillar", "Sleep"))
                         .foregroundStyle(by: .value("Pillar", "Sleep"))
-                        .interpolationMethod(.catmullRom)
+                        .interpolationMethod(ChartStyle.smooth)
                     LineMark(x: .value("Date", ChartDate.day(point.date)),
                              y: .value("Score", point.recoveryScore),
                              series: .value("Pillar", "Recovery"))
                         .foregroundStyle(by: .value("Pillar", "Recovery"))
-                        .interpolationMethod(.catmullRom)
+                        .interpolationMethod(ChartStyle.smooth)
                     LineMark(x: .value("Date", ChartDate.day(point.date)),
                              y: .value("Score", point.loadScore),
                              series: .value("Pillar", "Load"))
                         .foregroundStyle(by: .value("Pillar", "Load"))
-                        .interpolationMethod(.catmullRom)
+                        .interpolationMethod(ChartStyle.smooth)
                 }
                 if let sel = pillarSelection {
                     RuleMark(x: .value("Date", sel))
@@ -189,31 +193,82 @@ struct TrendsView: View {
 
             ScrubDetailBanner(
                 date: pillarSelection,
-                placeholder: "Tap or drag to compare Sleep · Recovery · Load for a day",
-                lines: pillarLines(for: pillarSelection, in: points)
+                placeholder: "Tap to compare Sleep · Recovery · Load for a day",
+                lines: pillarLines(for: pillarSelection, in: points),
+                note: pillarNote(for: pillarSelection, in: points)
             )
+        }
+        .onAppear {
+            if pillarSelection == nil, let last = dates.last {
+                pillarSelection = last
+            }
         }
     }
 
     private func readinessLines(for selection: Date?, in points: [ReadinessPoint]) -> [String] {
-        guard let selection,
-              let hit = points.first(where: { ChartDate.day($0.date) == selection })
-        else { return [] }
-        return [
+        guard let hit = point(on: selection, in: points) else { return [] }
+        var lines = [
             "Readiness \(Int(hit.readiness.rounded())) · \(hit.decision.title)",
             "Sleep \(Int(hit.sleepScore.rounded())) · Recovery \(Int(hit.recoveryScore.rounded())) · Load \(Int(hit.loadScore.rounded()))",
         ]
+        if let delta = delta(for: hit, in: points) {
+            lines.insert(deltaLabel(delta), at: 1)
+        }
+        return lines
+    }
+
+    private func readinessNote(for selection: Date?, in points: [ReadinessPoint]) -> String? {
+        guard let hit = point(on: selection, in: points) else { return nil }
+        if let delta = delta(for: hit, in: points) {
+            let absDelta = Int(abs(delta).rounded())
+            if absDelta == 0 {
+                return "Unchanged vs the previous scored day. Decision bands: 75+ Push, 50–74 Maintain, under 50 Recover."
+            }
+            if delta < 0 {
+                return "Down \(absDelta) point\(absDelta == 1 ? "" : "s") vs the previous day — your body was less ready. Check which pillar dropped below."
+            }
+            return "Up \(absDelta) point\(absDelta == 1 ? "" : "s") vs the previous day — recovery/load conditions improved."
+        }
+        return "Decision bands: 75+ Push, 50–74 Maintain, under 50 Recover."
     }
 
     private func pillarLines(for selection: Date?, in points: [ReadinessPoint]) -> [String] {
-        guard let selection,
-              let hit = points.first(where: { ChartDate.day($0.date) == selection })
-        else { return [] }
+        guard let hit = point(on: selection, in: points) else { return [] }
         return [
-            "Sleep \(Int(hit.sleepScore.rounded()))",
-            "Recovery \(Int(hit.recoveryScore.rounded()))",
-            "Load \(Int(hit.loadScore.rounded()))",
+            "Sleep \(Int(hit.sleepScore.rounded())) — rest quality vs your need",
+            "Recovery \(Int(hit.recoveryScore.rounded())) — HRV & resting heart rate",
+            "Load \(Int(hit.loadScore.rounded())) — recent training strain",
         ]
+    }
+
+    private func pillarNote(for selection: Date?, in points: [ReadinessPoint]) -> String? {
+        guard let hit = point(on: selection, in: points) else { return nil }
+        let ranked = [
+            ("Sleep", hit.sleepScore),
+            ("Recovery", hit.recoveryScore),
+            ("Load", hit.loadScore),
+        ].sorted { $0.1 < $1.1 }
+        if let weakest = ranked.first {
+            return "\(weakest.0) was the weakest input this day (\(Int(weakest.1.rounded()))/100), so it pulled readiness down the most."
+        }
+        return nil
+    }
+
+    private func point(on selection: Date?, in points: [ReadinessPoint]) -> ReadinessPoint? {
+        guard let selection else { return nil }
+        return points.first(where: { ChartDate.day($0.date) == selection })
+    }
+
+    private func delta(for hit: ReadinessPoint, in points: [ReadinessPoint]) -> Double? {
+        guard let idx = points.firstIndex(where: { $0.id == hit.id }), idx > 0 else { return nil }
+        return hit.readiness - points[idx - 1].readiness
+    }
+
+    private func deltaLabel(_ delta: Double) -> String {
+        let n = Int(delta.rounded())
+        if n == 0 { return "Change vs prior day · 0 points" }
+        if n > 0 { return "Change vs prior day · +\(n) points" }
+        return "Change vs prior day · \(n) points"
     }
 
     private func load() async {
@@ -223,6 +278,12 @@ struct TrendsView: View {
         defer { isLoading = false }
         do {
             response = try await client.getHistory(days: rangeDays)
+            if readinessSelection == nil, let last = response?.data.last {
+                readinessSelection = ChartDate.day(last.date)
+            }
+            if pillarSelection == nil, let last = response?.data.last {
+                pillarSelection = ChartDate.day(last.date)
+            }
         } catch {
             self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
