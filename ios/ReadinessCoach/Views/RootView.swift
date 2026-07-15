@@ -30,19 +30,38 @@ struct RootView: View {
 
 struct MainTabView: View {
     // Optional preselected tab (used for testing/screenshots): SIMCTL_CHILD_START_TAB=n.
-    @State private var selection = ProcessInfo.processInfo.environment["START_TAB"].flatMap { Int($0) } ?? 0
+    @StateObject private var tabs = TabRouter(
+        initial: ProcessInfo.processInfo.environment["START_TAB"].flatMap { Int($0) } ?? 0
+    )
+
     var body: some View {
-        TabView(selection: $selection) {
-            TodayView().tag(0).tabItem { Label("Today", systemImage: "circle.circle.fill") }
-            TrendsView().tag(1).tabItem { Label("Insights", systemImage: "chart.bar.fill") }
-            TrainView().tag(2).tabItem { Label("Activity", systemImage: "bolt.fill") }
-            BodyView().tag(3).tabItem { Label("Body", systemImage: "figure.stand") }
-            YouView().tag(4).tabItem { Label("You", systemImage: "person.fill") }
+        TabView(selection: $tabs.selection) {
+            TodayView().tag(AppTab.today.rawValue).tabItem { Label("Today", systemImage: "circle.circle.fill") }
+            TrendsView().tag(AppTab.insights.rawValue).tabItem { Label("Insights", systemImage: "chart.bar.fill") }
+            TrainView().tag(AppTab.activity.rawValue).tabItem { Label("Activity", systemImage: "bolt.fill") }
+            BodyView().tag(AppTab.body.rawValue).tabItem { Label("Body", systemImage: "figure.stand") }
+            YouView().tag(AppTab.you.rawValue).tabItem { Label("You", systemImage: "person.fill") }
         }
+        .environmentObject(tabs)
         .toolbarBackground(Palette.canvas, for: .tabBar)
         .toolbarBackground(.visible, for: .tabBar)
         .tint(Palette.accent)
     }
+}
+
+/// Shared tab indices so Today (and others) can jump to Insights, etc.
+enum AppTab: Int {
+    case today = 0
+    case insights = 1
+    case activity = 2
+    case body = 3
+    case you = 4
+}
+
+final class TabRouter: ObservableObject {
+    @Published var selection: Int
+    init(initial: Int = 0) { selection = initial }
+    func go(to tab: AppTab) { selection = tab.rawValue }
 }
 
 /// Shared helpers for date-based chart axes (auto-thinned, formatted labels).

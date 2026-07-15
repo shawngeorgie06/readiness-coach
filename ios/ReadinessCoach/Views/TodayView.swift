@@ -3,6 +3,7 @@ import SwiftUI
 struct TodayView: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var sync: SyncService
+    @EnvironmentObject private var tabs: TabRouter
 
     @State private var showAsk = false
     @State private var showSettings = false
@@ -172,11 +173,24 @@ struct TodayView: View {
 
         metricTiles(today.pillars)
         if recent.count > 1 {
-            SectionCard(title: "Readiness trend") {
-                ReadinessSparkline(points: recent)
-                Text("Last \(recent.count) days · tap Trends for detail")
-                    .font(.caption).foregroundStyle(.secondary)
+            Button {
+                tabs.go(to: .insights)
+            } label: {
+                SectionCard(title: "Readiness trend") {
+                    ReadinessSparkline(points: recent)
+                    HStack(spacing: 4) {
+                        Text("Last \(recent.count) days · tap for Insights detail")
+                            .font(.caption)
+                            .foregroundStyle(Palette.textSecondary)
+                        Spacer(minLength: 4)
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Palette.accent)
+                    }
+                }
             }
+            .buttonStyle(.plain)
+            .accessibilityHint("Opens the Insights tab")
         }
         advisor(today.advisor)
         Button { showAsk = true } label: {
