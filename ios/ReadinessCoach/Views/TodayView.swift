@@ -271,17 +271,23 @@ struct TodayView: View {
         SectionCard(title: "Strict advisor") {
             if !note.why.isEmpty {
                 ForEach(note.why, id: \.self) { line in
-                    Label(line, systemImage: "checkmark.circle")
-                        .font(.subheadline)
-                        .labelStyle(.titleAndIcon)
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "checkmark.circle")
+                        Text(line)
+                            .font(.subheadline)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
             }
             Text(note.prescription)
                 .font(.subheadline.weight(.medium))
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 4)
             Text("If ignored: \(note.ifIgnored)")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             Text(note.source == "llm" ? "Written by coach model" : "Template note")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
