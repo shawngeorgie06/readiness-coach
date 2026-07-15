@@ -38,6 +38,7 @@ struct MainTabView: View {
         TabView(selection: $tabs.selection) {
             TodayView().tag(AppTab.today.rawValue).tabItem { Label("Today", systemImage: "circle.circle.fill") }
             TrendsView().tag(AppTab.insights.rawValue).tabItem { Label("Insights", systemImage: "chart.bar.fill") }
+            SleepView().tag(AppTab.sleep.rawValue).tabItem { Label("Sleep", systemImage: "bed.double.fill") }
             TrainView().tag(AppTab.activity.rawValue).tabItem { Label("Activity", systemImage: "bolt.fill") }
             BodyView().tag(AppTab.body.rawValue).tabItem { Label("Body", systemImage: "figure.stand") }
             YouView().tag(AppTab.you.rawValue).tabItem { Label("You", systemImage: "person.fill") }
@@ -49,13 +50,14 @@ struct MainTabView: View {
     }
 }
 
-/// Shared tab indices so Today (and others) can jump to Insights, etc.
+/// Shared tab indices so Today (and others) can jump to Insights / Sleep, etc.
 enum AppTab: Int {
     case today = 0
     case insights = 1
-    case activity = 2
-    case body = 3
-    case you = 4
+    case sleep = 2
+    case activity = 3
+    case body = 4
+    case you = 5
 }
 
 final class TabRouter: ObservableObject {

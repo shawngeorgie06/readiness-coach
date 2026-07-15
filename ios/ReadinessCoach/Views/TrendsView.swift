@@ -2,9 +2,10 @@ import SwiftUI
 import Charts
 
 /// Insights tab — Aether prototype: range selector, readiness trend bars (tappable),
-/// pillar trends, sleep charts.
+/// pillar trends. Sleep detail lives on the Sleep tab.
 struct TrendsView: View {
     @EnvironmentObject private var settings: AppSettings
+    @EnvironmentObject private var tabs: TabRouter
     @State private var response: ReadinessHistoryResponse?
     @State private var error: String?
     @State private var isLoading = false
@@ -12,7 +13,6 @@ struct TrendsView: View {
     @State private var selectedPointID: String?
     @State private var pillarSelection: Date?
     @State private var pillars: Pillars?
-    @State private var showSleepDetail = false
 
     private let rangeLabels = ["7d", "30d", "90d"]
     private let rangeDays = [7, 30, 90]
@@ -27,7 +27,6 @@ struct TrendsView: View {
                         trendCard(points)
                         insightCards()
                         pillarsCard(points)
-                        sleepEntryCard
                     } else if isLoading {
                         ProgressView().padding(.top, 60)
                     } else {
@@ -47,11 +46,6 @@ struct TrendsView: View {
             .verticalScrollLocked()
             .screenBackground()
             .toolbar(.hidden, for: .navigationBar)
-            .sheet(isPresented: $showSleepDetail) {
-                NavigationStack {
-                    SleepView(showsDismiss: true)
-                }
-            }
             .task { await load() }
             .refreshable { await load() }
             .onChange(of: rangeIndex) { _, _ in
@@ -189,50 +183,18 @@ struct TrendsView: View {
     @ViewBuilder
     private func insightCards() -> some View {
         if let pillars {
-            Button { showSleepDetail = true } label: {
+            Button { tabs.go(to: .sleep) } label: {
                 insightCard("Sleep", .sleep, pillars.sleep,
-                            meaning: "How well you rested — duration and consistency vs your need. Tap for stages & history.")
+                            meaning: "How well you rested — duration and consistency vs your need. Tap to open the Sleep tab.")
             }
             .buttonStyle(.plain)
-            .accessibilityHint("Opens sleep stages and history")
+            .accessibilityHint("Opens the Sleep tab")
 
             insightCard("Recovery", .good, pillars.recovery,
                         meaning: "Nervous-system recovery from HRV and resting heart rate vs your baseline.")
             insightCard("Load", .accent, pillars.load,
                         meaning: "Recent training stress — how hard you’ve pushed vs your norm.")
         }
-    }
-
-    /// Opens the full Sleep detail sheet (stages, charts, consistency).
-    private var sleepEntryCard: some View {
-        Button { showSleepDetail = true } label: {
-            HStack(spacing: 14) {
-                Image(systemName: "bed.double.fill")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(Palette.lavender)
-                    .frame(width: 44, height: 44)
-                    .background(Palette.lavender.opacity(0.16), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Sleep details")
-                        .font(.system(size: 16, weight: .semibold, design: .rounded))
-                        .foregroundStyle(Palette.textPrimary)
-                    Text("Stages, restorative sleep, and nightly history")
-                        .font(.caption)
-                        .foregroundStyle(Palette.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 8)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Palette.accent)
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Palette.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Palette.strokeSoft, lineWidth: 1))
-        }
-        .buttonStyle(.plain)
-        .accessibilityHint("Opens sleep stages and history")
     }
 
     private func insightCard(_ name: String, _ tone: Pill.Tone, _ pillar: PillarScore, meaning: String) -> some View {
