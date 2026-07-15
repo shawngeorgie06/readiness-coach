@@ -12,7 +12,7 @@ extension Color {
 
 /// Bump when shipping device-visible UI fixes. Shown on Today + You.
 enum AppBuild {
-    static let stamp = "1.1.1"
+    static let stamp = "1.1.2"
 }
 
 /// Aether — warm, human, approachable dark. Every token explicit.
