@@ -86,7 +86,7 @@ struct TodayView: View {
             banner(
                 "Calibrating",
                 "Baselines are still forming from your recent history. Treat scores as provisional.",
-                color: .orange,
+                color: Palette.warn,
                 icon: "gauge.with.dots.needle.33percent",
                 infoTitle: "Calibrating",
                 infoMessage: "Your baselines are still forming from recent history. Scores are provisional until ~14 days of data exist."
@@ -96,22 +96,23 @@ struct TodayView: View {
             banner(
                 "Low confidence",
                 "Some data is missing today\(Self.friendlyMissing(today.missing)), so we're keeping the call cautious.",
-                color: .yellow,
-                icon: "exclamationmark.triangle",
+                color: Palette.warn,
+                icon: "exclamationmark.triangle.fill",
                 infoTitle: "Low confidence",
                 infoMessage: "Some signals are missing today, so the decision stays conservative. Sync your Watch data to improve it."
             )
         }
 
         VStack(spacing: 16) {
-            HStack {
+            HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Eyebrow(text: "Readiness")
+                    Eyebrow(text: "Readiness", color: Palette.accent)
                     Text("Calibrated from sleep, HRV & load").font(.caption).foregroundStyle(Palette.textSecondary)
                 }
+                Spacer()
+                Pill(today.decision.title, tone: pillTone(today.decision))
             }
             ReadinessRing(readiness: today.readiness, decision: today.decision)
-            DecisionChip(decision: today.decision)
             Text(today.decision.meaning).font(.system(.body, design: .rounded))
                 .foregroundStyle(Palette.textSecondary).multilineTextAlignment(.center)
             HStack(spacing: 8) {
@@ -151,6 +152,10 @@ struct TodayView: View {
         }
         .buttonStyle(.borderedProminent)
         .tint(Palette.accent)
+    }
+
+    private func pillTone(_ d: Decision) -> Pill.Tone {
+        switch d { case .push: return .good; case .maintain: return .warn; case .recover: return .accent }
     }
 
     /// A small labeled value inside the hero card (HRV / RHR / Sleep).
@@ -222,17 +227,16 @@ struct TodayView: View {
 
     private func banner(_ title: String, _ message: String, color: Color, icon: String,
                         infoTitle: String, infoMessage: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: icon).foregroundStyle(color)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.subheadline.weight(.semibold))
-                Text(message).font(.footnote).foregroundStyle(.secondary)
-            }
-            Spacer()
+        HStack(spacing: 8) {
+            Image(systemName: icon).font(.caption).foregroundStyle(color)
+            Text(title).font(.caption.weight(.semibold)).foregroundStyle(color)
+            Text(message).font(.caption2).foregroundStyle(Palette.textSecondary).lineLimit(2)
+            Spacer(minLength: 4)
             InfoBadge(title: infoTitle, message: infoMessage)
         }
-        .padding()
-        .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(color.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(color.opacity(0.22), lineWidth: 1))
     }
 
     /// Loads the 7-day readiness history for the sparkline; failures hide it silently.

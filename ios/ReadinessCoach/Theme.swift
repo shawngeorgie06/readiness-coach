@@ -37,8 +37,10 @@ enum Palette {
     static let warm      = accent
     static let coral     = accent
 
+    // Warm decision palette (Aether): recover reads coral, not clinical red, to
+    // match the prototype's warm hero. push→mint, maintain→amber, recover→coral.
     static func decisionColor(_ d: Decision) -> Color {
-        switch d { case .push: return success; case .maintain: return warn; case .recover: return danger }
+        switch d { case .push: return success; case .maintain: return warn; case .recover: return accent }
     }
     static func gradient(for d: Decision) -> [Color] {
         let c = decisionColor(d)
@@ -53,11 +55,12 @@ enum Palette {
 
 struct Eyebrow: View {
     let text: String
+    var color: Color = Palette.textSecondary
     var body: some View {
         Text(text.uppercased())
             .font(.system(.caption2, design: .monospaced).weight(.semibold))
             .tracking(1.2)
-            .foregroundStyle(Palette.textSecondary)
+            .foregroundStyle(color)
     }
 }
 
