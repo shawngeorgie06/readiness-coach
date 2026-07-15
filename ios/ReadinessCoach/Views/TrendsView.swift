@@ -1,20 +1,28 @@
 import SwiftUI
 import Charts
 
+/// Insights tab — matches the Aether prototype's Insights panel: screen-head,
+/// a range selector, the readiness trend as bars, plus real pillar trends and
+/// the folded sleep charts.
 struct TrendsView: View {
     @EnvironmentObject private var settings: AppSettings
     @State private var response: ReadinessHistoryResponse?
     @State private var error: String?
     @State private var isLoading = false
-    @State private var readinessSelection: Date?
+    @State private var rangeIndex = 1
     @State private var pillarSelection: Date?
+
+    private let rangeLabels = ["7d", "30d", "90d"]
+    private let rangeDays = [7, 30, 90]
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
+                    header
+                    SegmentedRange(rangeLabels, selection: $rangeIndex)
                     if let points, !points.isEmpty {
-                        readinessCard(points)
+                        trendCard(points)
                         pillarsCard(points)
                         SleepChartsSection()
                     } else if isLoading {
@@ -23,7 +31,7 @@ struct TrendsView: View {
                         ContentUnavailableCompat(
                             title: "No trend yet",
                             message: "Sync a few days of data to see your readiness trend.",
-                            systemImage: "chart.line.uptrend.xyaxis"
+                            systemImage: "chart.bar.fill"
                         )
                     }
                     if let error {
@@ -32,94 +40,82 @@ struct TrendsView: View {
                 }
                 .padding()
             }
-            .navigationTitle("Trends")
+            .screenBackground()
+            .toolbar(.hidden, for: .navigationBar)
             .task { await load() }
             .refreshable { await load() }
+            .onChange(of: rangeIndex) { _, _ in Task { await load() } }
         }
     }
 
     private var points: [ReadinessPoint]? { response?.data }
 
-    /// Plain-language readiness trend for the summary line.
-    private func readinessSummary(_ points: [ReadinessPoint]) -> String {
-        guard let trend = metricTrend(values: points.map { $0.readiness }, goodDirection: .higher, threshold: 2) else {
-            return "Not enough history yet to call a trend."
-        }
-        switch trend.direction {
-        case .up:   return "Your readiness is improving lately."
-        case .flat: return "Your readiness is holding steady lately."
-        case .down: return "Your readiness is sliding lately."
+    private var header: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                Eyebrow(text: "Patterns")
+                Text("Insights").font(.system(size: 30, weight: .bold, design: .rounded))
+                    .foregroundStyle(Palette.textPrimary)
+            }
+            Spacer()
         }
     }
 
-    private func readinessCard(_ points: [ReadinessPoint]) -> some View {
-        SectionCard(title: "Readiness — last \(response?.days ?? 0) days") {
-            HStack(spacing: 6) {
-                Text(readinessSummary(points))
-                    .font(.subheadline.weight(.medium))
-                InfoBadge(title: "Readiness score",
-                          message: "A 0–100 daily score. 75+ means Push, 50–74 Maintain, under 50 Recover. The score decides; the coach only ever plays it safer.")
-            }
-            Chart(points) { point in
-                LineMark(x: .value("Date", ChartDate.day(point.date)), y: .value("Readiness", point.readiness))
-                    .foregroundStyle(.secondary)
-                PointMark(x: .value("Date", ChartDate.day(point.date)), y: .value("Readiness", point.readiness))
-                    .foregroundStyle(point.decision.tint)
-                    .symbolSize(40)
-                if let sel = readinessSelection {
-                    RuleMark(x: .value("Date", sel))
-                        .foregroundStyle(.gray.opacity(0.4))
-                        .annotation(position: .top, overflowResolution: .init(x: .fit, y: .disabled)) {
-                            if let snapped = nearestDate(sel, in: points.map { ChartDate.day($0.date) }),
-                               let hit = points.first(where: { ChartDate.day($0.date) == snapped }) {
-                                ScrubReadout(date: snapped, lines: ["\(Int(hit.readiness.rounded())) · \(hit.decision.title)"])
-                            }
-                        }
+    // MARK: - Readiness trend (bars, avg, delta)
+
+    private func trendCard(_ points: [ReadinessPoint]) -> some View {
+        let avg = points.map(\.readiness).reduce(0, +) / Double(points.count)
+        let delta = (points.last?.readiness ?? 0) - (points.first?.readiness ?? 0)
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Eyebrow(text: "Readiness trend")
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text("\(Int(avg.rounded()))")
+                            .font(.system(size: 28, weight: .bold, design: .rounded))
+                            .foregroundStyle(Palette.textPrimary)
+                        Text("avg").font(.caption).foregroundStyle(Palette.textSecondary)
+                    }
                 }
+                Spacer()
+                Pill(String(format: "%+d pts", Int(delta.rounded())), tone: delta >= 0 ? .good : .warn)
             }
-            .chartYScale(domain: 0 ... 100)
-            .frame(height: 200)
-            .chartXSelection(value: $readinessSelection)
-            HStack(spacing: 14) {
-                ForEach(Decision.allCases, id: \.self) { decision in
-                    Label(decision.title, systemImage: "circle.fill")
-                        .font(.caption2).foregroundStyle(decision.tint)
-                        .labelStyle(.titleAndIcon)
-                }
-            }
-            if let latest = points.last {
-                Text("Latest \(Int(latest.readiness.rounded())) · \(latest.decision.title)")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+            trendBars(points)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card()
     }
+
+    private func trendBars(_ points: [ReadinessPoint]) -> some View {
+        GeometryReader { geo in
+            HStack(alignment: .bottom, spacing: max(2, 4 - Double(points.count) / 30)) {
+                ForEach(points) { p in
+                    let isToday = p.id == points.last?.id
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(isToday ? Palette.accent : Palette.accent.opacity(0.5))
+                        .frame(height: max(6, geo.size.height * (p.readiness / 100)))
+                        .shadow(color: isToday ? Palette.accent.opacity(0.5) : .clear, radius: 6)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        }
+        .frame(height: 130)
+    }
+
+    // MARK: - Pillar trends (real, restyled to the Aether palette)
 
     private func pillarsCard(_ points: [ReadinessPoint]) -> some View {
-        SectionCard(title: "Pillar scores over time") {
-            HStack(spacing: 6) {
-                Text("Sleep, Recovery, and Load are the three inputs to your readiness — watch which one is dragging the others down.")
-                    .font(.caption).foregroundStyle(.secondary)
-                InfoBadge(title: "Pillars",
-                          message: "Each pillar is scored 0–100. Your readiness is built from all three, so a low pillar here explains a low score on Today.")
-            }
+        VStack(alignment: .leading, spacing: 12) {
+            Eyebrow(text: "Pillar scores")
             Chart {
                 ForEach(points) { point in
-                    LineMark(x: .value("Date", ChartDate.day(point.date)),
-                             y: .value("Score", point.sleepScore),
-                             series: .value("Pillar", "Sleep"))
-                        .foregroundStyle(by: .value("Pillar", "Sleep"))
-                    LineMark(x: .value("Date", ChartDate.day(point.date)),
-                             y: .value("Score", point.recoveryScore),
-                             series: .value("Pillar", "Recovery"))
-                        .foregroundStyle(by: .value("Pillar", "Recovery"))
-                    LineMark(x: .value("Date", ChartDate.day(point.date)),
-                             y: .value("Score", point.loadScore),
-                             series: .value("Pillar", "Load"))
-                        .foregroundStyle(by: .value("Pillar", "Load"))
+                    line(point.date, point.sleepScore, "Sleep")
+                    line(point.date, point.recoveryScore, "Recovery")
+                    line(point.date, point.loadScore, "Load")
                 }
                 if let sel = pillarSelection {
                     RuleMark(x: .value("Date", sel))
-                        .foregroundStyle(.gray.opacity(0.4))
+                        .foregroundStyle(Palette.textTertiary.opacity(0.5))
                         .annotation(position: .top, overflowResolution: .init(x: .fit, y: .disabled)) {
                             if let snapped = nearestDate(sel, in: points.map { ChartDate.day($0.date) }),
                                let hit = points.first(where: { ChartDate.day($0.date) == snapped }) {
@@ -132,11 +128,32 @@ struct TrendsView: View {
                         }
                 }
             }
-            .chartForegroundStyleScale(domain: ["Sleep", "Recovery", "Load"], range: [.blue, .teal, .orange])
+            .chartForegroundStyleScale(domain: ["Sleep", "Recovery", "Load"],
+                                       range: [Palette.lavender, Palette.mint, Palette.accent])
             .chartYScale(domain: 0 ... 100)
-            .frame(height: 200)
+            .chartLegend(.hidden)
+            .frame(height: 180)
             .chartXSelection(value: $pillarSelection)
+            HStack(spacing: 14) {
+                legendDot("Sleep", Palette.lavender)
+                legendDot("Recovery", Palette.mint)
+                legendDot("Load", Palette.accent)
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card()
+    }
+
+    private func line(_ date: String, _ value: Double, _ series: String) -> some ChartContent {
+        LineMark(x: .value("Date", ChartDate.day(date)), y: .value("Score", value),
+                 series: .value("Pillar", series))
+            .foregroundStyle(by: .value("Pillar", series))
+            .interpolationMethod(.catmullRom)
+    }
+
+    private func legendDot(_ label: String, _ color: Color) -> some View {
+        Label(label, systemImage: "circle.fill")
+            .font(.caption2).foregroundStyle(color).labelStyle(.titleAndIcon)
     }
 
     private func load() async {
@@ -145,10 +162,9 @@ struct TrendsView: View {
         error = nil
         defer { isLoading = false }
         do {
-            response = try await client.getHistory(days: 30)
+            response = try await client.getHistory(days: rangeDays[rangeIndex])
         } catch {
             self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
-
 }
