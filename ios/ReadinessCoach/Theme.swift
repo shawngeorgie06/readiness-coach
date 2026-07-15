@@ -15,8 +15,8 @@ extension Color {
 /// labels cannot drift from MARKETING_VERSION.
 enum AppBuild {
     /// Fallback only if Info.plist keys are missing (previews / tests).
-    private static let fallbackMarketing = "1.1.3"
-    private static let fallbackBuild = "5"
+    private static let fallbackMarketing = "1.1.4"
+    private static let fallbackBuild = "6"
 
     static var marketing: String {
         (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String)

@@ -18,7 +18,7 @@ struct ReadinessSparkline: View {
         .frame(height: 56)
         .frame(maxWidth: .infinity)
         .clipped()
-        .allowsHitTesting(false)
         .accessibilityLabel("Last \(points.count) readiness scores")
+        .accessibilityHidden(true)
     }
 }
