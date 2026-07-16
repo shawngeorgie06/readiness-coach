@@ -71,11 +71,18 @@ struct APIClient {
 
     /// Verifies the base URL + token reach a working backend for this user.
     func testConnection() async throws {
-        // /health needs no auth but confirms the origin; getToday confirms auth + user.
+        // /health needs no auth but confirms the origin.
         var health = URLRequest(url: baseURL.appendingPathComponent("health"))
         health.timeoutInterval = 8
         _ = try await URLSession.shared.data(for: health)
-        _ = try await getToday()
+        // getToday confirms the token is accepted. A brand-new user that hasn't
+        // synced yet legitimately has no Today (404 user_not_found) — that still
+        // proves the URL + token are correct, so count it as a successful test.
+        do {
+            _ = try await getToday()
+        } catch APIError.http(status: 404, code: "user_not_found") {
+            return
+        }
     }
 
     /// Deletes the user and all associated health data (GDPR-style erase).
