@@ -14,14 +14,21 @@ final class SyncService: ObservableObject {
     private let health = HealthKitService()
     private var lastAutoSyncAt: Date?
 
-    private let cache = UserDefaults.standard
-    private static let cacheKey = "cachedTodayJSON"
+    /// Today includes health-derived information. Keep it in a file with iOS
+    /// complete file protection rather than in UserDefaults, and do not include
+    /// it in device backups.
+    private static let legacyCacheKey = "cachedTodayJSON"
+    private static let cacheURL = FileManager.default
+        .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("cached-today.json")
 
     /// Show the last-known Today immediately on launch (stale-while-revalidate),
     /// so a cold Render server (30–60s wake) doesn't leave the UI blank. The
     /// network refresh then replaces it in the background.
     init() {
-        if let data = cache.data(forKey: Self.cacheKey),
+        // Remove the pre-v1.3.4 UserDefaults cache after upgrading.
+        UserDefaults.standard.removeObject(forKey: Self.legacyCacheKey)
+        if let data = try? Data(contentsOf: Self.cacheURL),
            let cached = try? JSONDecoder().decode(TodayDTO.self, from: data) {
             today = cached
         }
@@ -32,7 +39,20 @@ final class SyncService: ObservableObject {
         today = dto
         settings.lastRefreshAt = Date()
         if let data = try? JSONEncoder().encode(dto) {
-            cache.set(data, forKey: Self.cacheKey)
+            do {
+                let directory = Self.cacheURL.deletingLastPathComponent()
+                try FileManager.default.createDirectory(
+                    at: directory,
+                    withIntermediateDirectories: true
+                )
+                try data.write(to: Self.cacheURL, options: [.atomic, .completeFileProtection])
+                var values = URLResourceValues()
+                values.isExcludedFromBackup = true
+                var cacheURL = Self.cacheURL
+                try cacheURL.setResourceValues(values)
+            } catch {
+                // Caching is an optimization; a fresh response remains usable.
+            }
         }
     }
 
