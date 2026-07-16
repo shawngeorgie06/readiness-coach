@@ -1,0 +1,28 @@
+# Free personal deploy blueprint for Render.
+# See docs/personal-free-deploy.md for Neon Postgres + secrets setup.
+#
+# Note: free Render web services sleep after idle. The first open of the day
+# can take ~30–60s while the API wakes up; after that it feels normal.
+
+services:
+  - type: web
+    name: readiness-coach-api
+    runtime: docker
+    plan: free
+    region: oregon
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: API_TOKEN
+        sync: false
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_BASE_URL
+        value: https://api.openai.com/v1
+      - key: LLM_MODEL
+        value: gpt-4o-mini

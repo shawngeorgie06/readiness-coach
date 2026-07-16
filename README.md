@@ -8,6 +8,7 @@ Watch → HealthKit → iPhone app → your API → readiness score (Push / Main
 
 - [Design spec](docs/superpowers/specs/2026-07-10-readiness-coach-design.md)
 - [Implementation plan](docs/superpowers/plans/2026-07-10-readiness-coach.md)
+- [Personal free deploy (phone app without laptop server)](docs/personal-free-deploy.md)
 
 ## Stack (planned)
 
