@@ -35,18 +35,24 @@ struct MainTabView: View {
     )
 
     var body: some View {
-        // System TabView collapses a 6th item into "More". Custom bar keeps all six visible.
-        ZStack {
-            tabPage(.today) { TodayView() }
-            tabPage(.insights) { TrendsView() }
-            tabPage(.sleep) { SleepView() }
-            tabPage(.activity) { TrainView() }
-            tabPage(.body) { BodyView() }
-            tabPage(.you) { YouView() }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+        // Custom six-tab shell: system TabView only shows five (+ More) and our solid
+        // replacement dropped Liquid Glass. Float a glass bar over content instead.
+        ZStack(alignment: .bottom) {
+            ZStack {
+                tabPage(.today) { TodayView() }
+                tabPage(.insights) { TrendsView() }
+                tabPage(.sleep) { SleepView() }
+                tabPage(.activity) { TrainView() }
+                tabPage(.body) { BodyView() }
+                tabPage(.you) { YouView() }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Leave room so scroll content isn’t trapped under the floating bar.
+            .safeAreaPadding(.bottom, 56)
+
             AetherTabBar(selection: $tabs.selection)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 6)
         }
         .background(Palette.canvas.ignoresSafeArea())
         .environmentObject(tabs)
@@ -63,7 +69,7 @@ struct MainTabView: View {
     }
 }
 
-/// Custom six-item bar — UIKit's UITabBar only shows five (+ More).
+/// Floating six-item bar with Liquid Glass when the SDK has it, material glass otherwise.
 struct AetherTabBar: View {
     @Binding var selection: Int
 
@@ -71,20 +77,22 @@ struct AetherTabBar: View {
         HStack(spacing: 0) {
             ForEach(AppTab.allCases) { tab in
                 Button {
-                    selection = tab.rawValue
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+                        selection = tab.rawValue
+                    }
                 } label: {
                     VStack(spacing: 3) {
                         Image(systemName: tab.systemImage)
                             .font(.system(size: 16, weight: .semibold))
+                            .symbolEffect(.bounce, value: selection == tab.rawValue)
                         Text(tab.title)
-                            .font(.system(size: 9, weight: .medium))
+                            .font(.system(size: 9, weight: .semibold))
                             .lineLimit(1)
-                            .minimumScaleFactor(0.8)
+                            .minimumScaleFactor(0.75)
                     }
-                    .foregroundStyle(selection == tab.rawValue ? Palette.accent : Palette.textTertiary)
+                    .foregroundStyle(selection == tab.rawValue ? Palette.accent : Palette.textSecondary)
                     .frame(maxWidth: .infinity)
-                    .padding(.top, 8)
-                    .padding(.bottom, 4)
+                    .padding(.vertical, 8)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -92,16 +100,41 @@ struct AetherTabBar: View {
                 .accessibilityAddTraits(selection == tab.rawValue ? .isSelected : [])
             }
         }
-        .padding(.horizontal, 2)
-        .background {
-            Palette.canvas
-                .shadow(color: .black.opacity(0.35), radius: 8, y: -2)
-                .ignoresSafeArea(edges: .bottom)
-        }
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(Palette.strokeSoft)
-                .frame(height: 1)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .liquidGlassChrome()
+    }
+}
+
+extension View {
+    /// Tab-bar chrome: native Liquid Glass on iOS 26+, frosted material fallback earlier.
+    @ViewBuilder
+    func liquidGlassChrome() -> some View {
+        if #available(iOS 26.0, *) {
+            self
+                .glassEffect(.regular.interactive(), in: .capsule)
+                .shadow(color: .black.opacity(0.22), radius: 18, y: 8)
+        } else {
+            self
+                .background {
+                    Capsule()
+                        .fill(.ultraThinMaterial)
+                        .overlay {
+                            Capsule()
+                                .strokeBorder(
+                                    LinearGradient(
+                                        colors: [
+                                            Color.white.opacity(0.38),
+                                            Color.white.opacity(0.06),
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    ),
+                                    lineWidth: 0.8
+                                )
+                        }
+                        .shadow(color: .black.opacity(0.28), radius: 18, y: 8)
+                }
         }
     }
 }
