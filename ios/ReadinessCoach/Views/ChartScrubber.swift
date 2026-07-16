@@ -191,8 +191,9 @@ final class ClampHostView: UIView {
     }
 
     private static func lock(_ scroll: UIScrollView) {
-        // Never clamp the horizontal page TabView — that kills section swiping.
+        // Never clamp the section pager (multi-page horizontal) or UIKit paging scrollers.
         if scroll.isPagingEnabled { return }
+        if scroll.contentSize.width >= max(scroll.bounds.width, 1) * 1.8 { return }
         // Nested intentional horizontal chip/carousels keep their own width.
         if scroll.contentSize.width > scroll.bounds.width + 1,
            abs(scroll.contentSize.height - scroll.bounds.height) < 1 {
