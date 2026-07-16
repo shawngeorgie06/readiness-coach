@@ -35,6 +35,8 @@ export function createApp({
   rateLimit: rateLimitOptions = defaultRateLimit,
 }: AppOptions) {
   const app = express();
+  // Render (and most hosts) terminate TLS at a proxy — needed for correct IPs.
+  app.set("trust proxy", 1);
   app.use(helmet());
   app.use(
     cors({

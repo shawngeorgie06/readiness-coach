@@ -1,0 +1,30 @@
+# Ping the Render free API every 10 minutes so it does not spin down after 15
+# minutes of idle (same keep-alive idea as an external "proxy" ping).
+#
+# One-time setup after the service is live:
+#   GitHub → repo Settings → Secrets and variables → Actions
+#   Create secret RENDER_HEALTH_URL = https://<your-service>.onrender.com/health
+
+name: render-keepalive
+
+on:
+  schedule:
+    # Every 10 minutes. GitHub cron can drift a few minutes; still under 15.
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Render /health
+        env:
+          RENDER_HEALTH_URL: ${{ secrets.RENDER_HEALTH_URL }}
+        run: |
+          if [ -z "$RENDER_HEALTH_URL" ]; then
+            echo "RENDER_HEALTH_URL secret not set — skip (add it after first deploy)."
+            exit 0
+          fi
+          curl -fsS --max-time 90 "$RENDER_HEALTH_URL"
+          echo
+          echo "keep-alive ok"
