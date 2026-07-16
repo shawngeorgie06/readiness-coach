@@ -93,7 +93,17 @@ struct APIClient {
     // MARK: - Internals
 
     private func dateQuery(_ date: String?) -> [URLQueryItem] {
-        [URLQueryItem(name: "date", value: date ?? Self.deviceLocalDate())]
+        [
+            URLQueryItem(name: "date", value: date ?? Self.deviceLocalDate()),
+            URLQueryItem(name: "tz", value: String(Self.tzOffsetMinutes())),
+        ]
+    }
+
+    /// The device's UTC offset in minutes (local − UTC; EDT = −240). The server
+    /// anchors each night's noon-to-noon window in this offset so a late wake-up
+    /// isn't split across day buckets regardless of the server's own timezone.
+    static func tzOffsetMinutes(now: Date = Date()) -> Int {
+        TimeZone.current.secondsFromGMT(for: now) / 60
     }
 
     /// The device's current calendar day (user's local timezone) as YYYY-MM-DD.

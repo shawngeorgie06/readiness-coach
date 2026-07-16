@@ -12,16 +12,43 @@ import {
 process.env.TZ = "America/New_York";
 
 describe("today aggregation helpers", () => {
-  it("anchors the sleep window on local noon, not UTC noon", () => {
-    const { start, end } = sleepWindowForDate(new Date("2026-07-12T00:00:00.000Z"));
-    // Last night = local noon Jul 11 → local noon Jul 12 (a natural night boundary in the user's zone).
-    expect(end.getHours()).toBe(12);
-    expect(end.getDate()).toBe(12);
-    expect(start.getHours()).toBe(12);
-    expect(start.getDate()).toBe(11);
-    expect(end.getTime() - start.getTime()).toBe(24 * 60 * 60 * 1000);
-    // In America/New_York (EDT, −4) local noon is 16:00 UTC — proving it is NOT the old UTC noon (12:00 UTC).
-    expect(end.getUTCHours()).toBe(16);
+  it("anchors the sleep window on the user's local noon via the tz offset", () => {
+    // EDT (−240): the night for Jul 12 runs local noon Jul 11 → local noon Jul 12,
+    // i.e. 16:00 UTC Jul 11 → 16:00 UTC Jul 12. Computed from the offset, so it
+    // does not depend on the server's own timezone (Render runs in UTC).
+    const edt = sleepWindowForDate(new Date("2026-07-12T00:00:00.000Z"), -240);
+    expect(edt.start.toISOString()).toBe("2026-07-11T16:00:00.000Z");
+    expect(edt.end.toISOString()).toBe("2026-07-12T16:00:00.000Z");
+    expect(edt.end.getTime() - edt.start.getTime()).toBe(24 * 60 * 60 * 1000);
+
+    // With no offset it falls back to plain UTC noon-to-noon (legacy behavior).
+    const utc = sleepWindowForDate(new Date("2026-07-12T00:00:00.000Z"));
+    expect(utc.end.toISOString()).toBe("2026-07-12T12:00:00.000Z");
+  });
+
+  it("keeps a full 7h52 Watch night in one day's bucket instead of leaking ~53m", () => {
+    // Regression: an Apple Watch night of 01:00–08:52 EDT on Jul 15
+    // (= 05:00–12:52 UTC), 7h52m asleep. The old UTC-noon boundary (12:00 UTC =
+    // 08:00 EDT) sliced off the 08:00–08:52 tail into the NEXT day, surfacing a
+    // phantom ~53-minute "night" for Jul 16.
+    const tz = -240; // EDT
+    const samples = [
+      {
+        startAt: new Date("2026-07-15T05:00:00.000Z"),
+        endAt: new Date("2026-07-15T12:52:00.000Z"),
+        metadata: { stage: "core" },
+      },
+    ];
+    const jul15 = sleepWindowForDate(new Date("2026-07-15T00:00:00.000Z"), tz);
+    const jul16 = sleepWindowForDate(new Date("2026-07-16T00:00:00.000Z"), tz);
+    // The whole night lands on Jul 15; Jul 16 sees none of it.
+    expect(summarizeSleep(samples, jul15.start, jul15.end).durationHours).toBeCloseTo(7.87, 1);
+    expect(summarizeSleep(samples, jul16.start, jul16.end).durationHours).toBe(0);
+
+    // Contrast: the old UTC-noon boundary leaks ~52m of the Jul 15 morning into
+    // Jul 16 — reproducing the reported "53 minute" bug.
+    const jul16Utc = sleepWindowForDate(new Date("2026-07-16T00:00:00.000Z"), 0);
+    expect(summarizeSleep(samples, jul16Utc.start, jul16Utc.end).durationHours).toBeGreaterThan(0.5);
   });
 
 

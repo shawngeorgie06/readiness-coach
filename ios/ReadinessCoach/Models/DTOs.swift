@@ -53,9 +53,14 @@ struct TodayDTO: Codable {
     /// "high" when all core signals are present, otherwise "low".
     let confidence: String
     let missing: [String]
+    /// True when tonight's night hasn't happened yet, so this score reflects the
+    /// last completed night. Optional so older cached payloads still decode.
+    let sleepPending: Bool?
     let advisor: AdvisorNote
 
     var isLowConfidence: Bool { confidence == "low" }
+    /// Whether the app should show "Haven't slept yet" for the sleep tile.
+    var isSleepPending: Bool { sleepPending ?? false }
 }
 
 // MARK: - Detail tabs

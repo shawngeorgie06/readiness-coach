@@ -139,6 +139,12 @@ struct TodayView: View {
             }
             ReadinessRing(readiness: today.readiness, decision: today.decision)
                 .frame(maxWidth: .infinity)
+            if today.isSleepPending {
+                Label("Showing last night — you haven't slept yet tonight", systemImage: "moon.zzz")
+                    .font(.caption).foregroundStyle(Palette.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+            }
             Text(today.decision.meaning).font(.system(.body, design: .rounded))
                 .foregroundStyle(Palette.textSecondary)
                 .multilineTextAlignment(.center)
@@ -147,7 +153,7 @@ struct TodayView: View {
             HStack(spacing: 8) {
                 miniStat("HRV", hrv.map { "\(Int($0.rounded()))" } ?? "—", "ms")
                 miniStat("RHR", rhr.map { "\(Int($0.rounded()))" } ?? "—", "bpm")
-                miniStat("Sleep", sleepHours.map { DurationFormat.short($0) } ?? "—", nil)
+                miniStat("Sleep", today.isSleepPending ? "Not yet" : (sleepHours.map { DurationFormat.short($0) } ?? "—"), nil)
             }
         }
         .frame(maxWidth: .infinity)
@@ -247,8 +253,9 @@ struct TodayView: View {
                     pillars.sleep,
                     opensSleep: true) {
                     MetricTile(label: "Sleep",
-                               value: sleepHours.map { DurationFormat.short($0) } ?? "—",
-                               delta: sleepDelta, fraction: (sleepHours ?? 0) / 8, tone: .sleep)
+                               value: (sync.today?.isSleepPending ?? false) ? "—" : (sleepHours.map { DurationFormat.short($0) } ?? "—"),
+                               delta: (sync.today?.isSleepPending ?? false) ? "Haven't slept yet" : sleepDelta,
+                               fraction: (sync.today?.isSleepPending ?? false) ? 0 : (sleepHours ?? 0) / 8, tone: .sleep)
                 }
                 metricTileButton("Load", "25%",
                     "Recent training strain and the acute:chronic ratio — how hard you've pushed lately vs your norm.",

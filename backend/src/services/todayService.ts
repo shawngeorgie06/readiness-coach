@@ -17,6 +17,10 @@ export interface TodayResponse {
   overridesApplied: string[];
   confidence: "high" | "low";
   missing: string[];
+  /** True when the requested day's night hasn't happened yet (the user hasn't
+   *  slept it), so the score returned reflects the last completed night. The
+   *  client shows "Haven't slept yet" for the sleep tile in this state. */
+  sleepPending: boolean;
   advisor: AdvisorNote;
 }
 
@@ -206,13 +210,19 @@ export function sleepBounds(
 }
 
 /**
- * Last night runs from noon on the previous calendar day through noon today,
- * anchored on the server's LOCAL timezone (the user's) rather than UTC — so a
- * late wake-up isn't truncated and the prior morning's nap isn't miscounted.
- * `date` carries the requested calendar day as its UTC components.
+ * A night's sleep window runs from noon on the previous calendar day through
+ * noon on the requested day, anchored in the USER's timezone (not the server's).
+ * Noon is chosen because nobody is asleep then, so a whole night always lands in
+ * one bucket — a late wake-up can't spill the tail into the next day.
+ *
+ * `tzOffsetMinutes` is the user's local offset from UTC in minutes (EDT = −240),
+ * as reported by the device. Default 0 (UTC) preserves the historical behaviour
+ * when a client omits it. Render runs in UTC, so without this the boundary was
+ * noon UTC = 8am Eastern, splitting nights and producing phantom ~53m "nights".
  */
-export function sleepWindowForDate(date: Date): { start: Date; end: Date } {
-  const end = new Date(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 12, 0, 0, 0);
+export function sleepWindowForDate(date: Date, tzOffsetMinutes = 0): { start: Date; end: Date } {
+  const noonUtc = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 12, 0, 0, 0);
+  const end = new Date(noonUtc - tzOffsetMinutes * 60_000);
   const start = new Date(end.getTime() - DAY_MS);
   return { start, end };
 }
@@ -290,10 +300,11 @@ function sleepHistory(
   samples: SleepSample[],
   targetStart: Date,
   days: number,
+  tzOffsetMinutes = 0,
 ): SleepSummary[] {
   return Array.from({ length: days }, (_, index) => {
     const date = addDays(targetStart, index - (days - 1));
-    const window = sleepWindowForDate(date);
+    const window = sleepWindowForDate(date, tzOffsetMinutes);
     return summarizeSleep(samples, window.start, window.end);
   });
 }
@@ -310,11 +321,16 @@ async function daysOfHistory(userId: string, date: Date): Promise<number> {
 }
 
 /** Deterministic score for a date: compute, persist the DailyScore, and return the response minus the advisor note. */
-export async function computeScore(userId: string, requestedDate = defaultRequestedDate()): Promise<Omit<TodayResponse, "advisor">> {
+export async function computeScore(
+  userId: string,
+  requestedDate = defaultRequestedDate(),
+  tzOffsetMinutes = 0,
+  allowPendingFallback = true,
+): Promise<Omit<TodayResponse, "advisor">> {
   const date = parseRequestedDate(requestedDate);
   const targetStart = dateStart(date);
   const targetEnd = addDays(targetStart, 1);
-  const sleepWindow = sleepWindowForDate(targetStart);
+  const sleepWindow = sleepWindowForDate(targetStart, tzOffsetMinutes);
 
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (user == null) throw new UserNotFoundError(userId);
@@ -348,8 +364,19 @@ export async function computeScore(userId: string, requestedDate = defaultReques
     daysOfHistory(userId, targetStart),
   ]);
 
-  const summaries = sleepHistory(sleepSamples, targetStart, 8);
+  const summaries = sleepHistory(sleepSamples, targetStart, 8, tzOffsetMinutes);
   const lastNight = summaries.at(-1) ?? { durationHours: 0, restorativeHours: 0 };
+
+  // "Haven't slept yet": if the requested night is still in progress (its window
+  // hasn't ended) and no real sleep has landed in it, fall back to the previous
+  // completed night so the score reflects a real night, and flag it so the
+  // client shows "Haven't slept yet" for the sleep tile instead of ~0h.
+  const nightInProgress = Date.now() < sleepWindow.end.getTime();
+  if (allowPendingFallback && nightInProgress && lastNight.durationHours < 1) {
+    const previousDate = addDays(targetStart, -1).toISOString().slice(0, 10);
+    const previous = await computeScore(userId, previousDate, tzOffsetMinutes, false);
+    return { ...previous, sleepPending: true };
+  }
   const recentSleep = summaries.slice(-7).map((summary) => summary.durationHours);
   const sleepDebtHours = recentSleep.reduce(
     (debt, duration) => debt + Math.max(0, user.sleepNeedHours - duration),
@@ -453,13 +480,18 @@ export async function computeScore(userId: string, requestedDate = defaultReques
     overridesApplied: readiness.overridesApplied,
     confidence: missing.length === 0 ? "high" : "low",
     missing,
+    sleepPending: false,
   };
   return response;
 }
 
 /** Compute today's deterministic score and attach the strict advisor note. */
-export async function getToday(userId: string, requestedDate = defaultRequestedDate()): Promise<TodayResponse> {
-  const response = await computeScore(userId, requestedDate);
+export async function getToday(
+  userId: string,
+  requestedDate = defaultRequestedDate(),
+  tzOffsetMinutes = 0,
+): Promise<TodayResponse> {
+  const response = await computeScore(userId, requestedDate, tzOffsetMinutes);
   const advisor = await getAdvisorNote(userId, dateStart(response.date), response);
   return { ...response, advisor };
 }
@@ -529,7 +561,7 @@ export async function getReadinessHistory(
   return { days, data };
 }
 
-export async function getSleepDetails(userId: string, days: number, requestedDate = defaultRequestedDate()) {
+export async function getSleepDetails(userId: string, days: number, requestedDate = defaultRequestedDate(), tzOffsetMinutes = 0) {
   const target = dateStart(requestedDate);
   const start = addDays(target, -(days - 1));
   const samples = await prisma.healthSample.findMany({
@@ -545,7 +577,7 @@ export async function getSleepDetails(userId: string, days: number, requestedDat
     days,
     data: Array.from({ length: days }, (_, index) => {
       const day = addDays(start, index);
-      const window = sleepWindowForDate(day);
+      const window = sleepWindowForDate(day, tzOffsetMinutes);
       return {
         date: day.toISOString().slice(0, 10),
         ...summarizeSleep(samples, window.start, window.end),
