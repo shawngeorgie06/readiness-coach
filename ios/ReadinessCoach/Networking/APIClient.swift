@@ -65,7 +65,7 @@ struct APIClient {
     }
 
     func ask(question: String, date: String? = nil) async throws -> AskResponse {
-        let body = AskRequest(userId: userId, question: question, date: date)
+        let body = AskRequest(userId: userId, question: question, date: date ?? Self.deviceLocalDate())
         return try await send("v1/coach/ask", method: "POST", body: body)
     }
 
@@ -93,8 +93,21 @@ struct APIClient {
     // MARK: - Internals
 
     private func dateQuery(_ date: String?) -> [URLQueryItem] {
-        guard let date else { return [] }
-        return [URLQueryItem(name: "date", value: date)]
+        [URLQueryItem(name: "date", value: date ?? Self.deviceLocalDate())]
+    }
+
+    /// The device's current calendar day (user's local timezone) as YYYY-MM-DD.
+    /// The server otherwise defaults "today" to its own UTC date, which rolls a
+    /// day ahead in the evening for users west of UTC — scoring a night that
+    /// hasn't happened yet (e.g. showing 0.9h of sleep at 11pm). Sending the
+    /// device's local day keeps "today" aligned with the user's actual day.
+    static func deviceLocalDate(now: Date = Date()) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: now)
     }
 
     private func get<T: Decodable>(_ path: String, query: [URLQueryItem]) async throws -> T {
