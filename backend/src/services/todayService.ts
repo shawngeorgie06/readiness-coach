@@ -133,6 +133,30 @@ export function summarizeSleepStages(
   return { deep: toHours(ms.deep), rem: toHours(ms.rem), core: toHours(ms.core), awake: toHours(ms.awake) };
 }
 
+/** Ordered stage segments for a hypnogram (excludes in-bed placeholders). */
+export function sleepTimeline(
+  samples: SleepSample[],
+  windowStart: Date,
+  windowEnd: Date,
+): Array<{ stage: "deep" | "rem" | "core" | "awake"; startAt: string; endAt: string; hours: number }> {
+  const out: Array<{ stage: "deep" | "rem" | "core" | "awake"; startAt: string; endAt: string; hours: number }> = [];
+  for (const { stage, start, end, overlapMs } of windowedSamples(samples, windowStart, windowEnd)) {
+    if (overlapMs <= 0 || stage.includes("inbed")) continue;
+    let label: "deep" | "rem" | "core" | "awake";
+    if (stage.includes("awake")) label = "awake";
+    else if (stage.includes("deep")) label = "deep";
+    else if (stage.includes("rem")) label = "rem";
+    else label = "core";
+    out.push({
+      stage: label,
+      startAt: new Date(start).toISOString(),
+      endAt: new Date(end).toISOString(),
+      hours: round(overlapMs / (60 * 60 * 1000)),
+    });
+  }
+  return out;
+}
+
 /** Earliest asleep-sample start and latest asleep-sample end within a night. */
 export function sleepBounds(
   samples: SleepSample[],
@@ -498,6 +522,7 @@ export async function getSleepDetails(userId: string, days: number, requestedDat
         ...summarizeSleep(samples, window.start, window.end),
         ...sleepBounds(samples, window.start, window.end),
         stages: summarizeSleepStages(samples, window.start, window.end),
+        timeline: sleepTimeline(samples, window.start, window.end),
       };
     }),
   };

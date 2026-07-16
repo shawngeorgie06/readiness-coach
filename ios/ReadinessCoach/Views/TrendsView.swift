@@ -138,7 +138,7 @@ struct TrendsView: View {
         let prior = priorPoint(for: hit, in: points)
         let delta = prior.map { hit.readiness - $0.readiness }
 
-        return VStack(alignment: .leading, spacing: 6) {
+        return VStack(alignment: .leading, spacing: 8) {
             Text(day, format: .dateTime.weekday(.wide).month(.wide).day().year())
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Palette.textPrimary)
@@ -151,10 +151,13 @@ struct TrendsView: View {
                     .foregroundStyle(Palette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            if let prior {
+                pillarDeltaBlock(hit: hit, prior: prior)
+            }
             Text("Sleep \(Int(hit.sleepScore.rounded())) · Recovery \(Int(hit.recoveryScore.rounded())) · Load \(Int(hit.loadScore.rounded()))")
-                .font(.caption)
+                .font(.caption.monospacedDigit())
                 .foregroundStyle(Palette.textSecondary)
-            Text("75+ Push · 50–74 Maintain · under 50 Recover. Sleep = rest quality; Recovery = HRV/RHR; Load = recent training strain.")
+            Text(decisionGuide)
                 .font(.caption2)
                 .foregroundStyle(Palette.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -162,6 +165,58 @@ struct TrendsView: View {
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Palette.surfaceHi, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private var decisionGuide: String {
+        "Decision bands: 75+ Push · 50–74 Maintain · under 50 Recover. Sleep = rest quality · Recovery = HRV/RHR · Load = training strain."
+    }
+
+    private func pillarDeltaBlock(hit: ReadinessPoint, prior: ReadinessPoint) -> some View {
+        let rows: [(String, Double, Double)] = [
+            ("Sleep", hit.sleepScore - prior.sleepScore, hit.sleepScore),
+            ("Recovery", hit.recoveryScore - prior.recoveryScore, hit.recoveryScore),
+            ("Load", hit.loadScore - prior.loadScore, hit.loadScore),
+        ]
+        let ranked = rows.sorted { abs($0.1) > abs($1.1) }
+        let top = ranked.first
+        return VStack(alignment: .leading, spacing: 4) {
+            if let top, abs(top.1) >= 0.5 {
+                Text(pillarDriverLine(name: top.0, delta: top.1))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Palette.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach(ranked, id: \.0) { row in
+                HStack {
+                    Text(row.0)
+                        .font(.caption2)
+                        .foregroundStyle(Palette.textSecondary)
+                    Spacer()
+                    Text(signedPts(row.1))
+                        .font(.caption2.monospacedDigit().weight(.semibold))
+                        .foregroundStyle(row.1 >= 0 ? Palette.mint : Palette.warn)
+                    Text("→ \(Int(row.2.rounded()))")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(Palette.textTertiary)
+                        .frame(width: 36, alignment: .trailing)
+                }
+            }
+        }
+        .padding(8)
+        .background(Palette.surface.opacity(0.65), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func pillarDriverLine(name: String, delta: Double) -> String {
+        let n = Int(delta.rounded())
+        if n > 0 { return "Biggest lift: \(name) (\(signedPts(delta)))." }
+        if n < 0 { return "Biggest drag: \(name) (\(signedPts(delta)))." }
+        return "\(name) was unchanged vs the prior day."
+    }
+
+    private func signedPts(_ delta: Double) -> String {
+        let n = Int(delta.rounded())
+        if n > 0 { return "+\(n)" }
+        return "\(n)"
     }
 
     private func priorPoint(for hit: ReadinessPoint, in points: [ReadinessPoint]) -> ReadinessPoint? {
@@ -175,9 +230,9 @@ struct TrendsView: View {
             return "0 pts vs the previous day — readiness held steady."
         }
         if n > 0 {
-            return "+\(n) pts vs the previous day — you were more recovered than the day before (sleep/HRV/load improved)."
+            return "+\(n) pts vs the previous day — overall readiness improved."
         }
-        return "\(n) pts vs the previous day — readiness dropped. Check which pillar (Sleep / Recovery / Load) pulled it down."
+        return "\(n) pts vs the previous day — overall readiness softened."
     }
 
     @ViewBuilder
