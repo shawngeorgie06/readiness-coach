@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  aggregateBodyDaily,
   countConsecutiveHighStrain,
   parseRequestedDate,
   sleepBounds,
@@ -51,6 +52,47 @@ describe("today aggregation helpers", () => {
     expect(summarizeSleep(samples, jul16Utc.start, jul16Utc.end).durationHours).toBeGreaterThan(0.5);
   });
 
+
+  it("reports the most-recent reading as `latest`, distinct from the daily mean", () => {
+    // Reproduces the reported HRV bug: 4 readings swinging 57→128 average to 82,
+    // but the latest reading (what Apple Health's headline shows) is 92. The hero
+    // stat must surface `latest`, not `avg`.
+    const daily = aggregateBodyDaily([
+      { type: "hrv_sdnn", startAt: new Date("2026-07-16T10:00:00.000Z"), value: 57 },
+      { type: "hrv_sdnn", startAt: new Date("2026-07-16T12:00:00.000Z"), value: 128 },
+      { type: "hrv_sdnn", startAt: new Date("2026-07-16T14:00:00.000Z"), value: 51 },
+      { type: "hrv_sdnn", startAt: new Date("2026-07-16T16:00:00.000Z"), value: 92 },
+    ]);
+    expect(daily).toHaveLength(1);
+    expect(daily[0].latest).toBe(92);
+    expect(daily[0].avg).toBe(82);
+    expect(daily[0].count).toBe(4);
+  });
+
+  it("picks `latest` by timestamp regardless of input ordering", () => {
+    const daily = aggregateBodyDaily([
+      { type: "resting_heart_rate", startAt: new Date("2026-07-16T18:00:00.000Z"), value: 54 },
+      { type: "resting_heart_rate", startAt: new Date("2026-07-16T06:00:00.000Z"), value: 61 },
+    ]);
+    expect(daily[0].latest).toBe(54);
+  });
+
+  it("buckets samples by the user's local day, not UTC", () => {
+    // 02:00 UTC Jul 17 is 22:00 EDT Jul 16 (tz −240). It must land on Jul 16,
+    // matching what the user sees on their phone, not spill into Jul 17.
+    const daily = aggregateBodyDaily(
+      [{ type: "hrv_sdnn", startAt: new Date("2026-07-17T02:00:00.000Z"), value: 88 }],
+      -240,
+    );
+    expect(daily).toHaveLength(1);
+    expect(daily[0].date).toBe("2026-07-16");
+
+    // With no offset the same sample buckets on the UTC day (legacy behavior).
+    const utc = aggregateBodyDaily(
+      [{ type: "hrv_sdnn", startAt: new Date("2026-07-17T02:00:00.000Z"), value: 88 }],
+    );
+    expect(utc[0].date).toBe("2026-07-17");
+  });
 
   it("uses only asleep stages and calculates restorative sleep", () => {
     const start = new Date("2026-07-10T00:00:00.000Z");

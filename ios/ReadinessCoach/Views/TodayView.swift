@@ -358,8 +358,8 @@ struct TodayView: View {
         async let sleep = try? client.getSleep(days: 2)
         async let train = try? client.getTrain(days: 7)
         if let b = await body {
-            hrv = b.daily.filter { $0.type == "hrv_sdnn" }.sorted { $0.date < $1.date }.last?.avg
-            rhr = b.daily.filter { $0.type == "resting_heart_rate" }.sorted { $0.date < $1.date }.last?.avg
+            hrv = b.daily.filter { $0.type == "hrv_sdnn" }.sorted { $0.date < $1.date }.last?.current
+            rhr = b.daily.filter { $0.type == "resting_heart_rate" }.sorted { $0.date < $1.date }.last?.current
         }
         if let s = await sleep { sleepHours = s.data.filter { $0.durationHours > 0 }.last?.durationHours }
         if let t = await train {

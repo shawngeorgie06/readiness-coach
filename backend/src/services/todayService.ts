@@ -641,37 +641,49 @@ export async function getTrainingDetails(userId: string, days: number, requested
   };
 }
 
-export async function getBodyDetails(userId: string, days: number, requestedDate = defaultRequestedDate()) {
-  const end = addDays(dateStart(requestedDate), 1);
-  const start = addDays(end, -days);
-  const samples = await prisma.healthSample.findMany({
-    where: {
-      userId,
-      type: { in: ["hrv_sdnn", "resting_heart_rate", "heart_rate"] },
-      startAt: { gte: start, lt: end },
-    },
-    orderBy: { startAt: "asc" },
-  });
-  // Aggregate to per-day min/avg/max per type so the app charts trends without
-  // shipping tens of thousands of raw heart-rate points.
-  interface Bucket { sum: number; count: number; min: number; max: number; }
+export interface BodyDailyBucket {
+  type: string;
+  date: string;
+  min: number;
+  avg: number;
+  max: number;
+  /** The most-recent reading of the day — what Apple Health surfaces and what
+   *  the recovery score keys off (see latestInWindow). The app's hero stat shows
+   *  this, not `avg`: HRV swings widely intraday, so the mean is misleadingly low. */
+  latest: number;
+  count: number;
+}
+
+/**
+ * Aggregate raw samples to one bucket per (type, local day). Buckets are keyed
+ * on the user's local calendar day via `tzOffsetMinutes` (local − UTC; EDT =
+ * −240) so an evening reading isn't filed under the next UTC day. `latest` is
+ * chosen by timestamp and does not depend on input ordering.
+ */
+export function aggregateBodyDaily(
+  samples: Array<{ type: string; startAt: Date; value: number | null }>,
+  tzOffsetMinutes = 0,
+): BodyDailyBucket[] {
+  interface Bucket { sum: number; count: number; min: number; max: number; latest: number; latestAt: number; }
   const buckets = new Map<string, Bucket>();
   for (const sample of samples) {
     if (sample.value == null) continue;
-    const dayIso = sample.startAt.toISOString().slice(0, 10);
+    const dayIso = new Date(sample.startAt.getTime() + tzOffsetMinutes * 60_000).toISOString().slice(0, 10);
     const key = `${sample.type}|${dayIso}`;
+    const at = sample.startAt.getTime();
     const bucket = buckets.get(key);
     if (bucket == null) {
-      buckets.set(key, { sum: sample.value, count: 1, min: sample.value, max: sample.value });
+      buckets.set(key, { sum: sample.value, count: 1, min: sample.value, max: sample.value, latest: sample.value, latestAt: at });
     } else {
       bucket.sum += sample.value;
       bucket.count += 1;
       bucket.min = Math.min(bucket.min, sample.value);
       bucket.max = Math.max(bucket.max, sample.value);
+      if (at >= bucket.latestAt) { bucket.latest = sample.value; bucket.latestAt = at; }
     }
   }
 
-  const daily = Array.from(buckets.entries())
+  return Array.from(buckets.entries())
     .map(([key, bucket]) => {
       const [type, date] = key.split("|");
       return {
@@ -680,10 +692,33 @@ export async function getBodyDetails(userId: string, days: number, requestedDate
         min: round(bucket.min),
         avg: round(bucket.sum / bucket.count),
         max: round(bucket.max),
+        latest: round(bucket.latest),
         count: bucket.count,
       };
     })
     .sort((a, b) => (a.type === b.type ? a.date.localeCompare(b.date) : a.type.localeCompare(b.type)));
+}
 
-  return { days, daily };
+export async function getBodyDetails(
+  userId: string,
+  days: number,
+  requestedDate = defaultRequestedDate(),
+  tzOffsetMinutes = 0,
+) {
+  // The requested day ends at the user's local midnight, not the server's UTC
+  // midnight, so late-evening readings west of UTC aren't dropped from the window.
+  const localEnd = dateStart(requestedDate).getTime() - tzOffsetMinutes * 60_000 + DAY_MS;
+  const end = new Date(localEnd);
+  const start = new Date(localEnd - days * DAY_MS);
+  const samples = await prisma.healthSample.findMany({
+    where: {
+      userId,
+      type: { in: ["hrv_sdnn", "resting_heart_rate", "heart_rate"] },
+      startAt: { gte: start, lt: end },
+    },
+    orderBy: { startAt: "asc" },
+  });
+  // Aggregate to per-day buckets per type so the app charts trends without
+  // shipping tens of thousands of raw heart-rate points.
+  return { days, daily: aggregateBodyDaily(samples, tzOffsetMinutes) };
 }

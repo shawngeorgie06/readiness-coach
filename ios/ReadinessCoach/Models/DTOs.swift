@@ -128,8 +128,15 @@ struct BodyDaily: Codable, Identifiable {
     let min: Double
     let avg: Double
     let max: Double
+    /// The most-recent reading of the day — matches Apple Health's headline and
+    /// the recovery score. Optional so older cached/server payloads still decode.
+    let latest: Double?
     let count: Int
     var id: String { type + date }
+
+    /// Value to surface as "today's" reading: the latest sample, falling back to
+    /// the daily mean when an older payload lacks `latest`.
+    var current: Double { latest ?? avg }
 }
 
 // MARK: - Readiness history
