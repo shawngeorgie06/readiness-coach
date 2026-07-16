@@ -1,8 +1,9 @@
 # Free personal deploy blueprint for Render.
-# See docs/personal-free-deploy.md for Neon Postgres + secrets setup.
+# See docs/personal-free-deploy.md (Neon Postgres + keep-alive for 15-min idle).
 #
-# Note: free Render web services sleep after idle. The first open of the day
-# can take ~30–60s while the API wakes up; after that it feels normal.
+# Free Render spins down after 15 minutes with no inbound traffic. This repo
+# self-pings /health every 10 minutes (via RENDER_EXTERNAL_URL) and includes a
+# GitHub Action keep-alive — set secret RENDER_HEALTH_URL after first deploy.
 
 services:
   - type: web
