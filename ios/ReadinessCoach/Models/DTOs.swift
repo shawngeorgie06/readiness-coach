@@ -72,6 +72,14 @@ struct SleepStages: Codable, Hashable {
     let awake: Double
 }
 
+struct SleepSegment: Codable, Hashable, Identifiable {
+    let stage: String
+    let startAt: String
+    let endAt: String
+    let hours: Double
+    var id: String { "\(stage)-\(startAt)-\(endAt)" }
+}
+
 struct SleepDay: Codable, Identifiable {
     let date: String
     let durationHours: Double
@@ -79,6 +87,8 @@ struct SleepDay: Codable, Identifiable {
     let sleepStart: String?
     let sleepEnd: String?
     let stages: SleepStages
+    /// Ordered stage blocks for the night hypnogram (may be empty on older servers).
+    let timeline: [SleepSegment]?
     var id: String { date }
 }
 

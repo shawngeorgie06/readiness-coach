@@ -151,6 +151,68 @@ struct SleepView: View {
 
             consistencyRow(nights)
             stageBreakdown(night)
+            if let timeline = night.timeline, !timeline.isEmpty {
+                hypnogram(timeline, start: night.sleepStart, end: night.sleepEnd)
+            }
+        }
+    }
+
+    private func hypnogram(_ timeline: [SleepSegment], start: String?, end: String?) -> some View {
+        let total = max(timeline.reduce(0) { $0 + $1.hours }, 0.01)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Text("Night timeline")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Palette.textSecondary)
+                InfoBadge(
+                    title: "Hypnogram",
+                    message: "Each block is a stretch of Deep, REM, Core, or Awake through the night, from your Watch sleep analysis."
+                )
+            }
+            GeometryReader { geo in
+                HStack(spacing: 1) {
+                    ForEach(timeline) { seg in
+                        RoundedRectangle(cornerRadius: 3, style: .continuous)
+                            .fill(stageColor(seg.stage))
+                            .frame(width: max(2, geo.size.width * CGFloat(seg.hours / total)))
+                            .accessibilityLabel("\(seg.stage) \(DurationFormat.short(seg.hours))")
+                    }
+                }
+            }
+            .frame(height: 28)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            HStack {
+                Text(clockTime(start) ?? "—")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(Palette.textTertiary)
+                Spacer()
+                Text(clockTime(end) ?? "—")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(Palette.textTertiary)
+            }
+            HStack(spacing: 10) {
+                legendDot("Deep", Palette.lavender)
+                legendDot("REM", .purple)
+                legendDot("Core", .blue)
+                legendDot("Awake", Palette.warn)
+            }
+        }
+        .padding(.top, 6)
+    }
+
+    private func stageColor(_ stage: String) -> Color {
+        switch stage.lowercased() {
+        case "deep": return Palette.lavender
+        case "rem": return .purple
+        case "awake": return Palette.warn
+        default: return .blue
+        }
+    }
+
+    private func legendDot(_ name: String, _ color: Color) -> some View {
+        HStack(spacing: 4) {
+            Circle().fill(color).frame(width: 6, height: 6)
+            Text(name).font(.caption2).foregroundStyle(Palette.textTertiary)
         }
     }
 
