@@ -23,7 +23,7 @@ struct OnboardingView: View {
 
                     SectionCard(title: "1 · Connect your API") {
                         LabeledField(label: "API URL", text: $settings.apiBaseURL, keyboard: .default)
-                        LabeledField(label: "API token", text: $settings.apiToken)
+                        LabeledField(label: "API token", text: $settings.apiToken, secure: true)
                         DisclosureGroup("Advanced") {
                             LabeledField(label: "User ID", text: $settings.userId)
                                 .padding(.top, 4)

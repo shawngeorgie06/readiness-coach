@@ -16,7 +16,7 @@ struct SettingsView: View {
             Form {
                 Section("Connection") {
                     LabeledField(label: "API URL", text: $settings.apiBaseURL, keyboard: .default)
-                    LabeledField(label: "API token", text: $settings.apiToken)
+                    LabeledField(label: "API token", text: $settings.apiToken, secure: true)
                     LabeledField(label: "User ID", text: $settings.userId)
                 }
 
@@ -164,20 +164,43 @@ struct SettingsView: View {
 struct LabeledField: View {
     let label: String
     @Binding var text: String
-    /// Kept for call-site compatibility. Always uses a normal TextField so paste
-    /// works on device — SecureField often blocks Paste for API tokens/URLs.
+    /// Secret fields (API token) mask by default via SecureField and expose a
+    /// reveal (eye) toggle. Paste works in both states — and the TextField
+    /// fallback guarantees paste even if SecureField's context menu misbehaves.
+    /// `.textContentType(.none)` avoids the AutoFill strong-password overlay
+    /// that used to block manual paste.
     var secure = false
     var keyboard: UIKeyboardType = .default
+    @State private var revealed = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label).font(.caption).foregroundStyle(.secondary)
-            TextField(label, text: $text)
-                .keyboardType(keyboard)
+            HStack(spacing: 8) {
+                Group {
+                    if secure && !revealed {
+                        SecureField(label, text: $text)
+                    } else {
+                        TextField(label, text: $text)
+                            .keyboardType(keyboard)
+                    }
+                }
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .textContentType(.none)
                 .font(secure || keyboard == .URL ? .body.monospaced() : .body)
+
+                if secure {
+                    Button {
+                        revealed.toggle()
+                    } label: {
+                        Image(systemName: revealed ? "eye.slash" : "eye")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(revealed ? "Hide \(label)" : "Show \(label)")
+                }
+            }
         }
     }
 }
