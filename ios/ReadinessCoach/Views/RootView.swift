@@ -35,19 +35,19 @@ struct MainTabView: View {
     )
 
     var body: some View {
-        // Custom six-tab shell: system TabView only shows five (+ More) and our solid
-        // replacement dropped Liquid Glass. Float a glass bar over content instead.
+        // Page TabView = swipe between sections. Custom glass bar = all six tabs visible
+        // (system tab bar would collapse extras into More).
         ZStack(alignment: .bottom) {
-            ZStack {
-                tabPage(.today) { TodayView() }
-                tabPage(.insights) { TrendsView() }
-                tabPage(.sleep) { SleepView() }
-                tabPage(.activity) { TrainView() }
-                tabPage(.body) { BodyView() }
-                tabPage(.you) { YouView() }
+            TabView(selection: $tabs.selection) {
+                TodayView().tag(AppTab.today.rawValue)
+                TrendsView().tag(AppTab.insights.rawValue)
+                SleepView().tag(AppTab.sleep.rawValue)
+                TrainView().tag(AppTab.activity.rawValue)
+                BodyView().tag(AppTab.body.rawValue)
+                YouView().tag(AppTab.you.rawValue)
             }
+            .tabViewStyle(.page(indexDisplayMode: .never))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            // Leave room so scroll content isn’t trapped under the floating bar.
             .safeAreaPadding(.bottom, 56)
 
             AetherTabBar(selection: $tabs.selection)
@@ -57,15 +57,7 @@ struct MainTabView: View {
         .background(Palette.canvas.ignoresSafeArea())
         .environmentObject(tabs)
         .tint(Palette.accent)
-    }
-
-    @ViewBuilder
-    private func tabPage<Content: View>(_ tab: AppTab, @ViewBuilder content: () -> Content) -> some View {
-        let selected = tabs.selection == tab.rawValue
-        content()
-            .opacity(selected ? 1 : 0)
-            .allowsHitTesting(selected)
-            .accessibilityHidden(!selected)
+        .animation(.easeInOut(duration: 0.22), value: tabs.selection)
     }
 }
 
