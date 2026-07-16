@@ -98,15 +98,10 @@ extension View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .clipped()
     }
-
-    /// Pins a continuous UIKit clamp that zeros horizontal offset and content width.
-    func killHorizontalScroll() -> some View {
-        self.background(HorizontalScrollKiller())
-    }
 }
 
-/// Vertical ScrollView whose content is forced to the viewport width so children
-/// cannot grow `contentSize` sideways. Used by Today (unique wide chrome/shadows).
+/// Pins vertical ScrollView content width. Does NOT walk up and clamp ancestor
+/// scrollers — that was killing the section-pager swipe gesture.
 struct WidthPinnedVerticalScroll<Content: View>: View {
     var onRefresh: (() async -> Void)? = nil
     @ViewBuilder var content: Content
@@ -119,7 +114,6 @@ struct WidthPinnedVerticalScroll<Content: View>: View {
                     .clipped()
             }
             .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
-            .killHorizontalScroll()
 
             Group {
                 if let onRefresh {
@@ -133,90 +127,9 @@ struct WidthPinnedVerticalScroll<Content: View>: View {
     }
 }
 
-/// Continuously clamps every ancestor UIScrollView: no horizontal bounce, content
-/// width == bounds width, contentOffset.x == 0. Survives SwiftUI re-layouts that
-/// briefly re-widen contentSize (shadows / GeometryReader / refreshable).
-struct HorizontalScrollKiller: UIViewRepresentable {
-    func makeUIView(context: Context) -> ClampHostView {
-        ClampHostView()
-    }
-
-    func updateUIView(_ uiView: ClampHostView, context: Context) {
-        uiView.clampNow()
-    }
-}
-
-final class ClampHostView: UIView {
-    private var displayLink: CADisplayLink?
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        isUserInteractionEnabled = false
-        backgroundColor = .clear
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { nil }
-
-    override func didMoveToWindow() {
-        super.didMoveToWindow()
-        if window != nil {
-            if displayLink == nil {
-                let link = CADisplayLink(target: self, selector: #selector(tick))
-                link.add(to: .main, forMode: .common)
-                displayLink = link
-            }
-            clampNow()
-        } else {
-            displayLink?.invalidate()
-            displayLink = nil
-        }
-    }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        clampNow()
-    }
-
-    @objc private func tick() { clampNow() }
-
-    func clampNow() {
-        var node: UIView? = self
-        while let current = node {
-            if let scroll = current as? UIScrollView {
-                Self.lock(scroll)
-            }
-            node = current.superview
-        }
-    }
-
-    private static func lock(_ scroll: UIScrollView) {
-        // Never clamp the section pager (multi-page horizontal) or UIKit paging scrollers.
-        if scroll.isPagingEnabled { return }
-        if scroll.contentSize.width >= max(scroll.bounds.width, 1) * 1.8 { return }
-        // Nested intentional horizontal chip/carousels keep their own width.
-        if scroll.contentSize.width > scroll.bounds.width + 1,
-           abs(scroll.contentSize.height - scroll.bounds.height) < 1 {
-            return
-        }
-        scroll.alwaysBounceHorizontal = false
-        scroll.isDirectionalLockEnabled = true
-        scroll.showsHorizontalScrollIndicator = false
-        let width = scroll.bounds.width
-        guard width > 0 else { return }
-        if scroll.contentSize.width > width + 0.5 {
-            scroll.contentSize.width = width
-        }
-        if abs(scroll.contentOffset.x) > 0.05 {
-            scroll.contentOffset.x = 0
-        }
-    }
-}
-
 enum ScrollLockBootstrap {
     static func apply() {
-        // Directional lock only — do NOT zero alwaysBounceHorizontal globally;
-        // that breaks the page-style TabView used to swipe between sections.
+        // Leave horizontal paging alone so section swipe works.
         UIScrollView.appearance().isDirectionalLockEnabled = true
     }
 }

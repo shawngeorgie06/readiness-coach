@@ -35,51 +35,26 @@ struct MainTabView: View {
     )
 
     var body: some View {
-        // Horizontal paging ScrollView = slide between sections.
-        // Glass tab bar with a sliding selection pill (Liquid Glass “slider”).
-        GeometryReader { geo in
-            ZStack(alignment: .bottom) {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 0) {
-                        ForEach(AppTab.allCases) { tab in
-                            tabRoot(tab)
-                                .frame(width: geo.size.width, height: geo.size.height)
-                                .id(tab.rawValue)
-                        }
-                    }
-                    .scrollTargetLayout()
-                }
-                .scrollTargetBehavior(.paging)
-                .scrollPosition(id: Binding(
-                    get: { tabs.selection as Int? },
-                    set: { newValue in
-                        if let newValue { tabs.selection = newValue }
-                    }
-                ))
-                .scrollBounceBehavior(.basedOnSize, axes: .vertical)
-                .frame(width: geo.size.width, height: geo.size.height)
-                .safeAreaPadding(.bottom, 56)
-
-                AetherTabBar(selection: $tabs.selection)
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 6)
-            }
+        // Page TabView = swipe between sections. safeAreaInset keeps the glass bar
+        // above the home indicator (not clipped below the screen).
+        TabView(selection: $tabs.selection) {
+            TodayView().tag(AppTab.today.rawValue)
+            TrendsView().tag(AppTab.insights.rawValue)
+            SleepView().tag(AppTab.sleep.rawValue)
+            TrainView().tag(AppTab.activity.rawValue)
+            BodyView().tag(AppTab.body.rawValue)
+            YouView().tag(AppTab.you.rawValue)
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            AetherTabBar(selection: $tabs.selection)
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
         }
         .background(Palette.canvas.ignoresSafeArea())
         .environmentObject(tabs)
         .tint(Palette.accent)
-    }
-
-    @ViewBuilder
-    private func tabRoot(_ tab: AppTab) -> some View {
-        switch tab {
-        case .today: TodayView()
-        case .insights: TrendsView()
-        case .sleep: SleepView()
-        case .activity: TrainView()
-        case .body: BodyView()
-        case .you: YouView()
-        }
     }
 }
 
@@ -96,28 +71,28 @@ struct AetherTabBar: View {
                         selection = tab.rawValue
                     }
                 } label: {
-                    VStack(spacing: 3) {
+                    VStack(spacing: 2) {
                         Image(systemName: tab.systemImage)
-                            .font(.system(size: 16, weight: .semibold))
+                            .font(.system(size: 17, weight: .semibold))
                         Text(tab.title)
                             .font(.system(size: 9, weight: .semibold))
                             .lineLimit(1)
-                            .minimumScaleFactor(0.75)
+                            .minimumScaleFactor(0.7)
                     }
                     .foregroundStyle(selection == tab.rawValue ? Palette.accent : Palette.textSecondary)
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
+                    .padding(.vertical, 7)
                     .background {
                         if selection == tab.rawValue {
                             Capsule()
-                                .fill(Color.white.opacity(0.16))
+                                .fill(Palette.accent.opacity(0.20))
                                 .overlay {
                                     Capsule()
-                                        .strokeBorder(Color.white.opacity(0.22), lineWidth: 0.6)
+                                        .strokeBorder(Palette.accent.opacity(0.45), lineWidth: 1)
                                 }
                                 .matchedGeometryEffect(id: "aether-tab-slider", in: tabSlide)
-                                .padding(.horizontal, 2)
-                                .padding(.vertical, 2)
+                                .padding(.horizontal, 1)
+                                .padding(.vertical, 1)
                         }
                     }
                     .contentShape(Rectangle())
@@ -127,12 +102,12 @@ struct AetherTabBar: View {
                 .accessibilityAddTraits(selection == tab.rawValue ? .isSelected : [])
             }
         }
-        .padding(.horizontal, 4)
+        .padding(.horizontal, 5)
         .padding(.vertical, 4)
         .liquidGlassChrome()
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Section slider")
-        .accessibilityHint("Swipe the screen sideways or tap a tab to change sections")
+        .accessibilityLabel("Sections")
+        .accessibilityHint("Swipe left or right between sections, or tap a tab")
     }
 }
 
