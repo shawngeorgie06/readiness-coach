@@ -10,6 +10,9 @@ final class HealthKitService {
     /// First sync only reaches back this far so the initial upload stays bounded.
     /// The backend computes 30-day baselines, so this window is sufficient.
     private let initialLookbackDays = 30
+    /// Sleep is often finalized or amended by Apple Health after a first read.
+    /// Re-check recent nights on every sync so late Watch data is not skipped.
+    private let sleepRecheckDays = 3
 
     static var isAvailable: Bool { HKHealthStore.isHealthDataAvailable() }
 
@@ -48,6 +51,11 @@ final class HealthKitService {
             byAdding: .day, value: -initialLookbackDays, to: Date()
         ) ?? Date().addingTimeInterval(-Double(initialLookbackDays) * 86_400)
         let end = Date()
+        let sleepStart = Calendar.current.date(
+            byAdding: .day,
+            value: -sleepRecheckDays,
+            to: end
+        ) ?? start
 
         async let hr = quantitySamples(heartRate, unit: HKUnit(from: "count/min"),
                                        apiType: "heart_rate", unitLabel: "count/min", start: start, end: end)
@@ -57,7 +65,7 @@ final class HealthKitService {
                                         apiType: "hrv_sdnn", unitLabel: "ms", start: start, end: end)
         async let spo2 = quantitySamples(oxygen, unit: .percent(),
                                          apiType: "oxygen_saturation", unitLabel: "%", start: start, end: end, scale: 100)
-        async let sleepSamples = self.sleepSamples(start: start, end: end)
+        async let sleepSamples = self.sleepSamples(start: sleepStart, end: end)
         async let workoutSamples = self.workouts(start: start, end: end)
 
         let samples = try await hr + rhr + hrv + spo2 + sleepSamples
