@@ -15,8 +15,8 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 Section("Connection") {
-                    LabeledField(label: "API URL", text: $settings.apiBaseURL, keyboard: .URL)
-                    LabeledField(label: "API token", text: $settings.apiToken, secure: true)
+                    LabeledField(label: "API URL", text: $settings.apiBaseURL, keyboard: .default)
+                    LabeledField(label: "API token", text: $settings.apiToken)
                     LabeledField(label: "User ID", text: $settings.userId)
                 }
 
@@ -164,25 +164,20 @@ struct SettingsView: View {
 struct LabeledField: View {
     let label: String
     @Binding var text: String
+    /// Kept for call-site compatibility. Always uses a normal TextField so paste
+    /// works on device — SecureField often blocks Paste for API tokens/URLs.
     var secure = false
     var keyboard: UIKeyboardType = .default
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label).font(.caption).foregroundStyle(.secondary)
-            Group {
-                if secure {
-                    SecureField(label, text: $text)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .font(.body.monospaced())
-                } else {
-                    TextField(label, text: $text)
-                        .keyboardType(keyboard)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                }
-            }
+            TextField(label, text: $text)
+                .keyboardType(keyboard)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .textContentType(.none)
+                .font(secure || keyboard == .URL ? .body.monospaced() : .body)
         }
     }
 }
