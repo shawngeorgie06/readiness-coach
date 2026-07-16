@@ -35,29 +35,110 @@ struct MainTabView: View {
     )
 
     var body: some View {
-        TabView(selection: $tabs.selection) {
-            TodayView().tag(AppTab.today.rawValue).tabItem { Label("Today", systemImage: "circle.circle.fill") }
-            TrendsView().tag(AppTab.insights.rawValue).tabItem { Label("Insights", systemImage: "chart.bar.fill") }
-            SleepView().tag(AppTab.sleep.rawValue).tabItem { Label("Sleep", systemImage: "bed.double.fill") }
-            TrainView().tag(AppTab.activity.rawValue).tabItem { Label("Activity", systemImage: "bolt.fill") }
-            BodyView().tag(AppTab.body.rawValue).tabItem { Label("Body", systemImage: "figure.stand") }
-            YouView().tag(AppTab.you.rawValue).tabItem { Label("You", systemImage: "person.fill") }
+        // System TabView collapses a 6th item into "More". Custom bar keeps all six visible.
+        ZStack {
+            tabPage(.today) { TodayView() }
+            tabPage(.insights) { TrendsView() }
+            tabPage(.sleep) { SleepView() }
+            tabPage(.activity) { TrainView() }
+            tabPage(.body) { BodyView() }
+            tabPage(.you) { YouView() }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            AetherTabBar(selection: $tabs.selection)
+        }
+        .background(Palette.canvas.ignoresSafeArea())
         .environmentObject(tabs)
-        .toolbarBackground(Palette.canvas, for: .tabBar)
-        .toolbarBackground(.visible, for: .tabBar)
         .tint(Palette.accent)
+    }
+
+    @ViewBuilder
+    private func tabPage<Content: View>(_ tab: AppTab, @ViewBuilder content: () -> Content) -> some View {
+        let selected = tabs.selection == tab.rawValue
+        content()
+            .opacity(selected ? 1 : 0)
+            .allowsHitTesting(selected)
+            .accessibilityHidden(!selected)
+    }
+}
+
+/// Custom six-item bar — UIKit's UITabBar only shows five (+ More).
+struct AetherTabBar: View {
+    @Binding var selection: Int
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(AppTab.allCases) { tab in
+                Button {
+                    selection = tab.rawValue
+                } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: tab.systemImage)
+                            .font(.system(size: 16, weight: .semibold))
+                        Text(tab.title)
+                            .font(.system(size: 9, weight: .medium))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .foregroundStyle(selection == tab.rawValue ? Palette.accent : Palette.textTertiary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 8)
+                    .padding(.bottom, 4)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(tab.title)
+                .accessibilityAddTraits(selection == tab.rawValue ? .isSelected : [])
+            }
+        }
+        .padding(.horizontal, 2)
+        .background {
+            Rectangle()
+                .fill(Palette.canvas)
+                .shadow(color: .black.opacity(0.35), radius: 8, y: -2)
+                .ignoresSafeArea(edges: .bottom)
+        }
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(Palette.strokeSoft)
+                .frame(height: 1)
+        }
     }
 }
 
 /// Shared tab indices so Today (and others) can jump to Insights / Sleep, etc.
-enum AppTab: Int {
+enum AppTab: Int, CaseIterable, Identifiable {
     case today = 0
     case insights = 1
     case sleep = 2
     case activity = 3
     case body = 4
     case you = 5
+
+    var id: Int { rawValue }
+
+    var title: String {
+        switch self {
+        case .today: return "Today"
+        case .insights: return "Insights"
+        case .sleep: return "Sleep"
+        case .activity: return "Activity"
+        case .body: return "Body"
+        case .you: return "You"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .today: return "circle.circle.fill"
+        case .insights: return "chart.bar.fill"
+        case .sleep: return "bed.double.fill"
+        case .activity: return "bolt.fill"
+        case .body: return "figure.stand"
+        case .you: return "person.fill"
+        }
+    }
 }
 
 final class TabRouter: ObservableObject {
