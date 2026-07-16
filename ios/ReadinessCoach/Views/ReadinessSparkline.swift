@@ -1,24 +1,24 @@
 import SwiftUI
-import Charts
 
+/// Mini readiness history as fixed-width caption bars.
+/// No Charts and no GeometryReader — both have widened Today’s ScrollView before.
 struct ReadinessSparkline: View {
     let points: [ReadinessPoint]
+
     var body: some View {
-        Chart(points) { point in
-            LineMark(x: .value("Date", ChartDate.day(point.date)),
-                     y: .value("Readiness", point.readiness))
-                .foregroundStyle(.secondary)
-                .interpolationMethod(ChartStyle.smooth)
-            PointMark(x: .value("Date", ChartDate.day(point.date)),
-                      y: .value("Readiness", point.readiness))
-                .foregroundStyle(point.decision.tint).symbolSize(24)
+        HStack(alignment: .bottom, spacing: 4) {
+            ForEach(points) { point in
+                let isLatest = point.id == points.last?.id
+                RoundedRectangle(cornerRadius: 2, style: .continuous)
+                    .fill(isLatest ? point.decision.tint : point.decision.tint.opacity(0.45))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: max(4, 56 * (point.readiness / 100)))
+            }
         }
-        .chartYScale(domain: 0 ... 100)
-        .chartXAxis(.hidden).chartYAxis(.hidden)
-        .chartLegend(.hidden)
-        .frame(maxWidth: .infinity)
         .frame(height: 56)
+        .frame(maxWidth: .infinity)
         .clipped()
-        .allowsHitTesting(false) // decorative — don’t let chart pans shove Today sideways
+        .accessibilityLabel("Last \(points.count) readiness scores")
+        .accessibilityHidden(true)
     }
 }

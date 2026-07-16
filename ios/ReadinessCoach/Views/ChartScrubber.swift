@@ -2,7 +2,6 @@ import SwiftUI
 import Charts
 import UIKit
 
-/// Snaps a continuously-selected x-date to the nearest plotted day.
 func nearestDate(_ target: Date?, in dates: [Date]) -> Date? {
     guard let target else { return nil }
     return dates.min(by: {
@@ -24,7 +23,6 @@ struct ScrubReadout: View {
     }
 }
 
-/// Detail under a chart: weekday + readable numbers + optional plain-language note.
 struct ScrubDetailBanner: View {
     let date: Date?
     let placeholder: String
@@ -36,31 +34,31 @@ struct ScrubDetailBanner: View {
             if let date {
                 Text(date, format: .dateTime.weekday(.wide).month(.wide).day().year())
                     .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Palette.textPrimary)
                 ForEach(lines, id: \.self) { line in
                     Text(line)
                         .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(Palette.textPrimary)
                 }
                 if let note, !note.isEmpty {
                     Text(note)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Palette.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             } else {
                 Text(placeholder)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Palette.textSecondary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(Color(.tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
-        .padding(.top, 6)
-        .accessibilityElement(children: .combine)
+        .background(Palette.surfaceHi, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(.top, 4)
     }
 }
 
-/// Finger → day mapping. Publishes only when the day changes (keeps scrubbing smooth).
 struct ChartDayScrubOverlay: View {
     let proxy: ChartProxy
     let dates: [Date]
@@ -89,15 +87,12 @@ struct ChartDayScrubOverlay: View {
 }
 
 extension View {
-    /// Vertical scrolling only — blocks the left/right page drift on Today and elsewhere.
     func verticalScrollLocked() -> some View {
         self
             .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
-            .scrollClipDisabled(false)
             .clipped()
     }
 
-    /// Pin content to the screen width so charts can’t widen the page and enable sideways drag.
     func pageWidthLocked() -> some View {
         self
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -105,16 +100,40 @@ extension View {
     }
 }
 
-enum ScrollLockBootstrap {
-    /// Call once at launch. Directional lock + no horizontal bounce on every UIScrollView.
-    static func apply() {
-        UIScrollView.appearance().alwaysBounceHorizontal = false
-        UIScrollView.appearance().isDirectionalLockEnabled = true
-        UIScrollView.appearance().contentInsetAdjustmentBehavior = .automatic
+/// Pins vertical ScrollView content width. Does NOT walk up and clamp ancestor
+/// scrollers — that was killing the section-pager swipe gesture.
+struct WidthPinnedVerticalScroll<Content: View>: View {
+    var onRefresh: (() async -> Void)? = nil
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        GeometryReader { geo in
+            let scroll = ScrollView(.vertical, showsIndicators: true) {
+                content
+                    .frame(width: geo.size.width, alignment: .topLeading)
+                    .clipped()
+            }
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+
+            Group {
+                if let onRefresh {
+                    scroll.refreshable { await onRefresh() }
+                } else {
+                    scroll
+                }
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
+        }
     }
 }
 
-/// Shared smooth line styling used across Insights / Body / Activity charts.
+enum ScrollLockBootstrap {
+    static func apply() {
+        // Leave horizontal paging alone so section swipe works.
+        UIScrollView.appearance().isDirectionalLockEnabled = true
+    }
+}
+
 enum ChartStyle {
     static let smooth: InterpolationMethod = .catmullRom
 }

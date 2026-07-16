@@ -21,13 +21,12 @@ Watch → HealthKit → iPhone app → your API → readiness score (Push / Main
 
 ## Status
 
-Backend + web (Tasks 1–9) and the SwiftUI iPhone app under [`ios/`](ios/) are
-implemented. **HealthKit only works on a physical iPhone** — open
-`ios/ReadinessCoach.xcodeproj` in Xcode, pick your phone (not Simulator), set
-your Signing Team, and run. Full steps: [`ios/README.md`](ios/README.md).
-
-API bind note: `npm run dev` listens on `0.0.0.0` so the phone can reach your Mac
-over Wi‑Fi. In the app, use `http://<Mac-LAN-IP>:4000` — never `localhost` on device.
+Backend + web (Tasks 1–9) are implemented and verified. The iOS app (Tasks
+10–12) is implemented under [`ios/`](ios/README.md) — full SwiftUI source wired
+to the API — and **compiles against the iOS SDK** (`xcodebuild` for the
+Simulator, `** BUILD SUCCEEDED **`). It still needs to be code-signed and run on
+a physical iPhone in Xcode to exercise HealthKit (device-only). See
+[`ios/README.md`](ios/README.md) and [`docs/ios-handoff.md`](docs/ios-handoff.md).
 
 ## Local setup (after implementation begins)
 

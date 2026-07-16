@@ -5,12 +5,8 @@ import { createGracefulShutdown } from "./shutdown.js";
 
 const env = loadEnv();
 const app = createApp({ apiToken: env.API_TOKEN, corsOrigin: env.CORS_ORIGIN });
-// Bind all interfaces so a physical iPhone on the same LAN can reach the API
-// (localhost-only would only work from the Simulator on this Mac).
-const HOST = process.env.HOST ?? "0.0.0.0";
-const server = app.listen(env.PORT, HOST, () => {
-  console.log(`readiness-coach API on http://${HOST}:${env.PORT}`);
-  console.log("Physical iPhone: enter this Mac’s LAN IP in the app (e.g. http://192.168.x.x:%d) — not localhost.", env.PORT);
+const server = app.listen(env.PORT, () => {
+  console.log(`readiness-coach API on :${env.PORT}`);
 });
 
 const shutdown = createGracefulShutdown({

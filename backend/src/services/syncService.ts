@@ -104,8 +104,6 @@ export async function applySync(
         strain,
       },
       update: {
-        // Refresh sport on re-sync so HealthKit activity renames/remaps stick
-        // (e.g. "other" → "strength" once the iOS map is expanded).
         sport: workout.sport,
         durationMin: workout.durationMin,
         avgHrBpm: workout.avgHrBpm,

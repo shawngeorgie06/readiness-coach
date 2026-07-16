@@ -1,76 +1,39 @@
 # Readiness Coach — iOS app
 
 SwiftUI iOS 17 app that reads HealthKit data, syncs it to the Readiness Coach
-API, and shows the locked readiness decision plus the strict advisor note.
-
-**HealthKit does not work in the Simulator.** Run on a **physical iPhone**.
-
-## Run on your iPhone (not Simulator)
-
-### 1. Mac prep
-
-- macOS with **Xcode 16+**
-- Your iPhone on the **same Wi‑Fi** as the Mac
-- Backend running on the Mac (from repo root):
-
-```bash
-docker compose up -d
-cd backend && cp -n .env.example .env && npm install && npx prisma migrate deploy && npm run seed:demo && npm run dev
-```
-
-When the API starts it listens on `0.0.0.0:4000`. Find your Mac’s LAN IP:
-
-```bash
-ipconfig getifaddr en0   # or System Settings → Network → Wi‑Fi → Details
-```
-
-Example API URL for the phone: `http://192.168.1.42:4000`  
-(Use the real IP. **Do not use `localhost` / `127.0.0.1` on a physical phone.**)
-
-### 2. Open & sign the app
-
-```bash
-git checkout cursor/ios-physical-device-2e3f   # or pull this PR branch
-open ios/ReadinessCoach.xcodeproj
-```
-
-1. Select the **ReadinessCoach** target → **Signing & Capabilities**.
-2. Check **Automatically manage signing** and pick your **Team** (personal Apple ID is fine for a development install).
-3. If the bundle id `com.readinesscoach.ReadinessCoach` is already taken on your team, change it to something unique (e.g. `com.yourname.ReadinessCoach`).
-4. HealthKit entitlement is already in `ReadinessCoach.entitlements`.
-
-### 3. Destination = your iPhone
-
-1. Unlock the phone, trust the computer if asked.
-2. In Xcode’s run destination menu (top toolbar), pick **your iPhone** — not any Simulator.
-3. Press **Run (⌘R)**.
-4. On the phone: Settings → General → VPN & Device Management → trust your developer certificate if iOS prompts.
-
-### 4. First launch (Onboarding)
-
-1. **API URL** — `http://<Mac-LAN-IP>:4000` (placeholder shows the pattern; fill your real IP).
-2. **API token** — same value as backend `API_TOKEN` in `backend/.env`.
-3. Tap **Test connection** (should succeed before you continue).
-4. Tap **Allow Health access** and grant reads.
-5. Tap **Start & sync**.
-
-When iOS asks for **Local Network** access, allow it — that is how the phone reaches your Mac API.
-
-### Quick failure checklist
-
-| Symptom | Fix |
-|--------|-----|
-| Destination only shows Simulators | Plug in / wireless-pair the iPhone; unlock it; enable Developer Mode (iOS 16+: Settings → Privacy & Security → Developer Mode) |
-| Signing / Team errors | Select a Team under Signing & Capabilities |
-| Test connection fails | Same Wi‑Fi; Mac firewall allows Node; URL uses LAN IP not localhost; backend is running |
-| Health / empty Today | Physical device only; grant Health read access; Watch data synced to iPhone Health |
-| Local Network denied | Settings → Readiness Coach → Local Network → On |
+API, and shows the locked readiness decision plus the strict advisor note. This
+covers implementation-plan Tasks 10–12.
 
 ## Requirements
 
-- **macOS with Xcode 16 or newer** (file-system-synchronized groups, `objectVersion = 77`). Older Xcode: regenerate with XcodeGen (below).
-- Physical iPhone with HealthKit data (ideally paired Apple Watch).
-- Backend reachable from the device with a private `API_TOKEN`.
+- **macOS with Xcode 16 or newer** (the project uses file-system-synchronized
+  groups, `objectVersion = 77`). If you have an older Xcode, regenerate the
+  project with XcodeGen — see below.
+- A physical iPhone signed into an Apple ID with HealthKit data (HealthKit is
+  not available on the Simulator).
+- The backend running and reachable from the device, with a private
+  `API_TOKEN`.
+
+## Open & run
+
+```bash
+open ios/ReadinessCoach.xcodeproj
+```
+
+1. Select the `ReadinessCoach` target → Signing & Capabilities → set your
+   **Team** (the project ships with an empty team and automatic signing).
+   HealthKit is already declared in `ReadinessCoach.entitlements`.
+2. Choose your connected iPhone as the run destination and Run (⌘R).
+3. On first launch (Onboarding):
+   - Enter **API URL** (e.g. `http://<your-mac-lan-ip>:4000`), **API token**
+     (matches backend `API_TOKEN`), and a **User ID** (a UUID is prefilled).
+   - Tap **Allow Health access** and grant read permissions.
+   - Tap **Start & sync** to run the first sync and load Today.
+
+> For a device to reach a locally-running backend, use your Mac's LAN IP (not
+> `localhost`) and make sure both are on the same network. Plain HTTP to a LAN
+> IP works in development; for anything outside your LAN, front the API with
+> HTTPS.
 
 ## Regenerate the project (optional / older Xcode)
 
@@ -117,10 +80,10 @@ All `/v1` calls send `Authorization: Bearer <token>`.
 - Missing signals surface a low-confidence banner; calibrating state is shown.
 - No Watch app, no local LLM (kept out of scope per the plan).
 
-## Device acceptance checklist
+## Device acceptance checklist (Task 11–12)
 
-1. Run destination is your physical iPhone (not Simulator).
-2. Grant HealthKit → first sync uploads real samples.
-3. Today shows the same decision + pillars as the web dashboard.
-4. Ask Coach never contradicts a `recover` lock.
-5. Missing data stays low-confidence and conservative.
+1. Grant HealthKit → first sync uploads real samples (verify counts in the sync
+   summary or `prisma studio`).
+2. Today shows the same decision + pillars as the web dashboard.
+3. Ask Coach never contradicts a `recover` lock.
+4. Missing data stays low-confidence and conservative.
