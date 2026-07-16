@@ -91,20 +91,49 @@ function windowedSamples(samples: SleepSample[], windowStart: Date, windowEnd: D
   });
 }
 
-/** Aggregate a sleep window while excluding HealthKit awake/in-bed intervals. */
+/** Duration of the union of intervals, preventing overlapping Health records from double-counting. */
+function unionDuration(intervals: Array<Pick<WindowedSample, "start" | "end">>): number {
+  const sorted = intervals
+    .filter(({ end, start }) => end > start)
+    .sort((a, b) => a.start - b.start);
+  let total = 0;
+  let currentStart: number | undefined;
+  let currentEnd: number | undefined;
+
+  for (const interval of sorted) {
+    if (currentStart === undefined || currentEnd === undefined) {
+      currentStart = interval.start;
+      currentEnd = interval.end;
+      continue;
+    }
+    if (interval.start > currentEnd) {
+      total += currentEnd - currentStart;
+      currentStart = interval.start;
+      currentEnd = interval.end;
+    } else {
+      currentEnd = Math.max(currentEnd, interval.end);
+    }
+  }
+  return total + (currentStart === undefined || currentEnd === undefined ? 0 : currentEnd - currentStart);
+}
+
+/** Aggregate a sleep window, falling back to the Watch's in-bed interval when staged sleep is incomplete. */
 export function summarizeSleep(
   samples: SleepSample[],
   windowStart: Date,
   windowEnd: Date,
 ): SleepSummary {
-  let durationMs = 0;
-  let restorativeMs = 0;
+  const windowed = windowedSamples(samples, windowStart, windowEnd);
+  const asleep = windowed.filter(({ stage }) => !stage.includes("awake") && !stage.includes("inbed"));
+  const inBed = windowed.filter(({ stage }) => stage.includes("inbed"));
+  const asleepMs = unionDuration(asleep);
+  const inBedMs = unionDuration(inBed);
+  const restorativeMs = unionDuration(asleep.filter(({ stage }) => stage.includes("deep") || stage.includes("rem")));
 
-  for (const { stage, overlapMs } of windowedSamples(samples, windowStart, windowEnd)) {
-    if (stage.includes("awake") || stage.includes("inbed")) continue;
-    durationMs += overlapMs;
-    if (stage.includes("deep") || stage.includes("rem")) restorativeMs += overlapMs;
-  }
+  // Some Watch/Health sources publish a complete in-bed interval before their
+  // detailed stages arrive. Counting only the small staged fragment turns a
+  // full night into e.g. "53m". Prefer the complete interval in that case.
+  const durationMs = asleepMs > 0 && asleepMs >= inBedMs * 0.6 ? asleepMs : Math.max(asleepMs, inBedMs);
 
   return {
     durationHours: round(durationMs / (60 * 60 * 1000)),

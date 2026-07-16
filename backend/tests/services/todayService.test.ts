@@ -38,6 +38,17 @@ describe("today aggregation helpers", () => {
     expect(summary).toEqual({ durationHours: 8, restorativeHours: 5 });
   });
 
+  it("uses the full in-bed interval when HealthKit has only a partial staged fragment", () => {
+    const start = new Date("2026-07-10T00:00:00.000Z");
+    const end = new Date("2026-07-10T07:52:00.000Z");
+    const summary = summarizeSleep([
+      { startAt: start, endAt: end, metadata: { stage: "inBed" } },
+      { startAt: new Date("2026-07-10T06:59:00.000Z"), endAt: end, metadata: { stage: "core" } },
+    ], start, end);
+
+    expect(summary).toEqual({ durationHours: 7.87, restorativeHours: 0 });
+  });
+
   it("counts only an unbroken streak of high-strain days", () => {
     expect(countConsecutiveHighStrain([15, 14, 8, 16, 15])).toBe(2);
     expect(countConsecutiveHighStrain([15, 8])).toBe(0);
