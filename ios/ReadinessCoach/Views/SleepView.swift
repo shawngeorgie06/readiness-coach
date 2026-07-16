@@ -107,7 +107,7 @@ struct SleepView: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("\(ChartDate.day(night.date).formatted(.dateTime.month().day())), \(fmt(night.durationHours)) hours")
+                        .accessibilityLabel("\(ChartDate.day(night.date).formatted(.dateTime.month().day())), \(DurationFormat.long(night.durationHours))")
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
@@ -133,7 +133,7 @@ struct SleepView: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(Palette.textPrimary)
 
-            Text("Slept \(fmt(night.durationHours))h — \(durationQualifier(night.durationHours)) your \(Int(Self.needHours))h target.")
+            Text("Slept \(DurationFormat.long(night.durationHours)) — \(durationQualifier(night.durationHours)) your \(Int(Self.needHours))h target.")
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(Palette.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -144,7 +144,7 @@ struct SleepView: View {
                     .foregroundStyle(Palette.textSecondary)
             }
 
-            Text("vs your \(recent.count)-night average of \(fmt(avg))h in this window.")
+            Text("vs your \(recent.count)-night average of \(DurationFormat.long(avg)) in this window.")
                 .font(.caption)
                 .foregroundStyle(Palette.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -169,7 +169,7 @@ struct SleepView: View {
             stageRow("REM", night.stages.rem, .purple)
             stageRow("Core", night.stages.core, .blue)
             stageRow("Awake", night.stages.awake, Palette.warn)
-            Text("Restorative (deep + REM): \(fmt(night.restorativeHours))h")
+            Text("Restorative (deep + REM): \(DurationFormat.long(night.restorativeHours))")
                 .font(.caption.weight(.medium))
                 .foregroundStyle(Palette.textPrimary)
                 .padding(.top, 2)
@@ -182,7 +182,7 @@ struct SleepView: View {
             Circle().fill(color).frame(width: 8, height: 8)
             Text(name).font(.subheadline).foregroundStyle(Palette.textPrimary)
             Spacer()
-            Text("\(fmt(hours))h")
+            Text(DurationFormat.short(hours))
                 .font(.subheadline.monospacedDigit().weight(.semibold))
                 .foregroundStyle(Palette.textPrimary)
         }
@@ -247,7 +247,7 @@ struct SleepView: View {
             .chartForegroundStyleScale(domain: stageColors.map(\.name), range: stageColors.map(\.color))
             .frame(height: 220)
             if let latest = selectedNight(in: nights) {
-                Text("Selected — deep \(fmt(latest.stages.deep))h · REM \(fmt(latest.stages.rem))h · core \(fmt(latest.stages.core))h · awake \(fmt(latest.stages.awake))h")
+                Text("Selected — deep \(DurationFormat.short(latest.stages.deep)) · REM \(DurationFormat.short(latest.stages.rem)) · core \(DurationFormat.short(latest.stages.core)) · awake \(DurationFormat.short(latest.stages.awake))")
                     .font(.caption)
                     .foregroundStyle(Palette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -297,6 +297,4 @@ struct SleepView: View {
         if hours <= 8.5 { return "right on" }
         return "above"
     }
-
-    private func fmt(_ value: Double) -> String { String(format: "%.1f", value) }
 }

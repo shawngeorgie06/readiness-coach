@@ -15,8 +15,8 @@ extension Color {
 /// labels cannot drift from MARKETING_VERSION.
 enum AppBuild {
     /// Fallback only if Info.plist keys are missing (previews / tests).
-    private static let fallbackMarketing = "1.2.1"
-    private static let fallbackBuild = "10"
+    private static let fallbackMarketing = "1.2.2"
+    private static let fallbackBuild = "11"
 
     static var marketing: String {
         (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String)
@@ -33,6 +33,41 @@ enum AppBuild {
 
     /// e.g. "v1.1.2 (4)" — hard to miss on You / Settings.
     static var label: String { "v\(marketing) (\(build))" }
+}
+
+/// Formats sleep/stage durations as hours + minutes (not decimal hours).
+enum DurationFormat {
+    /// Compact tile text: `7h 54m`, `45m`, `8h`.
+    static func short(_ hours: Double) -> String {
+        let parts = components(hours)
+        if parts.hours == 0 { return "\(parts.minutes)m" }
+        if parts.minutes == 0 { return "\(parts.hours)h" }
+        return "\(parts.hours)h \(parts.minutes)m"
+    }
+
+    /// Sentence text: `7 hr 54 min`.
+    static func long(_ hours: Double) -> String {
+        let parts = components(hours)
+        if parts.hours == 0 { return "\(parts.minutes) min" }
+        if parts.minutes == 0 {
+            return parts.hours == 1 ? "1 hour" : "\(parts.hours) hours"
+        }
+        return "\(parts.hours) hr \(parts.minutes) min"
+    }
+
+    private static func components(_ hours: Double) -> (hours: Int, minutes: Int) {
+        let total = max(0, Int((hours * 60).rounded()))
+        return (total / 60, total % 60)
+    }
+}
+
+/// Shared copy for the 0–21 workout strain scale.
+enum StrainExplain {
+    static let scaleBlurb =
+        "Strain rates how hard a workout was on a 0–21 scale (same idea as common recovery wearables). It’s computed from session duration and how hard your heart worked vs your resting-to-max reserve, then capped at 21. Easy days land low; long or high-intensity sessions push toward the top. Strain feeds the Load pillar of readiness."
+
+    static let shortBlurb =
+        "0–21 effort score from duration + heart-rate intensity (capped at 21)."
 }
 
 /// Aether — warm, human, approachable dark. Every token explicit.

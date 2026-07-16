@@ -220,7 +220,10 @@ struct WorkoutDetailSheet: View {
                     }
                 }
                 Section("Effort") {
-                    LabeledContent("Strain", value: "\(Int(workout.strain.rounded())) / 21")
+                    LabeledContent("Strain", value: String(format: "%.1f / 21", workout.strain))
+                    Text(StrainExplain.scaleBlurb)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     if let avg = workout.avgHrBpm {
                         LabeledContent("Avg heart rate", value: "\(Int(avg.rounded())) bpm")
                     }
