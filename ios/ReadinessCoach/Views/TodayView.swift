@@ -147,7 +147,7 @@ struct TodayView: View {
             HStack(spacing: 8) {
                 miniStat("HRV", hrv.map { "\(Int($0.rounded()))" } ?? "—", "ms")
                 miniStat("RHR", rhr.map { "\(Int($0.rounded()))" } ?? "—", "bpm")
-                miniStat("Sleep", sleepHours.map { String(format: "%.1f", $0) } ?? "—", "h")
+                miniStat("Sleep", sleepHours.map { DurationFormat.short($0) } ?? "—", nil)
             }
         }
         .frame(maxWidth: .infinity)
@@ -206,12 +206,12 @@ struct TodayView: View {
     }
 
     /// A small labeled value inside the hero card (HRV / RHR / Sleep).
-    private func miniStat(_ label: String, _ value: String, _ unit: String) -> some View {
+    private func miniStat(_ label: String, _ value: String, _ unit: String?) -> some View {
         VStack(spacing: 2) {
             Text(label).font(.system(size: 10, weight: .medium)).foregroundStyle(Palette.textSecondary)
             HStack(alignment: .firstTextBaseline, spacing: 2) {
                 Text(value).font(.system(size: 18, weight: .semibold, design: .rounded)).foregroundStyle(Palette.textPrimary)
-                Text(unit).font(.system(size: 11)).foregroundStyle(Palette.textSecondary)
+                if let unit { Text(unit).font(.system(size: 11)).foregroundStyle(Palette.textSecondary) }
             }
         }
         .frame(maxWidth: .infinity)
@@ -224,13 +224,15 @@ struct TodayView: View {
         VStack(spacing: 12) {
             HStack(spacing: 12) {
                 metricTileButton("Strain", "training load",
-                    "Yesterday’s workout strain on a 0–21 scale (from heart rate and duration). Higher means a harder session. This feeds the Load pillar.",
+                    StrainExplain.scaleBlurb,
                     PillarScore(score: min(100, (strain ?? 0) / 21 * 100),
                                 drivers: [Driver(text: strain.map { String(format: "Strain %.1f / 21" , $0) } ?? "No recent workout",
-                                                 detail: strainDelta ?? "Sync workouts from Apple Health to populate strain.")])) {
+                                                 detail: strainDelta.map { "\($0). \(StrainExplain.shortBlurb)" }
+                                                    ?? "\(StrainExplain.shortBlurb) Sync workouts from Apple Health to populate strain.")])) {
                     MetricTile(label: "Strain",
                                value: strain.map { fmt1($0) } ?? "—", unit: "/21",
-                               delta: strainDelta, fraction: (strain ?? 0) / 21, tone: .strain)
+                               delta: strainDelta,
+                               fraction: (strain ?? 0) / 21, tone: .strain)
                 }
                 metricTileButton("Recovery", "40%",
                     "HRV and resting heart rate vs your 30-day baseline — the strongest readiness signal.",
@@ -245,7 +247,7 @@ struct TodayView: View {
                     pillars.sleep,
                     opensSleep: true) {
                     MetricTile(label: "Sleep",
-                               value: sleepHours.map { fmt1($0) } ?? "—", unit: "h",
+                               value: sleepHours.map { DurationFormat.short($0) } ?? "—",
                                delta: sleepDelta, fraction: (sleepHours ?? 0) / 8, tone: .sleep)
                 }
                 metricTileButton("Load", "25%",
@@ -265,7 +267,9 @@ struct TodayView: View {
     }
     private var sleepDelta: String? {
         guard let sleepHours else { return nil }
-        return String(format: "%+.1fh vs 8h", sleepHours - 8)
+        let vsNeed = sleepHours - 8
+        let sign = vsNeed >= 0 ? "+" : "−"
+        return "\(sign)\(DurationFormat.short(abs(vsNeed))) vs 8h need"
     }
 
     private func metricTileButton(_ name: String, _ weight: String, _ description: String, _ pillar: PillarScore,
