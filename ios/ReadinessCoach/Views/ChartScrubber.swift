@@ -191,12 +191,19 @@ final class ClampHostView: UIView {
     }
 
     private static func lock(_ scroll: UIScrollView) {
+        // Never clamp the horizontal page TabView — that kills section swiping.
+        if scroll.isPagingEnabled { return }
+        // Nested intentional horizontal chip/carousels keep their own width.
+        if scroll.contentSize.width > scroll.bounds.width + 1,
+           abs(scroll.contentSize.height - scroll.bounds.height) < 1 {
+            return
+        }
         scroll.alwaysBounceHorizontal = false
         scroll.isDirectionalLockEnabled = true
         scroll.showsHorizontalScrollIndicator = false
         let width = scroll.bounds.width
         guard width > 0 else { return }
-        if abs(scroll.contentSize.width - width) > 0.5 {
+        if scroll.contentSize.width > width + 0.5 {
             scroll.contentSize.width = width
         }
         if abs(scroll.contentOffset.x) > 0.05 {
@@ -207,7 +214,8 @@ final class ClampHostView: UIView {
 
 enum ScrollLockBootstrap {
     static func apply() {
-        UIScrollView.appearance().alwaysBounceHorizontal = false
+        // Directional lock only — do NOT zero alwaysBounceHorizontal globally;
+        // that breaks the page-style TabView used to swipe between sections.
         UIScrollView.appearance().isDirectionalLockEnabled = true
     }
 }
