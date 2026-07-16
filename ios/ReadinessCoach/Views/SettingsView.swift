@@ -9,7 +9,10 @@ struct SettingsView: View {
     @State private var actionMessage: String?
     @State private var isDeleting = false
     @State private var notificationDenied = false
+    @State private var isRequestingHealth = false
+    @State private var healthRequested = false
     private let notifications = NotificationService()
+    private let health = HealthKitService()
 
     var body: some View {
         NavigationStack {
@@ -38,6 +41,22 @@ struct SettingsView: View {
                     if let summary = sync.lastSyncSummary {
                         Text(summary).font(.caption).foregroundStyle(.secondary)
                     }
+                }
+
+                Section("Health") {
+                    Button {
+                        Task { await requestHealth() }
+                    } label: {
+                        HStack {
+                            Image(systemName: healthRequested ? "checkmark.circle.fill" : "heart.text.square")
+                            Text(healthRequested ? "Health access requested" : "Allow Health access")
+                            Spacer()
+                            if isRequestingHealth { ProgressView() }
+                        }
+                    }
+                    .disabled(isRequestingHealth)
+                    Text("Reads heart rate, resting HR, HRV, sleep, and workouts. Never writes to Health. If you already granted this, manage it in iOS Settings → Health → Data Access & Devices.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
 
                 Section("Daily readiness") {
@@ -136,6 +155,17 @@ struct SettingsView: View {
             settings.clearLocalSettings()
             sync.today = nil
             actionMessage = "Account data deleted."
+        } catch {
+            actionMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    private func requestHealth() async {
+        isRequestingHealth = true
+        defer { isRequestingHealth = false }
+        do {
+            try await health.requestAuthorization()
+            healthRequested = true
         } catch {
             actionMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }

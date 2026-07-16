@@ -24,7 +24,7 @@ final class AppSettings: ObservableObject {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        self.apiBaseURL = defaults.string(forKey: Keys.baseURL) ?? ""
+        self.apiBaseURL = defaults.string(forKey: Keys.baseURL) ?? Self.defaultBaseURL
         self.apiToken = defaults.string(forKey: Keys.token) ?? ""
         self.userId = defaults.string(forKey: Keys.userId) ?? ""
         self.hasCompletedOnboarding = defaults.bool(forKey: Keys.onboarded)
@@ -81,12 +81,16 @@ final class AppSettings: ObservableObject {
     }
 
     func clearLocalSettings() {
-        apiBaseURL = ""
+        apiBaseURL = Self.defaultBaseURL
         apiToken = ""
         userId = ""
         hasCompletedOnboarding = false
         lastSyncAt = nil
     }
+
+    /// This is a single-user personal deployment, so the backend URL is stable.
+    /// Pre-filling it removes the need to type/paste the URL during onboarding.
+    static let defaultBaseURL = "https://readiness-coach.onrender.com"
 
     private enum Keys {
         static let baseURL = "apiBaseURL"
