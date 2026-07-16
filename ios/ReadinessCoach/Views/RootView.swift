@@ -94,8 +94,7 @@ struct AetherTabBar: View {
         }
         .padding(.horizontal, 2)
         .background {
-            Rectangle()
-                .fill(Palette.canvas)
+            Palette.canvas
                 .shadow(color: .black.opacity(0.35), radius: 8, y: -2)
                 .ignoresSafeArea(edges: .bottom)
         }
