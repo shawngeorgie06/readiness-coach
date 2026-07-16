@@ -21,10 +21,16 @@ xcodebuild -project ReadinessCoach.xcodeproj -scheme ReadinessCoach \
   CODE_SIGNING_ALLOWED=NO build
 ```
 
+## Personal daily use (no laptop server)
+
+To keep the API online without your Mac, use the free Neon + Render path in
+[`personal-free-deploy.md`](personal-free-deploy.md). Point the iPhone app at
+the HTTPS URL. Free Apple signing still needs a brief Xcode re-Run about weekly.
+
 ## Before starting
 
 - Run the backend with Postgres available and set `API_TOKEN` to a private
-  value.
+  value (local Docker, or the hosted URL from the free deploy doc).
 - Run `npm run seed:demo` in `backend` if a demo Today payload is needed before
   HealthKit sync is working.
 - Use the API contract exposed by `/v1/today`, `/v1/sync`, `/v1/sleep`,

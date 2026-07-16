@@ -34,6 +34,10 @@ open ios/ReadinessCoach.xcodeproj
 > `localhost`) and make sure both are on the same network. Plain HTTP to a LAN
 > IP works in development; for anything outside your LAN, front the API with
 > HTTPS.
+>
+> For daily use **without** leaving your Mac running the API, follow
+> [`docs/personal-free-deploy.md`](../docs/personal-free-deploy.md) (free Neon +
+> Render). Put that `https://…` URL into Onboarding instead of a LAN IP.
 
 ## Regenerate the project (optional / older Xcode)
 
