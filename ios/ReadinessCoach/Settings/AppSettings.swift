@@ -47,7 +47,30 @@ final class AppSettings: ObservableObject {
 
     /// Human-friendly "3m ago" text for the last successful sync, or nil if never.
     var lastSyncRelativeText: String? {
-        guard let date = lastSyncAt else { return nil }
+        relativeText(lastSyncAt)
+    }
+
+    /// Timestamp of the last successful Today refresh from the server — set on
+    /// ANY successful load, not only a HealthKit upload pass. This is what the
+    /// user-facing "last synced" label reads, so "Synced" and the timestamp
+    /// agree instead of showing "Synced" next to "Never synced".
+    var lastRefreshAt: Date? {
+        get {
+            let value = defaults.double(forKey: Keys.lastRefresh)
+            return value > 0 ? Date(timeIntervalSince1970: value) : nil
+        }
+        set {
+            objectWillChange.send()
+            defaults.set(newValue?.timeIntervalSince1970 ?? 0, forKey: Keys.lastRefresh)
+        }
+    }
+
+    var lastRefreshRelativeText: String? {
+        relativeText(lastRefreshAt)
+    }
+
+    private func relativeText(_ date: Date?) -> String? {
+        guard let date else { return nil }
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
         return formatter.localizedString(for: date, relativeTo: Date())
@@ -86,6 +109,7 @@ final class AppSettings: ObservableObject {
         userId = ""
         hasCompletedOnboarding = false
         lastSyncAt = nil
+        lastRefreshAt = nil
     }
 
     /// This is a single-user personal deployment, so the backend URL is stable.
@@ -98,6 +122,7 @@ final class AppSettings: ObservableObject {
         static let userId = "userId"
         static let onboarded = "hasCompletedOnboarding"
         static let lastSync = "lastSyncAt"
+        static let lastRefresh = "lastRefreshAt"
         static let notificationsEnabled = "notificationsEnabled"
         static let notificationHour = "notificationHour"
         static let notificationMinute = "notificationMinute"

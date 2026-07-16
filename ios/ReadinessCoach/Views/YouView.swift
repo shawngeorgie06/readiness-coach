@@ -60,7 +60,7 @@ struct YouView: View {
                     .font(.caption).foregroundStyle(Palette.textSecondary).lineLimit(1)
                 HStack(spacing: 8) {
                     Pill(sync.today == nil ? "Offline" : "Synced", tone: sync.today == nil ? .warn : .good)
-                    if let synced = settings.lastSyncRelativeText {
+                    if let synced = settings.lastRefreshRelativeText {
                         Text(synced).font(.caption2).foregroundStyle(Palette.textTertiary)
                     }
                 }
@@ -109,7 +109,7 @@ struct YouView: View {
     private var accountCard: some View {
         VStack(spacing: 0) {
             AetherListRow(systemImage: "arrow.triangle.2.circlepath", tone: .accent,
-                          title: "Sync now", subtitle: settings.lastSyncRelativeText.map { "Last synced \($0)" } ?? "Never synced") {
+                          title: "Sync now", subtitle: settings.lastRefreshRelativeText.map { "Last synced \($0)" } ?? "Never synced") {
                 if sync.isSyncing { ProgressView() } else { chevron }
             }
             .contentShape(Rectangle())

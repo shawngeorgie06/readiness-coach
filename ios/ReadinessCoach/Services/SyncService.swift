@@ -14,6 +14,28 @@ final class SyncService: ObservableObject {
     private let health = HealthKitService()
     private var lastAutoSyncAt: Date?
 
+    private let cache = UserDefaults.standard
+    private static let cacheKey = "cachedTodayJSON"
+
+    /// Show the last-known Today immediately on launch (stale-while-revalidate),
+    /// so a cold Render server (30–60s wake) doesn't leave the UI blank. The
+    /// network refresh then replaces it in the background.
+    init() {
+        if let data = cache.data(forKey: Self.cacheKey),
+           let cached = try? JSONDecoder().decode(TodayDTO.self, from: data) {
+            today = cached
+        }
+    }
+
+    /// Records a successful server refresh: cache it and stamp the display time.
+    private func didRefresh(_ dto: TodayDTO, _ settings: AppSettings) {
+        today = dto
+        settings.lastRefreshAt = Date()
+        if let data = try? JSONEncoder().encode(dto) {
+            cache.set(data, forKey: Self.cacheKey)
+        }
+    }
+
     /// Foreground-triggered sync, debounced so rapid app switches don't re-sync.
     func autoSync(_ settings: AppSettings) async {
         if let last = lastAutoSyncAt, Date().timeIntervalSince(last) < 30 { return }
@@ -55,7 +77,7 @@ final class SyncService: ObservableObject {
             } else {
                 lastSyncSummary = "HealthKit unavailable — showing server data only."
             }
-            today = try await client.getToday()
+            didRefresh(try await client.getToday(), settings)
         } catch {
             errorMessage = readable(error)
         }
@@ -71,7 +93,7 @@ final class SyncService: ObservableObject {
         errorMessage = nil
         defer { isLoadingToday = false }
         do {
-            today = try await client.getToday()
+            didRefresh(try await client.getToday(), settings)
         } catch {
             errorMessage = readable(error)
         }
