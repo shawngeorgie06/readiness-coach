@@ -7,13 +7,13 @@ struct ErrorCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Something went wrong", systemImage: "exclamationmark.triangle")
-                .font(.subheadline.weight(.semibold)).foregroundStyle(.orange)
-            Text(message).font(.footnote).foregroundStyle(.secondary)
-            Button("Retry", action: retry).buttonStyle(.bordered).controlSize(.small)
+                .font(.subheadline.weight(.semibold)).foregroundStyle(Palette.warn)
+            Text(message).font(.footnote).foregroundStyle(Palette.textSecondary)
+            Button("Retry", action: retry).buttonStyle(.bordered).controlSize(.small).tint(Palette.accent)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+        .background(Palette.warn.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
     }
 }
 
@@ -24,7 +24,7 @@ struct InfoBadge: View {
     @State private var show = false
     var body: some View {
         Button { show = true } label: { Image(systemName: "info.circle") }
-            .buttonStyle(.plain).foregroundStyle(.secondary)
+            .buttonStyle(.plain).foregroundStyle(Palette.textSecondary)
             .alert(title, isPresented: $show) { Button("OK", role: .cancel) {} } message: { Text(message) }
     }
 }

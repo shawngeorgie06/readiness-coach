@@ -14,22 +14,10 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    LabeledField(
-                        label: "API URL",
-                        text: $settings.apiBaseURL,
-                        keyboard: .URL,
-                        placeholder: "http://192.168.x.x:4000"
-                    )
+                Section("Connection") {
+                    LabeledField(label: "API URL", text: $settings.apiBaseURL, keyboard: .URL)
                     LabeledField(label: "API token", text: $settings.apiToken, secure: true)
                     LabeledField(label: "User ID", text: $settings.userId)
-                    Text("App update \(AppBuild.stamp)")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                } header: {
-                    Text("Connection")
-                } footer: {
-                    Text("Physical iPhone: use your Mac’s Wi‑Fi IP and port (not localhost). After updating from GitHub, Clean Build Folder then Run, and tap Sync so workout names refresh.")
                 }
 
                 Section("Sync") {
@@ -88,6 +76,10 @@ struct SettingsView: View {
 
                     Text("Sent in the morning after your data syncs. iOS decides the exact time, so some mornings it may arrive late or not at all.")
                         .font(.caption).foregroundStyle(.secondary)
+                }
+
+                Section("About") {
+                    LabeledContent("Version", value: AppBuild.label)
                 }
 
                 Section("Data & privacy") {
@@ -174,19 +166,18 @@ struct LabeledField: View {
     @Binding var text: String
     var secure = false
     var keyboard: UIKeyboardType = .default
-    var placeholder: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label).font(.caption).foregroundStyle(.secondary)
             Group {
                 if secure {
-                    SecureField(placeholder ?? label, text: $text)
+                    SecureField(label, text: $text)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .font(.body.monospaced())
                 } else {
-                    TextField(placeholder ?? label, text: $text)
+                    TextField(label, text: $text)
                         .keyboardType(keyboard)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
