@@ -23,6 +23,7 @@ export function createAppleVerifier(opts: { bundleId: string; getKey?: KeyInput 
       const { payload } = await jwtVerify(identityToken, getKey as never, {
         issuer: APPLE_ISSUER,
         audience: opts.bundleId,
+        algorithms: ["RS256"],
       });
       if (typeof payload.sub !== "string" || payload.sub.length === 0) {
         throw new Error("apple identity token missing sub");

@@ -16,7 +16,7 @@ export async function mintSession(userId: string, secret: string, ttl = "60d"): 
 /** Verify a session token; returns the userId, or null on any failure. */
 export async function verifySession(token: string, secret: string): Promise<string | null> {
   try {
-    const { payload } = await jwtVerify(token, key(secret));
+    const { payload } = await jwtVerify(token, key(secret), { algorithms: ["HS256"] });
     return typeof payload.userId === "string" ? payload.userId : null;
   } catch {
     return null;
