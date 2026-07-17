@@ -83,7 +83,7 @@ struct SettingsView: View {
                                     if granted {
                                         settings.notificationsEnabled = true
                                         notificationDenied = false
-                                        BackgroundRefreshService.schedule(for: settings)
+                                        notifications.refreshDailySchedule(settings: settings, latest: sync.today)
                                     } else {
                                         settings.notificationsEnabled = false
                                         notificationDenied = true
@@ -92,8 +92,7 @@ struct SettingsView: View {
                             } else {
                                 settings.notificationsEnabled = false
                                 notificationDenied = false
-                                BackgroundRefreshService.cancel()
-                                notifications.cancelPending()
+                                notifications.cancelDaily()
                             }
                         }
                     ))
@@ -107,7 +106,7 @@ struct SettingsView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
 
-                    Text("Sent in the morning after your data syncs. iOS decides the exact time, so some mornings it may arrive late or not at all.")
+                    Text("Delivered daily at your chosen time. Shows your latest synced score — open the app for today's fresh number.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
@@ -150,6 +149,7 @@ struct SettingsView: View {
                 Button("Clear settings", role: .destructive) {
                     settings.clearLocalSettings()
                     sync.today = nil
+                    notifications.cancelDaily()
                     actionMessage = "Local settings cleared."
                 }
                 Button("Cancel", role: .cancel) {}
@@ -168,6 +168,7 @@ struct SettingsView: View {
             try await client.deleteAccount()
             settings.clearLocalSettings()
             sync.today = nil
+            notifications.cancelDaily()
             actionMessage = "Account data deleted."
         } catch {
             actionMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -199,7 +200,7 @@ struct SettingsView: View {
                 let c = Calendar.current.dateComponents([.hour, .minute], from: newDate)
                 settings.notificationHour = c.hour ?? 7
                 settings.notificationMinute = c.minute ?? 0
-                BackgroundRefreshService.schedule(for: settings)
+                notifications.refreshDailySchedule(settings: settings, latest: sync.today)
             }
         )
     }

@@ -6,18 +6,26 @@ struct RootView: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var sync: SyncService
     @Environment(\.scenePhase) private var scenePhase
+    private let notifications = NotificationService()
 
     var body: some View {
         Group {
             if settings.isReady {
                 MainTabView()
                     .onChange(of: scenePhase) { _, phase in
-                        if phase == .active { Task { await sync.autoSync(settings) } }
-                        else if phase == .background { BackgroundRefreshService.schedule(for: settings) }
+                        if phase == .active {
+                            Task {
+                                await sync.autoSync(settings)
+                                notifications.refreshDailySchedule(settings: settings, latest: sync.today)
+                            }
+                        }
+                    }
+                    .onChange(of: sync.today?.date) { _, _ in
+                        notifications.refreshDailySchedule(settings: settings, latest: sync.today)
                     }
                     .task {
                         await sync.autoSync(settings)
-                        BackgroundRefreshService.schedule(for: settings)
+                        notifications.refreshDailySchedule(settings: settings, latest: sync.today)
                     }
             } else {
                 OnboardingView()

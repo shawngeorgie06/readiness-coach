@@ -84,7 +84,7 @@ struct YouView: View {
             Toggle(isOn: notificationBinding) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Daily readiness").font(.system(size: 15, weight: .semibold)).foregroundStyle(Palette.textPrimary)
-                    Text("A morning notification with today's call")
+                    Text("Daily reminder with your latest synced score")
                         .font(.caption).foregroundStyle(Palette.textSecondary)
                 }
             }
@@ -141,7 +141,7 @@ struct YouView: View {
                         if granted {
                             settings.notificationsEnabled = true
                             notificationDenied = false
-                            BackgroundRefreshService.schedule(for: settings)
+                            notifications.refreshDailySchedule(settings: settings, latest: sync.today)
                         } else {
                             settings.notificationsEnabled = false
                             notificationDenied = true
@@ -150,8 +150,7 @@ struct YouView: View {
                 } else {
                     settings.notificationsEnabled = false
                     notificationDenied = false
-                    BackgroundRefreshService.cancel()
-                    notifications.cancelPending()
+                    notifications.cancelDaily()
                 }
             }
         )
@@ -167,7 +166,7 @@ struct YouView: View {
                 let c = Calendar.current.dateComponents([.hour, .minute], from: newDate)
                 settings.notificationHour = c.hour ?? 7
                 settings.notificationMinute = c.minute ?? 0
-                BackgroundRefreshService.schedule(for: settings)
+                notifications.refreshDailySchedule(settings: settings, latest: sync.today)
             }
         )
     }
