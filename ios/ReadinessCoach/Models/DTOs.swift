@@ -201,7 +201,21 @@ struct SyncPayload: Codable {
 }
 
 struct SyncResult: Codable {
-    let ok: Bool
-    let samples: Int
-    let workouts: Int
+  let ok: Bool
+  let samples: Int
+  let workouts: Int
+}
+
+// MARK: - Auth
+
+struct AppleAuthRequest: Codable {
+    let identityToken: String
+    let fullName: String?
+    let claimUserId: String?
+    let claimToken: String?
+}
+
+struct AuthResponse: Codable {
+    let sessionToken: String
+    let userId: String
 }

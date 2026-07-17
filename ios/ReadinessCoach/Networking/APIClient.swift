@@ -69,6 +69,35 @@ struct APIClient {
         return try await send("v1/coach/ask", method: "POST", body: body)
     }
 
+    /// Exchanges an Apple identity token for a backend session. This endpoint
+    /// deliberately has no bearer because it creates the bearer session.
+    func signInWithApple(
+        identityToken: String,
+        fullName: String?,
+        claimUserId: String?,
+        claimToken: String?
+    ) async throws -> AuthResponse {
+        let body = AppleAuthRequest(
+            identityToken: identityToken,
+            fullName: fullName,
+            claimUserId: claimUserId,
+            claimToken: claimToken
+        )
+        var request = URLRequest(url: baseURL.appendingPathComponent("v1/auth/apple"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try Self.encoder.encode(body)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError.http(status: -1, code: nil)
+        }
+        guard (200 ..< 300).contains(http.statusCode) else {
+            throw APIError.http(status: http.statusCode, code: Self.errorCode(from: data))
+        }
+        return try decode(data)
+    }
+
     /// Verifies the base URL + token reach a working backend for this user.
     func testConnection() async throws {
         // /health needs no auth but confirms the origin.
