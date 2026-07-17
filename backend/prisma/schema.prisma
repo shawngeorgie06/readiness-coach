@@ -17,6 +17,9 @@ model User {
   dailyScores    DailyScore[]
   advisorNotes   AdvisorNote[]
   settings       Json?
+  appleSub    String? @unique
+  email       String?
+  displayName String?
 }
 
 model HealthSample {
