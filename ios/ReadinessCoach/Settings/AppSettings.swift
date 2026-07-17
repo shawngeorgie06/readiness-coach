@@ -5,10 +5,14 @@ import Combine
 /// Observable so views react when the user edits connection details.
 final class AppSettings: ObservableObject {
     private let defaults: UserDefaults
+    private let sessionKey = "sessionToken"
 
     @Published var apiBaseURL: String { didSet { defaults.set(apiBaseURL, forKey: Keys.baseURL) } }
     @Published var apiToken: String { didSet { defaults.set(apiToken, forKey: Keys.token) } }
     @Published var userId: String { didSet { defaults.set(userId, forKey: Keys.userId) } }
+    @Published var appleDisplayName: String? {
+        didSet { defaults.set(appleDisplayName, forKey: Keys.appleDisplayName) }
+    }
     @Published var hasCompletedOnboarding: Bool {
         didSet { defaults.set(hasCompletedOnboarding, forKey: Keys.onboarded) }
     }
@@ -27,11 +31,27 @@ final class AppSettings: ObservableObject {
         self.apiBaseURL = defaults.string(forKey: Keys.baseURL) ?? Self.defaultBaseURL
         self.apiToken = defaults.string(forKey: Keys.token) ?? ""
         self.userId = defaults.string(forKey: Keys.userId) ?? ""
+        self.appleDisplayName = defaults.string(forKey: Keys.appleDisplayName)
         self.hasCompletedOnboarding = defaults.bool(forKey: Keys.onboarded)
         self.notificationsEnabled = defaults.bool(forKey: Keys.notificationsEnabled)
         self.notificationHour = (defaults.object(forKey: Keys.notificationHour) as? Int) ?? 7
         self.notificationMinute = defaults.integer(forKey: Keys.notificationMinute)
     }
+
+    /// The backend session token (Keychain-backed). Nil when signed out.
+    var sessionToken: String? {
+        get { KeychainStore.get(sessionKey) }
+        set {
+            if let newValue {
+                KeychainStore.set(newValue, for: sessionKey)
+            } else {
+                KeychainStore.remove(sessionKey)
+            }
+            objectWillChange.send()
+        }
+    }
+
+    var isSignedIn: Bool { sessionToken != nil }
 
     /// Timestamp of the last successful sync; only newer samples are sent next time.
     var lastSyncAt: Date? {
@@ -83,17 +103,35 @@ final class AppSettings: ObservableObject {
             && !userId.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
-    var isReady: Bool { isConfigured && hasCompletedOnboarding }
+    var isReady: Bool { (isConfigured || isSignedIn) && hasCompletedOnboarding }
 
     /// Builds a client from the current settings, or nil if incomplete.
     func makeClient() -> APIClient? {
         let trimmedURL = apiBaseURL.trimmingCharacters(in: .whitespaces)
-        guard isConfigured, let url = URL(string: trimmedURL) else { return nil }
+        guard let url = URL(string: trimmedURL), !userId.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        let bearer = (sessionToken ?? apiToken).trimmingCharacters(in: .whitespaces)
+        guard !bearer.isEmpty else { return nil }
         return APIClient(
             url: url,
-            token: apiToken.trimmingCharacters(in: .whitespaces),
+            token: bearer,
             userId: userId.trimmingCharacters(in: .whitespaces)
         )
+    }
+
+    /// Persist a successful Apple sign-in: session token, user ID, and name.
+    func applyAuth(_ response: AuthResponse, displayName: String?) {
+        userId = response.userId
+        if let displayName, !displayName.isEmpty {
+            appleDisplayName = displayName
+        }
+        sessionToken = response.sessionToken
+    }
+
+    /// Clear the session and return the app to the sign-in screen.
+    func signOut() {
+        sessionToken = nil
+        appleDisplayName = nil
+        hasCompletedOnboarding = false
     }
 
     /// Fills a fresh, stable user identifier when none exists yet.
@@ -104,9 +142,11 @@ final class AppSettings: ObservableObject {
     }
 
     func clearLocalSettings() {
+        sessionToken = nil
         apiBaseURL = Self.defaultBaseURL
         apiToken = ""
         userId = ""
+        appleDisplayName = nil
         hasCompletedOnboarding = false
         lastSyncAt = nil
         lastRefreshAt = nil
@@ -120,6 +160,7 @@ final class AppSettings: ObservableObject {
         static let baseURL = "apiBaseURL"
         static let token = "apiToken"
         static let userId = "userId"
+        static let appleDisplayName = "appleDisplayName"
         static let onboarded = "hasCompletedOnboarding"
         static let lastSync = "lastSyncAt"
         static let lastRefresh = "lastRefreshAt"
