@@ -6,7 +6,7 @@ import { resetTestDatabase } from "../helpers/testDatabase.js";
 
 const TOKEN = process.env.API_TOKEN ?? "integration-test-token";
 const authorization = `Bearer ${TOKEN}`;
-const app = createApp({ apiToken: TOKEN });
+const app = createApp({ apiToken: TOKEN, sessionSecret: "t".repeat(32) });
 const date = "2026-07-10";
 
 const syncPayload = {

@@ -15,8 +15,11 @@ coachRouter.post("/ask", async (req, res) => {
   const parsed = askSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "invalid_request" });
 
+  const userId = req.userId ?? "";
+  if (!userId) return res.status(400).json({ error: "userId_required" });
+
   try {
-    const today = await getToday(parsed.data.userId, parsed.data.date ?? defaultRequestedDate());
+    const today = await getToday(userId, parsed.data.date ?? defaultRequestedDate());
     const answer = await askCoach(parsed.data.question, today);
     return res.json({ decision: today.decision, answer });
   } catch (error) {

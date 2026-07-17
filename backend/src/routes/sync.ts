@@ -10,8 +10,14 @@ syncRouter.post("/", async (req, res) => {
     return;
   }
 
+  const userId = req.userId ?? "";
+  if (!userId) {
+    res.status(400).json({ error: "userId_required" });
+    return;
+  }
+
   try {
-    const result = await applySync(parsed.data, {
+    const result = await applySync({ ...parsed.data, userId }, {
       restingHrBpm: 55,
       maxHrBpm: 190,
     });

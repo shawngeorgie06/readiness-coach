@@ -4,7 +4,7 @@ import { defaultRequestedDate, getBodyDetails } from "../services/todayService.j
 export const bodyRouter = Router();
 
 bodyRouter.get("/", async (req, res) => {
-  const userId = typeof req.query.userId === "string" ? req.query.userId : "";
+  const userId = req.userId ?? "";
   const days = req.query.days == null ? 30 : Number(req.query.days);
   if (!userId) return res.status(400).json({ error: "userId_required" });
   if (!Number.isInteger(days) || days < 1 || days > 90) return res.status(400).json({ error: "invalid_days" });

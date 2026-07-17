@@ -11,7 +11,7 @@ function daysFrom(value: unknown, fallback: number): number | undefined {
 }
 
 sleepRouter.get("/", async (req, res) => {
-  const userId = typeof req.query.userId === "string" ? req.query.userId : "";
+  const userId = req.userId ?? "";
   const days = daysFrom(req.query.days, 30);
   if (!userId) return res.status(400).json({ error: "userId_required" });
   if (days == null) return res.status(400).json({ error: "invalid_days" });

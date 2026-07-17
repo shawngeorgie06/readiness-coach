@@ -5,7 +5,7 @@ import { deleteUser } from "../services/userService.js";
 export const userRouter = Router();
 
 userRouter.delete("/", async (req, res) => {
-  const userId = typeof req.query.userId === "string" ? req.query.userId : "";
+  const userId = req.userId ?? "";
   if (!userId) return res.status(400).json({ error: "userId_required" });
 
   try {

@@ -5,7 +5,12 @@ import { resolveKeepAliveUrl, startKeepAlive } from "./keepAlive.js";
 import { createGracefulShutdown } from "./shutdown.js";
 
 const env = loadEnv();
-const app = createApp({ apiToken: env.API_TOKEN, corsOrigin: env.CORS_ORIGIN });
+const app = createApp({
+  apiToken: env.API_TOKEN,
+  sessionSecret: env.SESSION_SECRET,
+  appleBundleId: env.APPLE_BUNDLE_ID,
+  corsOrigin: env.CORS_ORIGIN,
+});
 const server = app.listen(env.PORT, () => {
   console.log(`readiness-coach API on :${env.PORT}`);
 });

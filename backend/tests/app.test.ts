@@ -6,6 +6,7 @@ describe("createApp", () => {
   it("reports ready when the database probe succeeds", async () => {
     const app = createApp({
       apiToken: "test-api-token",
+      sessionSecret: "t".repeat(32),
       checkDatabase: async () => 1,
     });
 
@@ -17,6 +18,7 @@ describe("createApp", () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     const app = createApp({
       apiToken: "test-api-token",
+      sessionSecret: "t".repeat(32),
       checkDatabase: async () => {
         throw error;
       },
@@ -33,6 +35,7 @@ describe("createApp", () => {
   it("rejects missing and invalid bearer tokens", async () => {
     const app = createApp({
       apiToken: "test-api-token",
+      sessionSecret: "t".repeat(32),
       checkDatabase: async () => 1,
     });
 
@@ -48,6 +51,7 @@ describe("createApp", () => {
   it("allows a valid token to reach route validation", async () => {
     const app = createApp({
       apiToken: "test-api-token",
+      sessionSecret: "t".repeat(32),
       checkDatabase: async () => 1,
     });
 
@@ -60,6 +64,7 @@ describe("createApp", () => {
   it("requires a userId to delete a user", async () => {
     const app = createApp({
       apiToken: "test-api-token",
+      sessionSecret: "t".repeat(32),
       checkDatabase: async () => 1,
     });
 
@@ -72,6 +77,7 @@ describe("createApp", () => {
   it("sets security headers via Helmet", async () => {
     const app = createApp({
       apiToken: "test-api-token",
+      sessionSecret: "t".repeat(32),
       checkDatabase: async () => 1,
     });
 
@@ -84,6 +90,7 @@ describe("createApp", () => {
   it("blocks cross-origin requests when no origin is configured", async () => {
     const app = createApp({
       apiToken: "test-api-token",
+      sessionSecret: "t".repeat(32),
       checkDatabase: async () => 1,
     });
 
@@ -97,6 +104,7 @@ describe("createApp", () => {
   it("allows only the configured origin", async () => {
     const app = createApp({
       apiToken: "test-api-token",
+      sessionSecret: "t".repeat(32),
       checkDatabase: async () => 1,
       corsOrigin: "https://app.readiness-coach.example",
     });
@@ -117,6 +125,7 @@ describe("createApp", () => {
   it("rate-limits requests to the /v1 API surface", async () => {
     const app = createApp({
       apiToken: "test-api-token",
+      sessionSecret: "t".repeat(32),
       checkDatabase: async () => 1,
       rateLimit: { windowMs: 60_000, max: 2 },
     });
