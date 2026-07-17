@@ -1,6 +1,6 @@
 import express from "express";
 import request from "supertest";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createAuthRouter } from "../../src/routes/auth.js";
 import { verifySession } from "../../src/auth/session.js";
 import type { AppleVerifier } from "../../src/auth/appleVerifier.js";
@@ -38,5 +38,26 @@ describe("POST /v1/auth/apple", () => {
     const res = await request(appWith(okVerifier, newUserDeps)).post("/v1/auth/apple").send({ identityToken: "x" }).expect(200);
     expect(res.body.userId).toBe("created-user");
     expect(await verifySession(res.body.sessionToken, SECRET)).toBe("created-user");
+  });
+
+  it("does not log sensitive details when session creation fails", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const secret = "identityToken=secret-token claimToken=secret-claim";
+    const failingDeps: ResolveUserDeps = {
+      ...newUserDeps,
+      createUser: async () => { throw new Error(secret); },
+    };
+
+    try {
+      await request(appWith(okVerifier, failingDeps))
+        .post("/v1/auth/apple")
+        .send({ identityToken: "x", claimToken: "secret-claim" })
+        .expect(500, { error: "auth_failed" });
+
+      expect(consoleError).toHaveBeenCalledWith("Apple authentication failed");
+      expect(consoleError.mock.calls.flat().join(" ")).not.toContain(secret);
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 });

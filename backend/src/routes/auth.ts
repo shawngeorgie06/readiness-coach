@@ -35,8 +35,8 @@ export function createAuthRouter(opts: {
       const user = await resolveUser(identity, displayName, claim, opts.apiToken, deps);
       const sessionToken = await mintSession(user.id, opts.sessionSecret);
       return res.json({ sessionToken, userId: user.id });
-    } catch (error) {
-      console.error(error);
+    } catch {
+      console.error("Apple authentication failed");
       return res.status(500).json({ error: "auth_failed" });
     }
   });
