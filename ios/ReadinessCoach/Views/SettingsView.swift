@@ -17,10 +17,24 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Connection") {
-                    LabeledField(label: "API URL", text: $settings.apiBaseURL, keyboard: .default)
-                    LabeledField(label: "API token", text: $settings.apiToken, secure: true)
-                    LabeledField(label: "User ID", text: $settings.userId)
+                Section("Account") {
+                    if settings.isSignedIn {
+                        LabeledContent("Signed in", value: settings.appleDisplayName ?? "Apple ID")
+                        Button("Sign out", role: .destructive) {
+                            settings.signOut()
+                        }
+                    } else {
+                        Text("Not signed in")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section {
+                    DisclosureGroup("Advanced (developer)") {
+                        LabeledField(label: "API URL", text: $settings.apiBaseURL, keyboard: .default)
+                        LabeledField(label: "API token", text: $settings.apiToken, secure: true)
+                        LabeledField(label: "User ID", text: $settings.userId)
+                    }
                 }
 
                 Section("Sync") {

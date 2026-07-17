@@ -99,6 +99,7 @@ final class SyncService: ObservableObject {
             }
             didRefresh(try await client.getToday(), settings)
         } catch {
+            signOutIfUnauthorized(error, settings: settings)
             errorMessage = readable(error)
         }
     }
@@ -115,7 +116,14 @@ final class SyncService: ObservableObject {
         do {
             didRefresh(try await client.getToday(), settings)
         } catch {
+            signOutIfUnauthorized(error, settings: settings)
             errorMessage = readable(error)
+        }
+    }
+
+    private func signOutIfUnauthorized(_ error: Error, settings: AppSettings) {
+        if case APIError.http(status: 401, _) = error, settings.isSignedIn {
+            settings.signOut()
         }
     }
 
