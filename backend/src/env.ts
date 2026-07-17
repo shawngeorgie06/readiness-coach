@@ -4,6 +4,8 @@ const envSchema = z.object({
   PORT: z.coerce.number().default(4000),
   DATABASE_URL: z.string().min(1),
   API_TOKEN: z.string().min(8),
+  SESSION_SECRET: z.string().min(32),
+  APPLE_BUNDLE_ID: z.string().min(1),
   LLM_API_KEY: z.string().optional(),
   LLM_BASE_URL: z.string().url().default("https://api.openai.com/v1"),
   LLM_MODEL: z.string().default("gpt-4o-mini"),
