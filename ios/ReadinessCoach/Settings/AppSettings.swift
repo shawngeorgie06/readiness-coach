@@ -118,6 +118,13 @@ final class AppSettings: ObservableObject {
         )
     }
 
+    /// A client for the unauthenticated Apple sign-in endpoint.
+    func makeClientForAuth() -> APIClient? {
+        let trimmedURL = apiBaseURL.trimmingCharacters(in: .whitespaces)
+        guard let url = URL(string: trimmedURL), url.scheme != nil, url.host != nil else { return nil }
+        return APIClient(baseURL: url, token: "", userId: userId)
+    }
+
     /// Persist a successful Apple sign-in: session token, user ID, and name.
     func applyAuth(_ response: AuthResponse, displayName: String?) {
         userId = response.userId
