@@ -1,7 +1,8 @@
-import AuthenticationServices
 import SwiftUI
 
-/// First-run flow: authenticate, request HealthKit access, then run the first sync.
+/// First-run flow: confirm the pre-filled API connection, request HealthKit
+/// access, then run the first sync. The backend URL and (on this machine) the
+/// token are pre-filled, so the happy path is "Allow Health → Start & sync".
 struct OnboardingView: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var sync: SyncService
@@ -10,6 +11,8 @@ struct OnboardingView: View {
     @State private var healthGranted = false
     @State private var error: String?
     @State private var isFinishing = false
+    @State private var isTesting = false
+    @State private var testOK: Bool?
     @State private var showAdvanced = false
 
     private let health = HealthKitService()
@@ -20,22 +23,33 @@ struct OnboardingView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     header
 
-                    SectionCard(title: "1 · Sign in") {
-                        if settings.isSignedIn {
-                            Label("Signed in with Apple", systemImage: "checkmark.circle.fill")
+                    SectionCard(title: "1 · Connect") {
+                        if settings.isConfigured {
+                            Label("Connected to your backend", systemImage: "checkmark.circle.fill")
                                 .foregroundStyle(.green)
                         } else {
-                            SignInWithAppleButton(.signIn) { request in
-                                request.requestedScopes = [.fullName, .email]
-                            } onCompletion: { result in
-                                Task { await handleSignIn(result) }
-                            }
-                            .signInWithAppleButtonStyle(.black)
-                            .frame(height: 48)
+                            Text("Add your API token under Advanced to connect.")
+                                .font(.subheadline)
                         }
-                        Text("Your data is tied to your Apple ID. No token to copy.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        DisclosureGroup("Advanced", isExpanded: $showAdvanced) {
+                            LabeledField(label: "API URL", text: $settings.apiBaseURL, keyboard: .default)
+                            LabeledField(label: "API token", text: $settings.apiToken, secure: true)
+                            LabeledField(label: "User ID", text: $settings.userId)
+                            Button {
+                                Task { await testConnection() }
+                            } label: {
+                                HStack {
+                                    Image(systemName: testIcon)
+                                    Text(isTesting ? "Testing…" : "Test connection")
+                                    Spacer()
+                                    if isTesting { ProgressView() }
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(isTesting || !settings.isConfigured)
+                            .padding(.top, 4)
+                        }
+                        .font(.subheadline)
                     }
 
                     SectionCard(title: "2 · Allow Health access") {
@@ -52,15 +66,8 @@ struct OnboardingView: View {
                             }
                         }
                         .buttonStyle(.bordered)
-                        .disabled(isRequestingHealth || !settings.isSignedIn)
+                        .disabled(isRequestingHealth || !settings.isConfigured)
                     }
-
-                    DisclosureGroup("Advanced (developer)", isExpanded: $showAdvanced) {
-                        LabeledField(label: "API URL", text: $settings.apiBaseURL, keyboard: .default)
-                        LabeledField(label: "API token", text: $settings.apiToken, secure: true)
-                        LabeledField(label: "User ID", text: $settings.userId)
-                    }
-                    .font(.subheadline)
 
                     if let error {
                         Text(error).font(.footnote).foregroundStyle(.red)
@@ -76,7 +83,7 @@ struct OnboardingView: View {
                         }
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(!settings.isSignedIn || isFinishing)
+                    .disabled(!settings.isConfigured || isFinishing)
                 }
                 .padding()
             }
@@ -95,35 +102,22 @@ struct OnboardingView: View {
         }
     }
 
-    private func handleSignIn(_ result: Result<ASAuthorization, Error>) async {
-        error = nil
-        switch result {
-        case .success(let authorization):
-            guard let credential = AppleSignIn.credential(from: authorization) else {
-                error = "Could not read your Apple sign-in."
-                return
-            }
-            guard let client = settings.makeClientForAuth() else {
-                error = "API URL is not set."
-                return
-            }
-            do {
-                let claimUserId = settings.userId.isEmpty ? nil : settings.userId
-                let claimToken = settings.apiToken.isEmpty ? nil : settings.apiToken
-                let auth = try await client.signInWithApple(
-                    identityToken: credential.identityToken,
-                    fullName: credential.fullName,
-                    claimUserId: claimUserId,
-                    claimToken: claimToken
-                )
-                settings.applyAuth(auth, displayName: credential.fullName)
-            } catch {
-                self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-            }
-        case .failure(let authorizationError):
-            if (authorizationError as? ASAuthorizationError)?.code != .canceled {
-                error = authorizationError.localizedDescription
-            }
+    private var testIcon: String {
+        switch testOK {
+        case .some(true): return "checkmark.circle.fill"
+        case .some(false): return "xmark.circle.fill"
+        case nil: return "bolt.horizontal.circle"
+        }
+    }
+
+    private func testConnection() async {
+        guard let client = settings.makeClient() else { return }
+        isTesting = true; error = nil
+        defer { isTesting = false }
+        do { try await client.testConnection(); testOK = true }
+        catch {
+            testOK = false
+            self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
 
@@ -140,9 +134,10 @@ struct OnboardingView: View {
     }
 
     private func finish() async {
-        guard settings.isSignedIn else { return }
+        guard settings.isConfigured else { return }
         isFinishing = true
         defer { isFinishing = false }
+        settings.ensureUserId()
         await sync.syncNow(settings)
         if sync.errorMessage == nil {
             settings.hasCompletedOnboarding = true

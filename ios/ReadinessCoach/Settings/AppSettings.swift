@@ -29,7 +29,7 @@ final class AppSettings: ObservableObject {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         self.apiBaseURL = defaults.string(forKey: Keys.baseURL) ?? Self.defaultBaseURL
-        self.apiToken = defaults.string(forKey: Keys.token) ?? ""
+        self.apiToken = defaults.string(forKey: Keys.token) ?? Secrets.defaultAPIToken
         self.userId = defaults.string(forKey: Keys.userId) ?? ""
         self.appleDisplayName = defaults.string(forKey: Keys.appleDisplayName)
         self.hasCompletedOnboarding = defaults.bool(forKey: Keys.onboarded)
