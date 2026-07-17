@@ -203,6 +203,9 @@ struct APIClient {
             throw APIError.http(status: -1, code: nil)
         }
         guard (200 ..< 300).contains(http.statusCode) else {
+            if http.statusCode == 401 {
+                NotificationCenter.default.post(name: .apiUnauthorized, object: nil)
+            }
             throw APIError.http(status: http.statusCode, code: Self.errorCode(from: data))
         }
         return data
@@ -216,4 +219,9 @@ struct APIClient {
         if let string = object["error"] as? String { return string }
         return nil
     }
+}
+
+extension Notification.Name {
+    /// Posted when an authenticated /v1 call returns 401 (session expired/invalid).
+    static let apiUnauthorized = Notification.Name("apiUnauthorized")
 }

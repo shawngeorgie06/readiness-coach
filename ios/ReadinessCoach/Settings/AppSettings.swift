@@ -36,6 +36,11 @@ final class AppSettings: ObservableObject {
         self.notificationsEnabled = defaults.bool(forKey: Keys.notificationsEnabled)
         self.notificationHour = (defaults.object(forKey: Keys.notificationHour) as? Int) ?? 7
         self.notificationMinute = defaults.integer(forKey: Keys.notificationMinute)
+
+        NotificationCenter.default.addObserver(forName: .apiUnauthorized, object: nil, queue: .main) { [weak self] _ in
+            guard let self, self.isSignedIn else { return }
+            self.signOut()
+        }
     }
 
     /// The backend session token (Keychain-backed). Nil when signed out.
