@@ -52,19 +52,26 @@ enum SyncFreshness {
         case .noData:
             return "Sync Health data to compute today's readiness."
         case .fresh:
-            if let summary, !summary.isEmpty { return summary }
+            if let summary = userFacingSummary(summary) { return summary }
             if let relative = settings.lastRefreshRelativeText {
                 return "Last refreshed \(relative)."
             }
             return nil
         case .aging:
-            if let summary, !summary.isEmpty { return summary }
+            if let summary = userFacingSummary(summary) { return summary }
             return "Open the app or pull to refresh for the latest score."
         case .stale(let scoreDay):
             return "Showing score for \(formattedDay(scoreDay)). Pull to refresh for today."
         case .offline:
             return "Couldn't reach the server — showing your last saved score."
         }
+    }
+
+    /// Hides stale HealthKit read errors from profile/Today lines when the score is otherwise fine.
+    private static func userFacingSummary(_ summary: String?) -> String? {
+        guard let summary, !summary.isEmpty else { return nil }
+        if summary.hasPrefix("Couldn't read Health") { return nil }
+        return summary
     }
 
     private static func formattedDay(_ isoDay: String) -> String {

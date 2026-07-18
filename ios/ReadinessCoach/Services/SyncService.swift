@@ -79,8 +79,18 @@ final class SyncService: ObservableObject {
         lastSyncSummary?.hasPrefix("Couldn't read Health") == true
     }
 
+    var healthSyncSucceeded: Bool {
+        guard let summary = lastSyncSummary else { return false }
+        return summary.hasPrefix("Synced ")
+            || summary.hasPrefix("No new HealthKit samples")
+    }
+
     /// Reads new HealthKit samples, uploads them, then refreshes Today so the
     /// locked decision reflects the just-synced data.
+    ///
+    /// HealthKit read and `/v1/today` run in parallel so the score can appear
+    /// while samples are still being collected. A second Today fetch runs only
+    /// when new samples were uploaded.
     func syncNow(_ settings: AppSettings) async {
         guard let client = settings.makeClient() else {
             errorMessage = APIError.notConfigured.localizedDescription
@@ -90,33 +100,47 @@ final class SyncService: ObservableObject {
         errorMessage = nil
         defer { isSyncing = false; uploadingCount = nil }
 
-        do {
-            if HealthKitService.isAvailable {
-                // A Health read/upload failure (no entitlement on Simulator, or
-                // partial permission) must not blank the server-computed score.
-                do {
-                    let payload = try await health.fetchSamples(
-                        since: settings.lastSyncAt,
-                        userId: settings.userId
-                    )
-                    if !payload.isEmpty {
+        await client.wakeServer()
+
+        async let healthPayloadTask = loadHealthPayload(settings)
+        async let preliminaryTodayTask = loadToday(client)
+
+        let healthPayload = await healthPayloadTask
+        let preliminaryToday = await preliminaryTodayTask
+
+        if let preliminaryToday {
+            didRefresh(preliminaryToday, settings)
+        }
+
+        var uploadedNewSamples = false
+        if let healthPayload {
+            switch healthPayload {
+            case .samples(let payload):
+                if payload.isEmpty {
+                    lastSyncSummary = "No new HealthKit samples since last sync."
+                    settings.lastSyncAt = Date()
+                } else {
+                    do {
                         uploadingCount = payload.samples.count
                         let result = try await client.sync(payload)
                         lastSyncSummary = "Synced \(result.samples) samples, \(result.workouts) workouts."
-                    } else {
-                        lastSyncSummary = "No new HealthKit samples since last sync."
+                        settings.lastSyncAt = Date()
+                        uploadedNewSamples = true
+                    } catch {
+                        errorMessage = readable(error)
                     }
-                    settings.lastSyncAt = Date()
-                } catch {
-                    lastSyncSummary = "Couldn't read Health data: \(readable(error))"
                 }
-            } else {
+            case .readFailed(let error):
+                applyHealthReadFailure(error)
+            case .unavailable:
                 lastSyncSummary = "HealthKit unavailable — showing server data only."
             }
-            didRefresh(try await client.getToday(), settings)
-        } catch {
-            signOutIfUnauthorized(error, settings: settings)
-            errorMessage = readable(error)
+        }
+
+        if uploadedNewSamples {
+            await refreshTodayFromServer(client, settings: settings, keepPreliminaryOnFailure: true)
+        } else if preliminaryToday == nil {
+            await refreshTodayFromServer(client, settings: settings, keepPreliminaryOnFailure: false)
         }
     }
 
@@ -129,11 +153,50 @@ final class SyncService: ObservableObject {
         isLoadingToday = true
         errorMessage = nil
         defer { isLoadingToday = false }
+        await refreshTodayFromServer(client, settings: settings, keepPreliminaryOnFailure: false)
+    }
+
+    private enum HealthPayloadResult {
+        case samples(SyncPayload)
+        case readFailed(Error)
+        case unavailable
+    }
+
+    private func loadHealthPayload(_ settings: AppSettings) async -> HealthPayloadResult? {
+        guard HealthKitService.isAvailable else { return .unavailable }
         do {
-            didRefresh(try await client.getToday(), settings)
+            let payload = try await health.fetchSamples(
+                since: settings.lastSyncAt,
+                userId: settings.userId
+            )
+            return .samples(payload)
+        } catch {
+            return .readFailed(error)
+        }
+    }
+
+    private func loadToday(_ client: APIClient) async -> TodayDTO? {
+        try? await client.getTodayWithRetry()
+    }
+
+    private func refreshTodayFromServer(
+        _ client: APIClient,
+        settings: AppSettings,
+        keepPreliminaryOnFailure: Bool
+    ) async {
+        do {
+            didRefresh(try await client.getTodayWithRetry(), settings)
         } catch {
             signOutIfUnauthorized(error, settings: settings)
-            errorMessage = readable(error)
+            if !keepPreliminaryOnFailure || today == nil {
+                errorMessage = readable(error)
+            }
+        }
+    }
+
+    private func applyHealthReadFailure(_ error: Error) {
+        if !healthSyncSucceeded {
+            lastSyncSummary = "Couldn't read Health data: \(readable(error))"
         }
     }
 

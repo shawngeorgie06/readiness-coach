@@ -5,6 +5,7 @@ struct TodayView: View {
     @EnvironmentObject private var sync: SyncService
     @EnvironmentObject private var tabs: TabRouter
     @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var showAsk = false
     @State private var showSettings = false
@@ -78,8 +79,11 @@ struct TodayView: View {
                 await loadRecent()
                 await loadMiniStats()
             }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { Task { healthStatus = await health.accessStatus() } }
+            }
             .onChange(of: sync.lastSyncSummary) { _, _ in
-                Task { healthStatus = await health.accessStatus() }
+                if sync.healthSyncSucceeded { healthStatus = .connected }
             }
         }
     }
@@ -359,7 +363,7 @@ struct TodayView: View {
             EmptyView()
         }
 
-        if healthStatus == .needsPermission || sync.healthSyncFailed {
+        if shouldShowHealthAccessBanner {
             FreshnessBanner(
                 title: "Health access needed",
                 message: "Readiness needs heart rate, HRV, sleep, and workouts from Apple Health.",
@@ -379,6 +383,15 @@ struct TodayView: View {
                 }
             )
         }
+    }
+
+    /// Only prompt when Health access is genuinely missing — not while loading status
+    /// or after a stale Health read error while access is already granted.
+    private var shouldShowHealthAccessBanner: Bool {
+        guard let healthStatus else { return false }
+        if healthStatus == .connected { return false }
+        if healthStatus == .needsPermission { return true }
+        return sync.healthSyncFailed && !sync.healthSyncSucceeded
     }
 
     private func banner(_ title: String, _ message: String, color: Color, icon: String,

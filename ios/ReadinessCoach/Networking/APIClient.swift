@@ -35,11 +35,43 @@ struct APIClient {
 
     private static let decoder = JSONDecoder()
     private static let encoder = JSONEncoder()
+    private static let session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 60
+        config.timeoutIntervalForResource = 120
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: config)
+    }()
 
     // MARK: Reads
 
     func getToday(date: String? = nil) async throws -> TodayDTO {
         try await get("v1/today", query: dateQuery(date))
+    }
+
+    /// Retries once after waking a cold host (Render free tier spin-up).
+    func getTodayWithRetry(date: String? = nil) async throws -> TodayDTO {
+        do {
+            return try await getToday(date: date)
+        } catch let error as APIError where Self.retryableTransport(error) {
+            await wakeServer()
+            try await Task.sleep(nanoseconds: 1_500_000_000)
+            return try await getToday(date: date)
+        }
+    }
+
+    /// Hits `/health` so a sleeping backend can start booting while HealthKit reads.
+    func wakeServer() async {
+        var request = URLRequest(url: baseURL.appendingPathComponent("health"))
+        request.httpMethod = "GET"
+        request.timeoutInterval = 20
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        _ = try? await Self.session.data(for: request)
+    }
+
+    private static func retryableTransport(_ error: APIError) -> Bool {
+        if case .transport = error { return true }
+        return false
     }
 
     func getSleep(days: Int = 30, date: String? = nil) async throws -> SleepDetailResponse {
@@ -88,7 +120,7 @@ struct APIClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try Self.encoder.encode(body)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await Self.session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw APIError.http(status: -1, code: nil)
         }
@@ -103,7 +135,7 @@ struct APIClient {
         // /health needs no auth but confirms the origin.
         var health = URLRequest(url: baseURL.appendingPathComponent("health"))
         health.timeoutInterval = 8
-        _ = try await URLSession.shared.data(for: health)
+        _ = try await Self.session.data(for: health)
         // getToday confirms the token is accepted. A brand-new user that hasn't
         // synced yet legitimately has no Today (404 user_not_found) — that still
         // proves the URL + token are correct, so count it as a successful test.
@@ -194,7 +226,7 @@ struct APIClient {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await URLSession.shared.data(for: request)
+            (data, response) = try await Self.session.data(for: request)
         } catch {
             throw APIError.transport(error)
         }
