@@ -7,6 +7,7 @@ struct RootView: View {
     @EnvironmentObject private var sync: SyncService
     @Environment(\.scenePhase) private var scenePhase
     private let notifications = NotificationService()
+    private let healthBackground = HealthBackgroundDelivery()
 
     var body: some View {
         Group {
@@ -26,6 +27,10 @@ struct RootView: View {
                     .task {
                         await sync.autoSync(settings)
                         notifications.refreshDailySchedule(settings: settings, latest: sync.today)
+                        healthBackground.start {
+                            await sync.backgroundSync(settings)
+                            notifications.refreshDailySchedule(settings: settings, latest: sync.today)
+                        }
                     }
             } else {
                 OnboardingView()

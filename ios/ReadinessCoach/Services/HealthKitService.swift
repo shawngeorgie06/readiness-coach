@@ -16,6 +16,13 @@ final class HealthKitService {
 
     static var isAvailable: Bool { HKHealthStore.isHealthDataAvailable() }
 
+    /// Whether the user has completed the Health permission flow (or still needs the sheet).
+    enum AccessStatus: Equatable {
+        case unavailable
+        case needsPermission
+        case connected
+    }
+
     // MARK: Types
 
     private var heartRate: HKQuantityType { HKQuantityType(.heartRate) }
@@ -40,6 +47,27 @@ final class HealthKitService {
         }
         // The app only reads; the second (share) set is intentionally empty.
         try await store.requestAuthorization(toShare: [], read: readTypes)
+    }
+
+    /// Reflects whether the Health permission sheet still needs to be shown.
+    /// After the user completes it (grant or deny), iOS reports `.unnecessary`.
+    func accessStatus() async -> AccessStatus {
+        guard Self.isAvailable else { return .unavailable }
+        do {
+            let requestStatus = try await withCheckedThrowingContinuation {
+                (continuation: CheckedContinuation<HKAuthorizationRequestStatus, Error>) in
+                store.getRequestStatusForAuthorization(toShare: [], read: readTypes) { status, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume(returning: status)
+                    }
+                }
+            }
+            return requestStatus == .shouldRequest ? .needsPermission : .connected
+        } catch {
+            return .needsPermission
+        }
     }
 
     // MARK: Fetch

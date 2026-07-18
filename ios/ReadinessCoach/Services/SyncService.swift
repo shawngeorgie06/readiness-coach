@@ -13,6 +13,7 @@ final class SyncService: ObservableObject {
 
     private let health = HealthKitService()
     private var lastAutoSyncAt: Date?
+    private var lastBackgroundSyncAt: Date?
 
     /// Today includes health-derived information. Keep it in a file with iOS
     /// complete file protection rather than in UserDefaults, and do not include
@@ -61,6 +62,21 @@ final class SyncService: ObservableObject {
         if let last = lastAutoSyncAt, Date().timeIntervalSince(last) < 30 { return }
         lastAutoSyncAt = Date()
         await syncNow(settings)
+    }
+
+    /// HealthKit background delivery — debounced harder than foreground sync.
+    func backgroundSync(_ settings: AppSettings) async {
+        if let last = lastBackgroundSyncAt, Date().timeIntervalSince(last) < 300 { return }
+        lastBackgroundSyncAt = Date()
+        await syncNow(settings)
+    }
+
+    func freshness(using settings: AppSettings) -> DataFreshness {
+        SyncFreshness.evaluate(today: today, settings: settings, errorMessage: errorMessage)
+    }
+
+    var healthSyncFailed: Bool {
+        lastSyncSummary?.hasPrefix("Couldn't read Health") == true
     }
 
     /// Reads new HealthKit samples, uploads them, then refreshes Today so the

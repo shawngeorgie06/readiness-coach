@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var sync: SyncService
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var showDeleteAccountConfirm = false
     @State private var showResetConfirm = false
@@ -10,7 +11,7 @@ struct SettingsView: View {
     @State private var isDeleting = false
     @State private var notificationDenied = false
     @State private var isRequestingHealth = false
-    @State private var healthRequested = false
+    @State private var healthStatus: HealthKitService.AccessStatus?
     private let notifications = NotificationService()
     private let health = HealthKitService()
 
@@ -23,14 +24,19 @@ struct SettingsView: View {
                         Button("Sign out", role: .destructive) {
                             settings.signOut()
                         }
+                    } else if settings.isConfigured {
+                        Label("Connected via API token", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                        LabeledContent("User ID", value: settings.userId)
+                            .font(.caption)
                     } else {
-                        Text("Not signed in")
+                        Text("Not connected")
                             .foregroundStyle(.secondary)
                     }
                 }
 
                 Section {
-                    DisclosureGroup("Advanced (developer)") {
+                    DisclosureGroup("Connection") {
                         LabeledField(label: "API URL", text: $settings.apiBaseURL, keyboard: .default)
                         LabeledField(label: "API token", text: $settings.apiToken, secure: true)
                         LabeledField(label: "User ID", text: $settings.userId)
@@ -58,18 +64,32 @@ struct SettingsView: View {
                 }
 
                 Section("Health") {
-                    Button {
-                        Task { await requestHealth() }
-                    } label: {
-                        HStack {
-                            Image(systemName: healthRequested ? "checkmark.circle.fill" : "heart.text.square")
-                            Text(healthRequested ? "Health access requested" : "Allow Health access")
-                            Spacer()
-                            if isRequestingHealth { ProgressView() }
+                    switch healthStatus {
+                    case .connected:
+                        Label("Health access enabled", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    case .needsPermission, .none:
+                        Button {
+                            Task { await requestHealth() }
+                        } label: {
+                            HStack {
+                                Image(systemName: "heart.text.square")
+                                Text("Allow Health access")
+                                Spacer()
+                                if isRequestingHealth { ProgressView() }
+                            }
                         }
+                        .disabled(isRequestingHealth)
+                    case .unavailable:
+                        Text("Health data is not available on this device.")
+                            .foregroundStyle(.secondary)
                     }
-                    .disabled(isRequestingHealth)
-                    Text("Reads heart rate, resting HR, HRV, sleep, and workouts. Never writes to Health. If you already granted this, manage it in iOS Settings → Health → Data Access & Devices.")
+                    if let summary = sync.lastSyncSummary, summary.hasPrefix("Couldn't read Health") {
+                        Text(summary)
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                    Text("Reads heart rate, resting HR, HRV, sleep, and workouts. Never writes to Health. Manage permissions in iOS Settings → Health → Data Access & Devices.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
@@ -131,6 +151,10 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .task { await refreshHealthStatus() }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { Task { await refreshHealthStatus() } }
+            }
             .confirmationDialog(
                 "Delete all account data on the server? This cannot be undone.",
                 isPresented: $showDeleteAccountConfirm,
@@ -175,12 +199,16 @@ struct SettingsView: View {
         }
     }
 
+    private func refreshHealthStatus() async {
+        healthStatus = await health.accessStatus()
+    }
+
     private func requestHealth() async {
         isRequestingHealth = true
         defer { isRequestingHealth = false }
         do {
             try await health.requestAuthorization()
-            healthRequested = true
+            await refreshHealthStatus()
         } catch {
             actionMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }

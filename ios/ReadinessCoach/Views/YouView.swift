@@ -9,6 +9,14 @@ struct YouView: View {
     @State private var showSettings = false
     private let notifications = NotificationService()
 
+    private var freshness: DataFreshness {
+        sync.freshness(using: settings)
+    }
+
+    private var statusPill: (text: String, tone: Pill.Tone) {
+        SyncFreshness.statusLabel(freshness, syncing: sync.isSyncing)
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -56,13 +64,19 @@ struct YouView: View {
                 Text(AppBuild.label)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(Palette.accent)
-                Text(settings.userId.isEmpty ? "Not configured" : settings.userId)
+                Text(settings.isConfigured ? "Connected via API token" : "Not configured")
                     .font(.caption).foregroundStyle(Palette.textSecondary).lineLimit(1)
                 HStack(spacing: 8) {
-                    Pill(sync.today == nil ? "Offline" : "Synced", tone: sync.today == nil ? .warn : .good)
+                    Pill(statusPill.text, tone: statusPill.tone)
                     if let synced = settings.lastRefreshRelativeText {
                         Text(synced).font(.caption2).foregroundStyle(Palette.textTertiary)
                     }
+                }
+                if let detail = SyncFreshness.detailLine(freshness, settings: settings, summary: sync.lastSyncSummary) {
+                    Text(detail)
+                        .font(.caption2)
+                        .foregroundStyle(Palette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             Spacer(minLength: 0)

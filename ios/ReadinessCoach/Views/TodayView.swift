@@ -4,16 +4,24 @@ struct TodayView: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var sync: SyncService
     @EnvironmentObject private var tabs: TabRouter
+    @Environment(\.openURL) private var openURL
 
     @State private var showAsk = false
     @State private var showSettings = false
     @State private var pillarInfo: PillarInfo?
+    @State private var healthStatus: HealthKitService.AccessStatus?
     @State private var recent: [ReadinessPoint] = []
     @State private var hrv: Double?
     @State private var rhr: Double?
     @State private var sleepHours: Double?
     @State private var strain: Double?
     @State private var strainAvg: Double?
+
+    private let health = HealthKitService()
+
+    private var freshness: DataFreshness {
+        sync.freshness(using: settings)
+    }
 
     /// Maps raw missing-metric keys to human names for the banner.
     static func friendlyMissing(_ keys: [String]) -> String {
@@ -65,7 +73,14 @@ struct TodayView: View {
             .sheet(isPresented: $showAsk) { NavigationStack { AskCoachView() } }
             .sheet(isPresented: $showSettings) { NavigationStack { SettingsView() } }
             .sheet(item: $pillarInfo) { PillarDetailSheet(info: $0) }
-            .task { await loadRecent(); await loadMiniStats() }
+            .task {
+                healthStatus = await health.accessStatus()
+                await loadRecent()
+                await loadMiniStats()
+            }
+            .onChange(of: sync.lastSyncSummary) { _, _ in
+                Task { healthStatus = await health.accessStatus() }
+            }
         }
     }
 
@@ -104,6 +119,8 @@ struct TodayView: View {
 
     @ViewBuilder
     private func content(_ today: TodayDTO) -> some View {
+        freshnessBanners
+
         if today.calibrating {
             banner(
                 "Calibrating",
@@ -162,19 +179,11 @@ struct TodayView: View {
         if let count = sync.uploadingCount {
             Label("Uploading \(count) samples…", systemImage: "arrow.up.circle")
                 .font(.caption2).foregroundStyle(Palette.textSecondary)
-        } else if let synced = settings.lastSyncRelativeText {
-            Text("Last synced \(synced)")
-                .font(.caption2).foregroundStyle(Palette.textSecondary)
-        }
-        Text(AppBuild.label)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(Palette.accent)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityIdentifier("today-app-build")
-        if !today.overridesApplied.isEmpty {
-            Text("Overrides: \(today.overridesApplied.joined(separator: ", "))")
+        } else if let detail = SyncFreshness.detailLine(freshness, settings: settings, summary: sync.lastSyncSummary) {
+            Text(detail)
                 .font(.caption2)
-                .foregroundStyle(Palette.textSecondary)
+                .foregroundStyle(freshness == .offline ? Palette.warn : Palette.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
 
         metricTiles(today.pillars)
@@ -319,9 +328,56 @@ struct TodayView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Text(note.source == "llm" ? "Written by coach model" : "Template note")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+        }
+    }
+
+    @ViewBuilder
+    private var freshnessBanners: some View {
+        switch freshness {
+        case .offline:
+            FreshnessBanner(
+                title: "Offline",
+                message: "Showing your last saved score. Connect to refresh today's readiness.",
+                color: Palette.warn,
+                icon: "wifi.slash"
+            )
+        case .stale:
+            FreshnessBanner(
+                title: "Score may be outdated",
+                message: "This readiness ring may not reflect today yet. Pull down or tap sync to refresh.",
+                color: Palette.warn,
+                icon: "clock.arrow.circlepath"
+            )
+        case .aging:
+            FreshnessBanner(
+                title: "Not refreshed recently",
+                message: "Background sync runs when Health gets new data, but you can pull to refresh now.",
+                color: Palette.textSecondary,
+                icon: "arrow.triangle.2.circlepath"
+            )
+        default:
+            EmptyView()
+        }
+
+        if healthStatus == .needsPermission || sync.healthSyncFailed {
+            FreshnessBanner(
+                title: "Health access needed",
+                message: "Readiness needs heart rate, HRV, sleep, and workouts from Apple Health.",
+                color: Palette.accent,
+                icon: "heart.text.square",
+                actionTitle: healthStatus == .needsPermission ? "Allow Health access" : "Open Health settings",
+                action: {
+                    if healthStatus == .needsPermission {
+                        Task {
+                            try? await health.requestAuthorization()
+                            healthStatus = await health.accessStatus()
+                            await sync.syncNow(settings)
+                        }
+                    } else if let url = URL(string: "x-apple-health://") {
+                        openURL(url)
+                    }
+                }
+            )
         }
     }
 

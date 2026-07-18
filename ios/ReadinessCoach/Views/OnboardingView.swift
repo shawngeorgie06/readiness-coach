@@ -8,7 +8,7 @@ struct OnboardingView: View {
     @EnvironmentObject private var sync: SyncService
 
     @State private var isRequestingHealth = false
-    @State private var healthGranted = false
+    @State private var healthStatus: HealthKitService.AccessStatus?
     @State private var error: String?
     @State private var isFinishing = false
     @State private var isTesting = false
@@ -55,18 +55,28 @@ struct OnboardingView: View {
                     SectionCard(title: "2 · Allow Health access") {
                         Text("Readiness Coach reads heart rate, resting HR, HRV, sleep, and workouts. It never writes to Health.")
                             .font(.subheadline)
-                        Button {
-                            Task { await requestHealth() }
-                        } label: {
-                            HStack {
-                                Image(systemName: healthGranted ? "checkmark.circle.fill" : "heart.text.square")
-                                Text(healthGranted ? "Health access requested" : "Allow Health access")
-                                Spacer()
-                                if isRequestingHealth { ProgressView() }
+                        switch healthStatus {
+                        case .connected:
+                            Label("Health access enabled", systemImage: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                        case .needsPermission, .none:
+                            Button {
+                                Task { await requestHealth() }
+                            } label: {
+                                HStack {
+                                    Image(systemName: "heart.text.square")
+                                    Text("Allow Health access")
+                                    Spacer()
+                                    if isRequestingHealth { ProgressView() }
+                                }
                             }
+                            .buttonStyle(.bordered)
+                            .disabled(isRequestingHealth || !settings.isConfigured)
+                        case .unavailable:
+                            Text("Health data is not available on this device.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
                         }
-                        .buttonStyle(.bordered)
-                        .disabled(isRequestingHealth || !settings.isConfigured)
                     }
 
                     if let error {
@@ -89,6 +99,7 @@ struct OnboardingView: View {
             }
             .navigationTitle("Welcome")
             .onAppear { settings.ensureUserId() }
+            .task { healthStatus = await health.accessStatus() }
         }
     }
 
@@ -127,7 +138,7 @@ struct OnboardingView: View {
         defer { isRequestingHealth = false }
         do {
             try await health.requestAuthorization()
-            healthGranted = true
+            healthStatus = await health.accessStatus()
         } catch {
             self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
