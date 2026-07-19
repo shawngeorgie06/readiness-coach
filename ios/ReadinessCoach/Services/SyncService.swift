@@ -9,6 +9,7 @@ final class SyncService: ObservableObject {
     @Published var isLoadingToday = false
     @Published var errorMessage: String?
     @Published var lastSyncSummary: String?
+    @Published var lastUploadError: String?
     @Published var uploadingCount: Int?
 
     private let health = HealthKitService()
@@ -39,6 +40,7 @@ final class SyncService: ObservableObject {
     private func didRefresh(_ dto: TodayDTO, _ settings: AppSettings) {
         today = dto
         settings.lastRefreshAt = Date()
+        errorMessage = nil
         if let data = try? JSONEncoder().encode(dto) {
             do {
                 let directory = Self.cacheURL.deletingLastPathComponent()
@@ -85,6 +87,10 @@ final class SyncService: ObservableObject {
             || summary.hasPrefix("No new HealthKit samples")
     }
 
+    var healthUploadFailed: Bool {
+        lastUploadError != nil
+    }
+
     /// Reads new HealthKit samples, uploads them, then refreshes Today so the
     /// locked decision reflects the just-synced data.
     ///
@@ -98,13 +104,14 @@ final class SyncService: ObservableObject {
         }
         isSyncing = true
         errorMessage = nil
+        lastUploadError = nil
         defer { isSyncing = false; uploadingCount = nil }
 
-        await client.wakeServer()
-
+        async let wakeTask: Void = client.wakeServer()
         async let healthPayloadTask = loadHealthPayload(settings)
         async let preliminaryTodayTask = loadToday(client)
 
+        _ = await wakeTask
         let healthPayload = await healthPayloadTask
         let preliminaryToday = await preliminaryTodayTask
 
@@ -122,12 +129,13 @@ final class SyncService: ObservableObject {
                 } else {
                     do {
                         uploadingCount = payload.samples.count
-                        let result = try await client.sync(payload)
+                        let result = try await client.syncBatched(payload)
                         lastSyncSummary = "Synced \(result.samples) samples, \(result.workouts) workouts."
+                        lastUploadError = nil
                         settings.lastSyncAt = Date()
                         uploadedNewSamples = true
                     } catch {
-                        errorMessage = readable(error)
+                        lastUploadError = readable(error)
                     }
                 }
             case .readFailed(let error):

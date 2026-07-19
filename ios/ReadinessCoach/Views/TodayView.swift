@@ -183,7 +183,12 @@ struct TodayView: View {
         if let count = sync.uploadingCount {
             Label("Uploading \(count) samples…", systemImage: "arrow.up.circle")
                 .font(.caption2).foregroundStyle(Palette.textSecondary)
-        } else if let detail = SyncFreshness.detailLine(freshness, settings: settings, summary: sync.lastSyncSummary) {
+        } else if let detail = SyncFreshness.detailLine(
+            freshness,
+            settings: settings,
+            summary: sync.lastSyncSummary,
+            uploadError: sync.lastUploadError
+        ) {
             Text(detail)
                 .font(.caption2)
                 .foregroundStyle(freshness == .offline ? Palette.warn : Palette.textSecondary)
@@ -361,6 +366,15 @@ struct TodayView: View {
             )
         default:
             EmptyView()
+        }
+
+        if sync.healthUploadFailed {
+            FreshnessBanner(
+                title: "Health upload pending",
+                message: "Your score loaded, but new Watch data didn’t reach the server. Pull down to retry.",
+                color: Palette.warn,
+                icon: "arrow.up.circle.trianglebadge.exclamationmark"
+            )
         }
 
         if shouldShowHealthAccessBanner {

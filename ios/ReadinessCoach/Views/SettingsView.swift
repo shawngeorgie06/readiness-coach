@@ -61,6 +61,11 @@ struct SettingsView: View {
                     if let summary = sync.lastSyncSummary {
                         Text(summary).font(.caption).foregroundStyle(.secondary)
                     }
+                    if let uploadError = sync.lastUploadError {
+                        Text(SyncFreshness.detailLine(.fresh, settings: settings, summary: nil, uploadError: uploadError) ?? uploadError)
+                            .font(.caption)
+                            .foregroundStyle(Palette.warn)
+                    }
                 }
 
                 Section("Health") {

@@ -54,8 +54,8 @@ struct APIClient {
         do {
             return try await getToday(date: date)
         } catch let error as APIError where Self.retryableTransport(error) {
-            await wakeServer()
-            try await Task.sleep(nanoseconds: 1_500_000_000)
+            // syncNow already pings /health in parallel; wait for cold boot then retry once.
+            try await Task.sleep(nanoseconds: 2_500_000_000)
             return try await getToday(date: date)
         }
     }
@@ -92,8 +92,65 @@ struct APIClient {
 
     // MARK: Writes
 
-    func sync(_ payload: SyncPayload) async throws -> SyncResult {
-        try await send("v1/sync", method: "POST", body: payload)
+    private static let syncChunkSize = 150
+    private static let syncRequestTimeout: TimeInterval = 120
+
+    /// Uploads large Health payloads in smaller POSTs so Render cold starts and
+    /// dense heart-rate history stay under HTTP timeouts.
+    func syncBatched(_ payload: SyncPayload) async throws -> SyncResult {
+        guard !payload.isEmpty else {
+            return SyncResult(ok: true, samples: 0, workouts: 0)
+        }
+
+        if payload.samples.count <= Self.syncChunkSize {
+            return try await syncChunk(payload)
+        }
+
+        var totalSamples = 0
+        var totalWorkouts = 0
+        let sampleChunks = payload.samples.chunked(into: Self.syncChunkSize)
+
+        if sampleChunks.isEmpty {
+            let result = try await syncChunk(
+                SyncPayload(userId: payload.userId, samples: [], workouts: payload.workouts)
+            )
+            return SyncResult(ok: true, samples: result.samples, workouts: result.workouts)
+        }
+
+        for (index, chunk) in sampleChunks.enumerated() {
+            let isLast = index == sampleChunks.count - 1
+            let chunkPayload = SyncPayload(
+                userId: payload.userId,
+                samples: chunk,
+                workouts: isLast ? payload.workouts : []
+            )
+            let result = try await syncChunk(chunkPayload)
+            totalSamples += result.samples
+            totalWorkouts += result.workouts
+        }
+
+        return SyncResult(ok: true, samples: totalSamples, workouts: totalWorkouts)
+    }
+
+    private func syncChunk(_ payload: SyncPayload) async throws -> SyncResult {
+        do {
+            return try await postSync(payload)
+        } catch let error as APIError where Self.retryableTransport(error) {
+            await wakeServer()
+            try await Task.sleep(nanoseconds: 2_500_000_000)
+            return try await postSync(payload)
+        }
+    }
+
+    private func postSync(_ payload: SyncPayload) async throws -> SyncResult {
+        let data = try await requestData(
+            path: "v1/sync",
+            method: "POST",
+            query: [],
+            body: payload,
+            timeout: Self.syncRequestTimeout
+        )
+        return try decode(data)
     }
 
     func ask(question: String, date: String? = nil) async throws -> AskResponse {
@@ -203,7 +260,8 @@ struct APIClient {
         path: String,
         method: String,
         query: [URLQueryItem],
-        body: Body?
+        body: Body?,
+        timeout: TimeInterval? = nil
     ) async throws -> Data {
         var components = URLComponents(
             url: baseURL.appendingPathComponent(path),
@@ -217,6 +275,7 @@ struct APIClient {
 
         var request = URLRequest(url: url)
         request.httpMethod = method
+        request.timeoutInterval = timeout ?? 60
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         if let body {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -256,4 +315,19 @@ struct APIClient {
 extension Notification.Name {
     /// Posted when an authenticated /v1 call returns 401 (session expired/invalid).
     static let apiUnauthorized = Notification.Name("apiUnauthorized")
+}
+
+private extension Array {
+    func chunked(into size: Int) -> [[Element]] {
+        guard size > 0, !isEmpty else { return isEmpty ? [] : [self] }
+        var chunks: [[Element]] = []
+        chunks.reserveCapacity((count + size - 1) / size)
+        var start = startIndex
+        while start < endIndex {
+            let end = index(start, offsetBy: size, limitedBy: endIndex) ?? endIndex
+            chunks.append(Array(self[start ..< end]))
+            start = end
+        }
+        return chunks
+    }
 }

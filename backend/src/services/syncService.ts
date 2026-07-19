@@ -42,6 +42,19 @@ export interface SyncDefaults {
   maxHrBpm: number;
 }
 
+/** Parallel upserts per transaction — keeps large Watch heart-rate dumps under HTTP timeouts. */
+const UPSERT_BATCH_SIZE = 50;
+
+async function upsertInBatches<T>(
+  items: T[],
+  upsertOne: (item: T) => Prisma.PrismaPromise<unknown>
+): Promise<void> {
+  for (let index = 0; index < items.length; index += UPSERT_BATCH_SIZE) {
+    const batch = items.slice(index, index + UPSERT_BATCH_SIZE);
+    await prisma.$transaction(batch.map((item) => upsertOne(item)));
+  }
+}
+
 /**
  * Idempotently merge a batch of HealthKit samples by the stable HealthKit UUID.
  * Validation stays separate so callers can reject malformed payloads before any
@@ -57,8 +70,8 @@ export async function applySync(
     update: {},
   });
 
-  for (const sample of payload.samples) {
-    await prisma.healthSample.upsert({
+  await upsertInBatches(payload.samples, (sample) =>
+    prisma.healthSample.upsert({
       where: {
         userId_hkUuid: { userId: payload.userId, hkUuid: sample.hkUuid },
       },
@@ -77,10 +90,10 @@ export async function applySync(
         endAt: new Date(sample.endAt),
         metadata: sample.metadata as Prisma.InputJsonValue | undefined,
       },
-    });
-  }
+    })
+  );
 
-  for (const workout of payload.workouts) {
+  await upsertInBatches(payload.workouts, (workout) => {
     const strain = estimateWorkoutStrain({
       durationMin: workout.durationMin,
       avgHrBpm: workout.avgHrBpm ?? 0,
@@ -88,7 +101,7 @@ export async function applySync(
       maxHrBpm: defaults.maxHrBpm,
     });
 
-    await prisma.workout.upsert({
+    return prisma.workout.upsert({
       where: {
         userId_hkUuid: { userId: payload.userId, hkUuid: workout.hkUuid },
       },
@@ -112,7 +125,7 @@ export async function applySync(
         endAt: new Date(workout.endAt),
       },
     });
-  }
+  });
 
   return {
     ok: true as const,

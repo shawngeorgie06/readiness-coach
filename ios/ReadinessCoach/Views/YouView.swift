@@ -14,7 +14,12 @@ struct YouView: View {
     }
 
     private var statusPill: (text: String, tone: Pill.Tone) {
-        SyncFreshness.statusLabel(freshness, syncing: sync.isSyncing)
+        SyncFreshness.statusLabel(
+            freshness,
+            syncing: sync.isSyncing,
+            scoreVisible: sync.today != nil,
+            uploadFailed: sync.healthUploadFailed
+        )
     }
 
     var body: some View {
@@ -72,7 +77,12 @@ struct YouView: View {
                         Text(synced).font(.caption2).foregroundStyle(Palette.textTertiary)
                     }
                 }
-                if let detail = SyncFreshness.detailLine(freshness, settings: settings, summary: sync.lastSyncSummary) {
+                if let detail = SyncFreshness.detailLine(
+                    freshness,
+                    settings: settings,
+                    summary: sync.lastSyncSummary,
+                    uploadError: sync.lastUploadError
+                ) {
                     Text(detail)
                         .font(.caption2)
                         .foregroundStyle(Palette.textTertiary)

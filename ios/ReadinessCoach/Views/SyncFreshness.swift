@@ -36,8 +36,14 @@ enum SyncFreshness {
         return .fresh
     }
 
-    static func statusLabel(_ freshness: DataFreshness, syncing: Bool) -> (text: String, tone: Pill.Tone) {
-        if syncing { return ("Syncing…", .neutral) }
+    static func statusLabel(
+        _ freshness: DataFreshness,
+        syncing: Bool,
+        scoreVisible: Bool = false,
+        uploadFailed: Bool = false
+    ) -> (text: String, tone: Pill.Tone) {
+        if syncing && !scoreVisible { return ("Syncing…", .neutral) }
+        if uploadFailed && scoreVisible { return ("Upload pending", .warn) }
         switch freshness {
         case .noData: return ("Not synced", .warn)
         case .fresh: return ("Up to date", .good)
@@ -47,7 +53,15 @@ enum SyncFreshness {
         }
     }
 
-    static func detailLine(_ freshness: DataFreshness, settings: AppSettings, summary: String?) -> String? {
+    static func detailLine(
+        _ freshness: DataFreshness,
+        settings: AppSettings,
+        summary: String?,
+        uploadError: String? = nil
+    ) -> String? {
+        if let uploadError {
+            return uploadPendingMessage(uploadError)
+        }
         switch freshness {
         case .noData:
             return "Sync Health data to compute today's readiness."
@@ -71,7 +85,15 @@ enum SyncFreshness {
     private static func userFacingSummary(_ summary: String?) -> String? {
         guard let summary, !summary.isEmpty else { return nil }
         if summary.hasPrefix("Couldn't read Health") { return nil }
+        if summary.hasPrefix("Couldn't upload Health") { return nil }
         return summary
+    }
+
+    private static func uploadPendingMessage(_ error: String) -> String {
+        let detail = error.localizedCaseInsensitiveContains("timed out")
+            ? "the upload timed out"
+            : error
+        return "Score is loaded, but new Health data didn’t upload (\(detail)). Pull to retry."
     }
 
     private static func formattedDay(_ isoDay: String) -> String {
