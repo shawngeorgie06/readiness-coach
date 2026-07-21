@@ -52,6 +52,9 @@ Optional backup: [cron-job.org](https://cron-job.org) → GET that same URL ever
 |-----|--------|
 | `DATABASE_URL` | Neon connection string |
 | `API_TOKEN` | Long random secret (same value you type into the iPhone app) |
+| `API_TOKEN_USER_ID` | **Same User ID** as in the iPhone app (Settings / onboarding). Required — the shared token only works for this user |
+| `SESSION_SECRET` | Long random secret (≥32 chars); Render can generate |
+| `APPLE_BUNDLE_ID` | Your app bundle id (e.g. `com.readinesscoach.app`) |
 | `LLM_API_KEY` | Optional OpenAI key for Ask Coach |
 | `LLM_BASE_URL` | `https://api.openai.com/v1` |
 | `LLM_MODEL` | `gpt-4o-mini` |

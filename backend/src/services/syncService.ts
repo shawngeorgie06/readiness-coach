@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { estimateWorkoutStrain } from "../scoring/strain.js";
+import { assertNotDeleted } from "./userService.js";
 
 export const syncPayloadSchema = z.object({
   userId: z.string().min(1),
@@ -64,6 +65,8 @@ export async function applySync(
   payload: SyncPayload,
   defaults: SyncDefaults
 ) {
+  await assertNotDeleted(payload.userId);
+
   await prisma.user.upsert({
     where: { id: payload.userId },
     create: { id: payload.userId },

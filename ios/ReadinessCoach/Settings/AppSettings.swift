@@ -6,9 +6,21 @@ import Combine
 final class AppSettings: ObservableObject {
     private let defaults: UserDefaults
     private let sessionKey = "sessionToken"
+    private let apiTokenKey = "apiToken"
 
     @Published var apiBaseURL: String { didSet { defaults.set(apiBaseURL, forKey: Keys.baseURL) } }
-    @Published var apiToken: String { didSet { defaults.set(apiToken, forKey: Keys.token) } }
+    @Published var apiToken: String {
+        didSet {
+            let trimmed = apiToken.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty {
+                KeychainStore.remove(apiTokenKey)
+            } else {
+                KeychainStore.set(trimmed, for: apiTokenKey)
+            }
+            // Never leave the bearer token in UserDefaults / device backups.
+            defaults.removeObject(forKey: Keys.token)
+        }
+    }
     @Published var userId: String { didSet { defaults.set(userId, forKey: Keys.userId) } }
     @Published var appleDisplayName: String? {
         didSet { defaults.set(appleDisplayName, forKey: Keys.appleDisplayName) }
@@ -29,7 +41,18 @@ final class AppSettings: ObservableObject {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         self.apiBaseURL = defaults.string(forKey: Keys.baseURL) ?? Self.defaultBaseURL
-        self.apiToken = defaults.string(forKey: Keys.token) ?? Secrets.defaultAPIToken
+        // Prefer Keychain; migrate any legacy UserDefaults token once, then wipe it.
+        let legacyToken = defaults.string(forKey: Keys.token)
+        if let legacyToken, !legacyToken.isEmpty {
+            KeychainStore.set(legacyToken, for: apiTokenKey)
+            defaults.removeObject(forKey: Keys.token)
+        }
+        let storedToken = KeychainStore.get(apiTokenKey) ?? ""
+        let initialToken = storedToken.isEmpty ? Secrets.defaultAPIToken : storedToken
+        self.apiToken = initialToken
+        if !initialToken.isEmpty {
+            KeychainStore.set(initialToken, for: apiTokenKey)
+        }
         self.userId = defaults.string(forKey: Keys.userId) ?? ""
         self.appleDisplayName = defaults.string(forKey: Keys.appleDisplayName)
         self.hasCompletedOnboarding = defaults.bool(forKey: Keys.onboarded)
@@ -157,6 +180,7 @@ final class AppSettings: ObservableObject {
         sessionToken = nil
         apiBaseURL = Self.defaultBaseURL
         apiToken = ""
+        KeychainStore.remove(apiTokenKey)
         userId = ""
         appleDisplayName = nil
         hasCompletedOnboarding = false

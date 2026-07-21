@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { applySync, syncPayloadSchema } from "../services/syncService.js";
+import { AccountDeletedError } from "../services/userService.js";
 
 export const syncRouter = Router();
 
@@ -23,6 +24,10 @@ syncRouter.post("/", async (req, res) => {
     });
     res.json(result);
   } catch (error) {
+    if (error instanceof AccountDeletedError) {
+      res.status(401).json({ error: "account_deleted" });
+      return;
+    }
     console.error(error);
     res.status(500).json({ error: "sync_failed" });
   }

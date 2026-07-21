@@ -22,6 +22,12 @@ model User {
   displayName String?
 }
 
+/// Tombstone so a deleted account cannot be silently re-created by a still-valid session/sync.
+model DeletedUser {
+  userId    String   @id
+  deletedAt DateTime @default(now())
+}
+
 model HealthSample {
   id        String   @id @default(cuid())
   userId    String

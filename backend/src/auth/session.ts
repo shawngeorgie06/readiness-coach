@@ -5,7 +5,8 @@ function key(secret: string): Uint8Array {
 }
 
 /** Sign a 60-day session token carrying the internal userId. */
-export async function mintSession(userId: string, secret: string, ttl = "60d"): Promise<string> {
+/** Sessions expire after 14 days; account deletion also tombstones the userId. */
+export async function mintSession(userId: string, secret: string, ttl = "14d"): Promise<string> {
   return new SignJWT({ userId })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()

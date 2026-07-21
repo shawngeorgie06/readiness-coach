@@ -3,7 +3,7 @@ import Security
 
 /// Minimal Keychain wrapper for storing credential strings.
 enum KeychainStore {
-    private static let service = "com.readinesscoach.session"
+    private static let service = "com.readinesscoach.credentials"
 
     static func set(_ value: String, for key: String) {
         let data = Data(value.utf8)

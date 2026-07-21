@@ -16,11 +16,21 @@ export function requireToken(expected: string) {
   };
 }
 
+export interface SessionAuthOptions {
+  sessionSecret: string;
+  apiToken: string;
+  /**
+   * User ID bound to the shared API token. Required for shared-token auth —
+   * client-supplied userId is ignored so the token cannot access other accounts.
+   */
+  apiTokenUserId: string;
+}
+
 /**
- * Authenticate a /v1 request. Prefers a session JWT and falls back during
- * migration to the legacy shared token with an explicit user ID.
+ * Authenticate a /v1 request. Prefers a session JWT; falls back to the shared
+ * API token which is permanently bound to `apiTokenUserId` (no client spoofing).
  */
-export function requireSession(opts: { sessionSecret: string; apiToken: string }) {
+export function requireSession(opts: SessionAuthOptions) {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const header = req.header("authorization") ?? "";
     const token = header.startsWith("Bearer ") ? header.slice(7) : "";
@@ -37,12 +47,12 @@ export function requireSession(opts: { sessionSecret: string; apiToken: string }
     }
 
     if (token === opts.apiToken) {
-      const queryUserId = typeof req.query.userId === "string" ? req.query.userId : "";
-      const bodyUserId =
-        req.body != null && typeof (req.body as Record<string, unknown>).userId === "string"
-          ? (req.body as Record<string, unknown>).userId as string
-          : "";
-      req.userId = queryUserId || bodyUserId;
+      if (!opts.apiTokenUserId) {
+        res.status(401).json({ error: "api_token_user_unbound" });
+        return;
+      }
+      // Ignore any client-supplied userId — the shared token maps to one user only.
+      req.userId = opts.apiTokenUserId;
       next();
       return;
     }

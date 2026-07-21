@@ -4,6 +4,8 @@ const envSchema = z.object({
   PORT: z.coerce.number().default(4000),
   DATABASE_URL: z.string().min(1),
   API_TOKEN: z.string().min(8),
+  /** User ID the shared API_TOKEN is allowed to act as (blocks cross-user IDOR). */
+  API_TOKEN_USER_ID: z.string().min(1),
   SESSION_SECRET: z.string().min(32),
   APPLE_BUNDLE_ID: z.string().min(1),
   LLM_API_KEY: z.string().optional(),

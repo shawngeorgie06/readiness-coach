@@ -7,6 +7,7 @@ import { createGracefulShutdown } from "./shutdown.js";
 const env = loadEnv();
 const app = createApp({
   apiToken: env.API_TOKEN,
+  apiTokenUserId: env.API_TOKEN_USER_ID,
   sessionSecret: env.SESSION_SECRET,
   appleBundleId: env.APPLE_BUNDLE_ID,
   corsOrigin: env.CORS_ORIGIN,

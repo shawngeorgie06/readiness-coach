@@ -1,5 +1,5 @@
 import cors from "cors";
-import express from "express";
+import express, { type NextFunction, type Request, type Response } from "express";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { createAppleVerifier, type AppleVerifier } from "./auth/appleVerifier.js";
@@ -22,6 +22,8 @@ export interface RateLimitOptions {
 
 export interface AppOptions {
   apiToken: string;
+  /** User ID bound to apiToken — shared token cannot spoof other users. */
+  apiTokenUserId: string;
   sessionSecret: string;
   appleBundleId?: string;
   appleVerifier?: AppleVerifier;
@@ -35,6 +37,7 @@ const defaultRateLimit: RateLimitOptions = { windowMs: 15 * 60 * 1000, max: 300 
 
 export function createApp({
   apiToken,
+  apiTokenUserId,
   sessionSecret,
   appleBundleId,
   appleVerifier,
@@ -53,7 +56,11 @@ export function createApp({
         : false,
     }),
   );
-  app.use(express.json({ limit: "50mb" }));
+  // Large bodies only for Health sync; keep a small default elsewhere (memory DoS).
+  app.use((req, res, next) => {
+    const limit = req.path === "/v1/sync" || req.path.startsWith("/v1/sync/") ? "50mb" : "256kb";
+    express.json({ limit })(req, res, next);
+  });
 
   app.get("/health", async (_req, res) => {
     try {
@@ -80,7 +87,7 @@ export function createApp({
     app.use("/v1/auth", createAuthRouter({ verifier, sessionSecret, apiToken }));
   }
 
-  app.use("/v1", requireSession({ sessionSecret, apiToken }));
+  app.use("/v1", requireSession({ sessionSecret, apiToken, apiTokenUserId }));
   app.use("/v1/sync", syncRouter);
   app.use("/v1/today", todayRouter);
   app.use("/v1/history", historyRouter);
@@ -89,6 +96,22 @@ export function createApp({
   app.use("/v1/body", bodyRouter);
   app.use("/v1/coach", coachRouter);
   app.use("/v1/user", userRouter);
+
+  app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    if (res.headersSent) return;
+    const status =
+      typeof err === "object" && err != null && "status" in err && typeof (err as { status: unknown }).status === "number"
+        ? (err as { status: number }).status
+        : typeof err === "object" && err != null && "statusCode" in err && typeof (err as { statusCode: unknown }).statusCode === "number"
+          ? (err as { statusCode: number }).statusCode
+          : 500;
+    if (status === 400 || status === 413) {
+      res.status(status).json({ error: "bad_request" });
+      return;
+    }
+    console.error(err);
+    res.status(500).json({ error: "internal_error" });
+  });
 
   return app;
 }

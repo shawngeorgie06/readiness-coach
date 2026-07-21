@@ -32,6 +32,7 @@ export interface TodayResponse {
 }
 
 const apiUrl = import.meta.env.VITE_API_URL?.replace(/\/$/, "");
+/** @deprecated Prefer iOS. Never ship a production API_TOKEN via VITE_* — it is embedded in the bundle. */
 const apiToken = import.meta.env.VITE_API_TOKEN;
 const userId = import.meta.env.VITE_USER_ID;
 

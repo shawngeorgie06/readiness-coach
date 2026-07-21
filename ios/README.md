@@ -22,6 +22,9 @@ open ios/ReadinessCoach.xcodeproj
 
 1. Select the `ReadinessCoach` target → Signing & Capabilities → set your
    **Team** (the project ships with an empty team and automatic signing).
+2. Copy `ios/Secrets.example.swift` to `ReadinessCoach/Secrets.swift` and optionally
+   paste your API token to pre-fill onboarding (`Secrets.swift` is gitignored).
+3. Open `Secrets.swift` only on your machine — never commit a real token.
    HealthKit is already declared in `ReadinessCoach.entitlements`.
 2. Choose your connected iPhone as the run destination and Run (⌘R).
 3. On first launch (Onboarding):

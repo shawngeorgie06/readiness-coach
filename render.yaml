@@ -21,6 +21,13 @@ services:
         sync: false
       - key: API_TOKEN
         sync: false
+      # Must match the User ID in the iOS app — shared token is bound to this user only.
+      - key: API_TOKEN_USER_ID
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: APPLE_BUNDLE_ID
+        value: com.readinesscoach.ReadinessCoach
       - key: LLM_API_KEY
         sync: false
       - key: LLM_BASE_URL

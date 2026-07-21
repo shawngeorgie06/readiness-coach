@@ -6,11 +6,14 @@ import { requireSession } from "../../src/middleware/auth.js";
 
 const SECRET = "z".repeat(32);
 const API_TOKEN = "shared-token";
+const BOUND_USER = "bound-user-1";
 
 function app() {
   const instance = express();
   instance.use(express.json());
-  instance.use(requireSession({ sessionSecret: SECRET, apiToken: API_TOKEN }));
+  instance.use(
+    requireSession({ sessionSecret: SECRET, apiToken: API_TOKEN, apiTokenUserId: BOUND_USER }),
+  );
   instance.get("/probe", (req, res) => res.json({ userId: req.userId ?? null }));
   return instance;
 }
@@ -28,24 +31,39 @@ describe("requireSession", () => {
       .expect(200, { userId: "user-9" });
   });
 
-  it("accepts the legacy shared token with a query userId", async () => {
+  it("binds the shared token to apiTokenUserId and ignores query userId", async () => {
     await request(app())
-      .get("/probe?userId=legacy-7")
+      .get("/probe?userId=attacker-spoof")
       .set("Authorization", `Bearer ${API_TOKEN}`)
-      .expect(200, { userId: "legacy-7" });
+      .expect(200, { userId: BOUND_USER });
   });
 
-  it("accepts the legacy shared token with a body userId", async () => {
+  it("binds the shared token to apiTokenUserId and ignores body userId", async () => {
     const instance = express();
     instance.use(express.json());
-    instance.use(requireSession({ sessionSecret: SECRET, apiToken: API_TOKEN }));
+    instance.use(
+      requireSession({ sessionSecret: SECRET, apiToken: API_TOKEN, apiTokenUserId: BOUND_USER }),
+    );
     instance.post("/probe", (req, res) => res.json({ userId: req.userId ?? null }));
 
     await request(instance)
       .post("/probe")
       .set("Authorization", `Bearer ${API_TOKEN}`)
-      .send({ userId: "legacy-body" })
-      .expect(200, { userId: "legacy-body" });
+      .send({ userId: "attacker-spoof" })
+      .expect(200, { userId: BOUND_USER });
+  });
+
+  it("401s when the shared token has no bound user id", async () => {
+    const instance = express();
+    instance.use(
+      requireSession({ sessionSecret: SECRET, apiToken: API_TOKEN, apiTokenUserId: "" }),
+    );
+    instance.get("/probe", (req, res) => res.json({ userId: req.userId ?? null }));
+
+    await request(instance)
+      .get("/probe")
+      .set("Authorization", `Bearer ${API_TOKEN}`)
+      .expect(401, { error: "api_token_user_unbound" });
   });
 
   it("401s on an unknown bearer", async () => {

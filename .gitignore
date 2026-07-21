@@ -5,6 +5,9 @@ dist/
 .env
 .worktrees/
 
+# Local iOS secrets (copy from Secrets.example.swift) — never commit real tokens
+ios/ReadinessCoach/Secrets.swift
+
 # Xcode user-specific / generated
 **/xcuserdata/
 **/*.xcuserstate
