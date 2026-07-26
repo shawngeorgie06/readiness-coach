@@ -4,6 +4,7 @@ enum APIError: LocalizedError {
     case notConfigured
     case invalidURL
     case http(status: Int, code: String?)
+    case rateLimited(retryAfter: TimeInterval?)
     case transport(Error)
     case decoding(Error)
 
@@ -18,6 +19,12 @@ enum APIError: LocalizedError {
                 return "Server error (\(status)): \(code)"
             }
             return "Server returned status \(status)."
+        case let .rateLimited(retryAfter):
+            guard let retryAfter, retryAfter > 0 else {
+                return "The server is rate-limiting uploads. Sync will resume shortly."
+            }
+            let minutes = max(1, Int((retryAfter / 60).rounded(.up)))
+            return "The server is rate-limiting uploads. Try again in about \(minutes) min."
         case let .transport(error):
             return error.localizedDescription
         case .decoding:
@@ -92,52 +99,51 @@ struct APIClient {
 
     // MARK: Writes
 
-    private static let syncChunkSize = 150
+    private static let syncChunkSize = 1_000
     private static let syncRequestTimeout: TimeInterval = 120
+    /// Cool-offs shorter than this are worth waiting out inline. A longer one
+    /// means the rate-limit window is exhausted, so stop and resume next sync
+    /// rather than sitting in the foreground for minutes.
+    private static let maxInlineRateLimitWait: TimeInterval = 30
 
-    /// Uploads large Health payloads in smaller POSTs so Render cold starts and
-    /// dense heart-rate history stay under HTTP timeouts.
-    func syncBatched(_ payload: SyncPayload) async throws -> SyncResult {
-        guard !payload.isEmpty else {
-            return SyncResult(ok: true, samples: 0, workouts: 0)
+    /// Splits a Health payload into requests small enough for Render cold starts
+    /// and sparse enough to stay under the `/v1` rate limit.
+    ///
+    /// Samples go out oldest-first so a partial upload is resumable: once a chunk
+    /// is accepted, everything at or before its last `startAt` is stored. Workouts
+    /// ride the first request so they are never stranded behind samples that
+    /// failed to send — the resume watermark advances past them either way.
+    func syncChunks(_ payload: SyncPayload) -> [SyncPayload] {
+        guard !payload.isEmpty else { return [] }
+        // DateFormatting.iso emits fixed-width UTC, so lexical order is time order.
+        let ordered = payload.samples.sorted { $0.startAt < $1.startAt }
+        let groups = ordered.chunked(into: Self.syncChunkSize)
+        guard !groups.isEmpty else {
+            return [SyncPayload(userId: payload.userId, samples: [], workouts: payload.workouts)]
         }
-
-        if payload.samples.count <= Self.syncChunkSize {
-            return try await syncChunk(payload)
-        }
-
-        var totalSamples = 0
-        var totalWorkouts = 0
-        let sampleChunks = payload.samples.chunked(into: Self.syncChunkSize)
-
-        if sampleChunks.isEmpty {
-            let result = try await syncChunk(
-                SyncPayload(userId: payload.userId, samples: [], workouts: payload.workouts)
-            )
-            return SyncResult(ok: true, samples: result.samples, workouts: result.workouts)
-        }
-
-        for (index, chunk) in sampleChunks.enumerated() {
-            let isLast = index == sampleChunks.count - 1
-            let chunkPayload = SyncPayload(
+        return groups.enumerated().map { index, samples in
+            SyncPayload(
                 userId: payload.userId,
-                samples: chunk,
-                workouts: isLast ? payload.workouts : []
+                samples: samples,
+                workouts: index == 0 ? payload.workouts : []
             )
-            let result = try await syncChunk(chunkPayload)
-            totalSamples += result.samples
-            totalWorkouts += result.workouts
         }
-
-        return SyncResult(ok: true, samples: totalSamples, workouts: totalWorkouts)
     }
 
-    private func syncChunk(_ payload: SyncPayload) async throws -> SyncResult {
+    /// Sends one chunk, waking a cold host or riding out a brief rate-limit
+    /// cool-off. Anything longer is thrown so the caller can bank its progress.
+    func syncChunk(_ payload: SyncPayload) async throws -> SyncResult {
         do {
             return try await postSync(payload)
         } catch let error as APIError where Self.retryableTransport(error) {
             await wakeServer()
             try await Task.sleep(nanoseconds: 2_500_000_000)
+            return try await postSync(payload)
+        } catch let APIError.rateLimited(retryAfter) {
+            guard let retryAfter, retryAfter <= Self.maxInlineRateLimitWait else {
+                throw APIError.rateLimited(retryAfter: retryAfter)
+            }
+            try await Task.sleep(nanoseconds: UInt64(max(0, retryAfter) * 1_000_000_000))
             return try await postSync(payload)
         }
     }
@@ -297,10 +303,34 @@ struct APIClient {
             if http.statusCode == 401 {
                 NotificationCenter.default.post(name: .apiUnauthorized, object: nil)
             }
+            if http.statusCode == 429 {
+                throw APIError.rateLimited(retryAfter: Self.retryAfterSeconds(http))
+            }
             throw APIError.http(status: http.statusCode, code: Self.errorCode(from: data))
         }
         return data
     }
+
+    /// `Retry-After` is either a delta in seconds or an HTTP date. express-rate-limit
+    /// sends seconds; parse both so a proxy in front of it can't confuse us.
+    private static func retryAfterSeconds(_ response: HTTPURLResponse) -> TimeInterval? {
+        guard
+            let raw = response.value(forHTTPHeaderField: "Retry-After")?
+                .trimmingCharacters(in: .whitespaces),
+            !raw.isEmpty
+        else { return nil }
+        if let seconds = TimeInterval(raw) { return max(0, seconds) }
+        guard let date = httpDateFormatter.date(from: raw) else { return nil }
+        return max(0, date.timeIntervalSinceNow)
+    }
+
+    private static let httpDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "GMT")
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss 'GMT'"
+        return formatter
+    }()
 
     /// Pulls the `error` field from a JSON error body when present.
     private static func errorCode(from data: Data) -> String? {

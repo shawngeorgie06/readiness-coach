@@ -56,7 +56,9 @@ struct SettingsView: View {
                     .disabled(sync.isSyncing)
 
                     if let last = settings.lastSyncAt {
-                        LabeledContent("Last sync", value: last.formatted(date: .abbreviated, time: .shortened))
+                        // This is the resume point, not the last attempt: after a
+                        // partial upload it sits at the oldest data still pending.
+                        LabeledContent("Health synced through", value: last.formatted(date: .abbreviated, time: .shortened))
                     }
                     if let summary = sync.lastSyncSummary {
                         Text(summary).font(.caption).foregroundStyle(.secondary)

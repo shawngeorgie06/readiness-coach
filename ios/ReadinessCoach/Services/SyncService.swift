@@ -127,16 +127,7 @@ final class SyncService: ObservableObject {
                     lastSyncSummary = "No new HealthKit samples since last sync."
                     settings.lastSyncAt = Date()
                 } else {
-                    do {
-                        uploadingCount = payload.samples.count
-                        let result = try await client.syncBatched(payload)
-                        lastSyncSummary = "Synced \(result.samples) samples, \(result.workouts) workouts."
-                        lastUploadError = nil
-                        settings.lastSyncAt = Date()
-                        uploadedNewSamples = true
-                    } catch {
-                        lastUploadError = readable(error)
-                    }
+                    uploadedNewSamples = await uploadHealth(payload, client: client, settings: settings)
                 }
             case .readFailed(let error):
                 applyHealthReadFailure(error)
@@ -150,6 +141,54 @@ final class SyncService: ObservableObject {
         } else if preliminaryToday == nil {
             await refreshTodayFromServer(client, settings: settings, keepPreliminaryOnFailure: false)
         }
+    }
+
+    /// Uploads Health samples chunk by chunk, banking the resume point after each
+    /// accepted request.
+    ///
+    /// Failing part-way (rate limit, dropped connection) therefore keeps whatever
+    /// already landed: the next sync picks up where this one stopped instead of
+    /// re-sending the entire backfill. Re-sending was what wedged a fresh install
+    /// permanently — a 30-day backfill outran the `/v1` rate limit, the whole
+    /// batch was discarded, and every retry restarted it and hit 429 again.
+    ///
+    /// Returns whether anything new reached the server.
+    private func uploadHealth(
+        _ payload: SyncPayload,
+        client: APIClient,
+        settings: AppSettings
+    ) async -> Bool {
+        let chunks = client.syncChunks(payload)
+        let total = payload.samples.count
+        var uploadedSamples = 0
+        var uploadedWorkouts = 0
+        uploadingCount = total
+
+        for chunk in chunks {
+            do {
+                let result = try await client.syncChunk(chunk)
+                uploadedSamples += result.samples
+                uploadedWorkouts += result.workouts
+                uploadingCount = max(0, total - uploadedSamples)
+                // Chunks are oldest-first, so the server now holds everything up
+                // to this timestamp. Persist it before attempting the next one.
+                if let watermark = chunk.samples.last?.startAt,
+                   let date = DateFormatting.date(fromISO: watermark) {
+                    settings.lastSyncAt = date
+                }
+            } catch {
+                lastUploadError = readable(error)
+                lastSyncSummary = uploadedSamples > 0
+                    ? "Uploaded \(uploadedSamples) of \(total) samples — the rest syncs next time."
+                    : "Couldn't upload new Health data."
+                return uploadedSamples > 0 || uploadedWorkouts > 0
+            }
+        }
+
+        lastSyncSummary = "Synced \(uploadedSamples) samples, \(uploadedWorkouts) workouts."
+        lastUploadError = nil
+        settings.lastSyncAt = Date()
+        return uploadedSamples > 0 || uploadedWorkouts > 0
     }
 
     /// Fetches Today without pushing new samples (e.g. on tab appear).
