@@ -14,7 +14,9 @@
     "test:all": "npm test && npm run test:integration",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "seed:demo": "tsx scripts/seedDemo.ts"
+    "seed:demo": "tsx scripts/seedDemo.ts",
+    "postinstall": "prisma generate",
+    "migrate:deploy": "prisma migrate deploy"
   },
   "dependencies": {
     "@prisma/client": "^6.5.0",
