@@ -12,3 +12,4 @@ ios/ReadinessCoach/Secrets.swift
 **/xcuserdata/
 **/*.xcuserstate
 **/project.xcworkspace/xcuserdata/
+.vercel
