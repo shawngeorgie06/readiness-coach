@@ -62,6 +62,13 @@ export function createApp({
     express.json({ limit })(req, res, next);
   });
 
+  // Liveness only: the platform health probe hits the root and needs a 200
+  // from a process that is up. It deliberately does not touch the database --
+  // that is what /health is for, and a slow query must not read as "dead".
+  app.get("/", (_req, res) => {
+    res.json({ ok: true, service: "readiness-coach" });
+  });
+
   app.get("/health", async (_req, res) => {
     try {
       await checkDatabase();
