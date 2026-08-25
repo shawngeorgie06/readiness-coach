@@ -77,6 +77,9 @@ final class SyncService: ObservableObject {
         SyncFreshness.evaluate(today: today, settings: settings, errorMessage: errorMessage)
     }
 
+    /// The sync currently in flight, if any. Owned here rather than by a view.
+    private var syncTask: Task<Void, Never>?
+
     var healthSyncFailed: Bool {
         lastSyncSummary?.hasPrefix("Couldn't read Health") == true
     }
@@ -97,7 +100,31 @@ final class SyncService: ObservableObject {
     /// HealthKit read and `/v1/today` run in parallel so the score can appear
     /// while samples are still being collected. A second Today fetch runs only
     /// when new samples were uploaded.
+    /// Runs the sync in a task this service owns, so it survives the view that
+    /// asked for it.
+    ///
+    /// Pull-to-refresh and `.task` hand SwiftUI a child task and cancel it the
+    /// moment the view goes away -- a scroll, a tab switch, backgrounding the
+    /// app. A 30-day backfill is many chunks long and was being killed
+    /// mid-upload, surfacing as `CancellationError` and "new Health data
+    /// didn't upload". Callers still await completion; they just no longer
+    /// take the upload down with them. A second caller joins the run already
+    /// in flight instead of starting a competing one.
     func syncNow(_ settings: AppSettings) async {
+        if let inFlight = syncTask {
+            await inFlight.value
+            return
+        }
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.performSync(settings)
+        }
+        syncTask = task
+        await task.value
+        syncTask = nil
+    }
+
+    private func performSync(_ settings: AppSettings) async {
         guard let client = settings.makeClient() else {
             errorMessage = APIError.notConfigured.localizedDescription
             return
@@ -176,6 +203,12 @@ final class SyncService: ObservableObject {
                    let date = DateFormatting.date(fromISO: watermark) {
                     settings.lastSyncAt = date
                 }
+            } catch is CancellationError {
+                // The run was torn down rather than refused. Whatever chunks
+                // were accepted are banked in the watermark, so the next sync
+                // resumes -- reporting a failure here would be misleading.
+                lastSyncSummary = "Upload interrupted — resuming next sync."
+                return uploadedSamples > 0 || uploadedWorkouts > 0
             } catch {
                 lastUploadError = readable(error)
                 lastSyncSummary = uploadedSamples > 0
