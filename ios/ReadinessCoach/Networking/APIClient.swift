@@ -99,7 +99,11 @@ struct APIClient {
 
     // MARK: Writes
 
-    private static let syncChunkSize = 1_000
+    /// 5,000 samples is roughly 600KB of JSON -- comfortably inside the 50MB
+    /// the server allows on /v1/sync, and five times fewer round trips than the
+    /// old 1,000. A first sync after reinstall is round-trip bound, not
+    /// bandwidth bound, so this is what makes it finish in minutes not hours.
+    private static let syncChunkSize = 5_000
     private static let syncRequestTimeout: TimeInterval = 120
     /// Cool-offs shorter than this are worth waiting out inline. A longer one
     /// means the rate-limit window is exhausted, so stop and resume next sync

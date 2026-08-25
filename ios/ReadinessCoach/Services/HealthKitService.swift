@@ -10,9 +10,6 @@ final class HealthKitService {
     /// First sync only reaches back this far so the initial upload stays bounded.
     /// The backend computes 30-day baselines, so this window is sufficient.
     private let initialLookbackDays = 30
-    /// Sleep is often finalized or amended by Apple Health after a first read.
-    /// Re-check recent nights on every sync so late Watch data is not skipped.
-    private let sleepRecheckDays = 3
 
     static var isAvailable: Bool { HKHealthStore.isHealthDataAvailable() }
 
@@ -79,10 +76,18 @@ final class HealthKitService {
             byAdding: .day, value: -initialLookbackDays, to: Date()
         ) ?? Date().addingTimeInterval(-Double(initialLookbackDays) * 86_400)
         let end = Date()
+        // Sleep is re-read for a few days back because HealthKit revises a
+        // night after the fact. But that recheck window must never be shorter
+        // than the window everything else uses -- on a first sync (or after a
+        // reinstall) `start` is 30 days back, and clamping sleep to 3 days
+        // silently leaves the history full of zero-hour nights.
+        // Sleep always reaches back the full lookback, not just since the last
+        // sync. HealthKit revises nights after the fact, a watch worn late
+        // backfills days later, and the server upserts on (userId, hkUuid), so
+        // re-sending costs nothing and self-heals gaps. Nights are a handful of
+        // samples each -- this is nothing like re-sending 30 days of heart rate.
         let sleepStart = Calendar.current.date(
-            byAdding: .day,
-            value: -sleepRecheckDays,
-            to: end
+            byAdding: .day, value: -initialLookbackDays, to: end
         ) ?? start
 
         async let hr = quantitySamples(heartRate, unit: HKUnit(from: "count/min"),

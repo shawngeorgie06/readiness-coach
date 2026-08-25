@@ -13,6 +13,15 @@ struct YouView: View {
         sync.freshness(using: settings)
     }
 
+    /// "Last synced" describes the download only -- it is set whenever /v1/today
+    /// is fetched. Saying it while Watch samples are still stuck reads as though
+    /// everything is up to date, so the upload state wins when the two disagree.
+    private var syncRowSubtitle: String {
+        if sync.healthUploadFailed { return "Health data still to upload" }
+        guard let relative = settings.lastRefreshRelativeText else { return "Never synced" }
+        return "Last synced \(relative)"
+    }
+
     private var statusPill: (text: String, tone: Pill.Tone) {
         SyncFreshness.statusLabel(
             freshness,
@@ -133,7 +142,7 @@ struct YouView: View {
     private var accountCard: some View {
         VStack(spacing: 0) {
             AetherListRow(systemImage: "arrow.triangle.2.circlepath", tone: .accent,
-                          title: "Sync now", subtitle: settings.lastRefreshRelativeText.map { "Last synced \($0)" } ?? "Never synced") {
+                          title: "Sync now", subtitle: syncRowSubtitle) {
                 if sync.isSyncing { ProgressView() } else { chevron }
             }
             .contentShape(Rectangle())
