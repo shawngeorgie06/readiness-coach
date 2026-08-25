@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   aggregateBodyDaily,
+  localDateStart,
   countConsecutiveHighStrain,
   parseRequestedDate,
   sleepBounds,
@@ -154,5 +155,25 @@ describe("today aggregation helpers", () => {
   it("returns nulls when no asleep samples overlap the window", () => {
     const bounds = sleepBounds([], new Date("2026-07-11T16:00:00.000Z"), new Date("2026-07-12T16:00:00.000Z"));
     expect(bounds).toEqual({ sleepStart: null, sleepEnd: null });
+  });
+});
+
+describe("localDateStart", () => {
+  it("anchors the day to the caller's timezone, not UTC", () => {
+    // EDT is UTC-4, so local midnight on Aug 24 is 04:00Z the same day.
+    expect(localDateStart("2026-08-24", -240).toISOString()).toBe("2026-08-24T04:00:00.000Z");
+  });
+
+  it("treats a zero offset as plain UTC", () => {
+    expect(localDateStart("2026-08-24", 0).toISOString()).toBe("2026-08-24T00:00:00.000Z");
+  });
+
+  it("keeps an evening workout inside the requested local day", () => {
+    // The regression: a 19:41 EDT workout ends 00:11Z the NEXT UTC day. The
+    // window used to close at 2026-08-25T00:00Z and dropped it, so anything
+    // finished after 8pm was invisible until tomorrow.
+    const end = new Date(localDateStart("2026-08-24", -240).getTime() + 24 * 60 * 60 * 1000);
+    const workoutEndsAt = new Date("2026-08-25T00:11:00.000Z");
+    expect(workoutEndsAt.getTime()).toBeLessThan(end.getTime());
   });
 });

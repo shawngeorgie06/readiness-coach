@@ -250,6 +250,12 @@ export function dateStart(date: string): Date {
   return new Date(`${parseRequestedDate(date)}T00:00:00.000Z`);
 }
 
+/// Midnight of `date` in a caller whose UTC offset is `tzOffsetMinutes`
+/// (local − UTC, so EDT is −240), expressed as an instant.
+export function localDateStart(date: string, tzOffsetMinutes: number): Date {
+  return new Date(dateStart(date).getTime() - tzOffsetMinutes * 60_000);
+}
+
 function addDays(date: Date, days: number): Date {
   return new Date(date.getTime() + days * DAY_MS);
 }
@@ -589,8 +595,17 @@ export async function getSleepDetails(userId: string, days: number, requestedDat
   };
 }
 
-export async function getTrainingDetails(userId: string, days: number, requestedDate = defaultRequestedDate()) {
-  const end = addDays(dateStart(requestedDate), 1);
+export async function getTrainingDetails(
+  userId: string,
+  days: number,
+  requestedDate = defaultRequestedDate(),
+  tzOffsetMinutes = 0,
+) {
+  // The window has to close at the end of the caller's local day, not UTC's.
+  // Anchoring it to UTC midnight dropped any workout that *ended* after
+  // 00:00Z -- for a user at UTC-4 that is anything finished after 8pm, which
+  // made an evening workout invisible until the next day.
+  const end = addDays(localDateStart(requestedDate, tzOffsetMinutes), 1);
   const start = addDays(end, -days);
   const workouts = await prisma.workout.findMany({
     where: { userId, endAt: { gte: start, lt: end } },

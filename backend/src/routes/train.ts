@@ -9,7 +9,9 @@ trainRouter.get("/", async (req, res) => {
   if (!userId) return res.status(400).json({ error: "userId_required" });
   if (!Number.isInteger(days) || days < 1 || days > 90) return res.status(400).json({ error: "invalid_days" });
   try {
-    return res.json(await getTrainingDetails(userId, days, typeof req.query.date === "string" ? req.query.date : defaultRequestedDate()));
+    const date = typeof req.query.date === "string" ? req.query.date : defaultRequestedDate();
+    const tz = typeof req.query.tz === "string" && Number.isFinite(Number(req.query.tz)) ? Number(req.query.tz) : 0;
+    return res.json(await getTrainingDetails(userId, days, date, tz));
   } catch (error) {
     if (error instanceof Error && error.message === "date must be YYYY-MM-DD") return res.status(400).json({ error: "invalid_date" });
     console.error(error);
