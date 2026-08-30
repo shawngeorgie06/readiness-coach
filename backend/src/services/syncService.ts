@@ -1,5 +1,5 @@
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import type { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { estimateWorkoutStrain } from "../scoring/strain.js";
 import { assertNotDeleted } from "./userService.js";
@@ -43,17 +43,104 @@ export interface SyncDefaults {
   maxHrBpm: number;
 }
 
-/** Parallel upserts per transaction — keeps large Watch heart-rate dumps under HTTP timeouts. */
-const UPSERT_BATCH_SIZE = 50;
+/**
+ * Rows per bulk statement. Each statement binds nine arrays of this length, so
+ * the cap keeps us well inside PostgreSQL's parameter limits while still making
+ * a 5,000-sample chunk cost three round trips instead of 5,000.
+ */
+const BULK_BATCH_SIZE = 2_000;
 
-async function upsertInBatches<T>(
-  items: T[],
-  upsertOne: (item: T) => Prisma.PrismaPromise<unknown>
-): Promise<void> {
-  for (let index = 0; index < items.length; index += UPSERT_BATCH_SIZE) {
-    const batch = items.slice(index, index + UPSERT_BATCH_SIZE);
-    await prisma.$transaction(batch.map((item) => upsertOne(item)));
+function batches<T>(items: T[], size: number): T[][] {
+  const result: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    result.push(items.slice(index, index + size));
   }
+  return result;
+}
+
+/**
+ * Ids are client-generated because the column has no database-level default —
+ * Prisma normally fills `cuid()` in, and raw SQL bypasses that. Only inserts
+ * consume the value; on conflict the existing row keeps its id.
+ */
+function newId(): string {
+  return randomUUID();
+}
+
+/**
+ * Upserts a batch of samples in one statement.
+ *
+ * `unnest` turns nine parameter arrays into rows, so the whole batch is a single
+ * round trip. That is the point: sync is round-trip bound against a remote
+ * database, and the previous row-at-a-time upsert paid one trip per sample.
+ */
+async function upsertSampleBatch(
+  userId: string,
+  samples: SyncPayload["samples"]
+): Promise<void> {
+  if (samples.length === 0) return;
+
+  await prisma.$executeRaw`
+    INSERT INTO "HealthSample" ("id", "userId", "hkUuid", "type", "startAt", "endAt", "value", "unit", "metadata")
+    SELECT * FROM unnest(
+      ${samples.map(newId)}::text[],
+      ${samples.map(() => userId)}::text[],
+      ${samples.map((sample) => sample.hkUuid)}::text[],
+      ${samples.map((sample) => sample.type)}::text[],
+      ${samples.map((sample) => sample.startAt)}::timestamp[],
+      ${samples.map((sample) => sample.endAt)}::timestamp[],
+      ${samples.map((sample) => sample.value ?? null)}::double precision[],
+      ${samples.map((sample) => sample.unit ?? null)}::text[],
+      ${samples.map((sample) =>
+        sample.metadata === undefined ? null : JSON.stringify(sample.metadata)
+      )}::jsonb[]
+    )
+    ON CONFLICT ("userId", "hkUuid") DO UPDATE SET
+      "value" = EXCLUDED."value",
+      "endAt" = EXCLUDED."endAt",
+      "metadata" = EXCLUDED."metadata"
+  `;
+}
+
+/** As `upsertSampleBatch`, with strain computed in JS before the statement runs. */
+async function upsertWorkoutBatch(
+  userId: string,
+  workouts: SyncPayload["workouts"],
+  defaults: SyncDefaults
+): Promise<void> {
+  if (workouts.length === 0) return;
+
+  const strains = workouts.map((workout) =>
+    estimateWorkoutStrain({
+      durationMin: workout.durationMin,
+      avgHrBpm: workout.avgHrBpm ?? 0,
+      restingHrBpm: defaults.restingHrBpm,
+      maxHrBpm: defaults.maxHrBpm,
+    })
+  );
+
+  await prisma.$executeRaw`
+    INSERT INTO "Workout" ("id", "userId", "hkUuid", "sport", "startAt", "endAt", "durationMin", "avgHrBpm", "calories", "strain")
+    SELECT * FROM unnest(
+      ${workouts.map(newId)}::text[],
+      ${workouts.map(() => userId)}::text[],
+      ${workouts.map((workout) => workout.hkUuid)}::text[],
+      ${workouts.map((workout) => workout.sport)}::text[],
+      ${workouts.map((workout) => workout.startAt)}::timestamp[],
+      ${workouts.map((workout) => workout.endAt)}::timestamp[],
+      ${workouts.map((workout) => workout.durationMin)}::double precision[],
+      ${workouts.map((workout) => workout.avgHrBpm ?? null)}::double precision[],
+      ${workouts.map((workout) => workout.calories ?? null)}::double precision[],
+      ${strains}::double precision[]
+    )
+    ON CONFLICT ("userId", "hkUuid") DO UPDATE SET
+      "sport" = EXCLUDED."sport",
+      "durationMin" = EXCLUDED."durationMin",
+      "avgHrBpm" = EXCLUDED."avgHrBpm",
+      "calories" = EXCLUDED."calories",
+      "strain" = EXCLUDED."strain",
+      "endAt" = EXCLUDED."endAt"
+  `;
 }
 
 /**
@@ -73,62 +160,13 @@ export async function applySync(
     update: {},
   });
 
-  await upsertInBatches(payload.samples, (sample) =>
-    prisma.healthSample.upsert({
-      where: {
-        userId_hkUuid: { userId: payload.userId, hkUuid: sample.hkUuid },
-      },
-      create: {
-        userId: payload.userId,
-        hkUuid: sample.hkUuid,
-        type: sample.type,
-        startAt: new Date(sample.startAt),
-        endAt: new Date(sample.endAt),
-        value: sample.value ?? null,
-        unit: sample.unit,
-        metadata: sample.metadata as Prisma.InputJsonValue | undefined,
-      },
-      update: {
-        value: sample.value ?? null,
-        endAt: new Date(sample.endAt),
-        metadata: sample.metadata as Prisma.InputJsonValue | undefined,
-      },
-    })
-  );
+  for (const batch of batches(payload.samples, BULK_BATCH_SIZE)) {
+    await upsertSampleBatch(payload.userId, batch);
+  }
 
-  await upsertInBatches(payload.workouts, (workout) => {
-    const strain = estimateWorkoutStrain({
-      durationMin: workout.durationMin,
-      avgHrBpm: workout.avgHrBpm ?? 0,
-      restingHrBpm: defaults.restingHrBpm,
-      maxHrBpm: defaults.maxHrBpm,
-    });
-
-    return prisma.workout.upsert({
-      where: {
-        userId_hkUuid: { userId: payload.userId, hkUuid: workout.hkUuid },
-      },
-      create: {
-        userId: payload.userId,
-        hkUuid: workout.hkUuid,
-        sport: workout.sport,
-        startAt: new Date(workout.startAt),
-        endAt: new Date(workout.endAt),
-        durationMin: workout.durationMin,
-        avgHrBpm: workout.avgHrBpm,
-        calories: workout.calories,
-        strain,
-      },
-      update: {
-        sport: workout.sport,
-        durationMin: workout.durationMin,
-        avgHrBpm: workout.avgHrBpm,
-        calories: workout.calories,
-        strain,
-        endAt: new Date(workout.endAt),
-      },
-    });
-  });
+  for (const batch of batches(payload.workouts, BULK_BATCH_SIZE)) {
+    await upsertWorkoutBatch(payload.userId, batch, defaults);
+  }
 
   return {
     ok: true as const,
