@@ -29,6 +29,6 @@ export function requireSafeTestDatabaseUrl(
 export async function resetTestDatabase(): Promise<void> {
   requireSafeTestDatabaseUrl(process.env.DATABASE_URL);
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "AdvisorNote", "DailyScore", "Workout", "HealthSample", "User" RESTART IDENTITY CASCADE',
+    'TRUNCATE TABLE "AdvisorNote", "DailyScore", "Workout", "HealthSample", "DeletedUser", "User" RESTART IDENTITY CASCADE',
   );
 }
