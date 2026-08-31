@@ -1,112 +1,114 @@
-# Personal free deploy (Render + Neon, no laptop server)
+# Family Host deployment and Neon migration
 
-Use this when you want the iPhone app to work day-to-day **without** leaving
-your Mac running the API. You still re-sign the iOS app from Xcode about once a
-week (free Apple ID limit) — that is separate from hosting.
+The Readiness Coach API is already live and healthy at:
 
-## What you get
+- App: <https://readiness-coach-api-shawngeorgie06.georgenijo.com>
+- Health: <https://readiness-coach-api-shawngeorgie06.georgenijo.com/health>
 
-| Piece | Free setup |
-|-------|------------|
-| Phone app | Same Readiness Coach UI (Today, Sleep, Insights, …) |
-| API + DB | Render (API) + Neon (Postgres) |
-| Cost | $0 |
-| Stay awake | Keep-alive pings every ~10 min so free Render does **not** die after 15 min idle |
+The deployed container is built from this repository's `backend/Dockerfile`.
+Family Host can also provision PostgreSQL, inject `DATABASE_URL`, run the
+declared Prisma migration, retain backups, and restore the database with the
+application. Neon is the last external hosting dependency.
 
-## Stay awake (the 15‑minute fix)
+This is a short data migration, not a rebuild.
 
-Free Render spins down after **15 minutes with no inbound HTTP**. Same idea as
-a keep-alive “proxy” ping on other projects:
+## See the complete deployment plan safely
 
-1. **In the API** — on Render, `RENDER_EXTERNAL_URL` is set automatically. The
-   process pings its own `/health` every 10 minutes while it’s up.
-2. **From GitHub Actions** — workflow `.github/workflows/render-keepalive.yml`
-   pings `/health` every 10 minutes even if the service went cold (wakes it).
-
-After deploy, add a GitHub Actions secret:
-
-| Secret | Value |
-|--------|--------|
-| `RENDER_HEALTH_URL` | `https://<your-service>.onrender.com/health` |
-
-Optional backup: [cron-job.org](https://cron-job.org) → GET that same URL every 10 minutes.
-
-## 1. Free Postgres (Neon)
-
-1. Create a free account at [https://neon.tech](https://neon.tech) (or reuse one).
-2. Create a project (any region near you).
-3. Copy the connection string (`DATABASE_URL`). Prefer the **pooled** URL if Neon shows one.
-
-## 2. Free API host (Render — you already have an account)
-
-1. Make sure this repo is on GitHub `main` (with the Dockerfile).
-2. In Render: **New → Web Service** → connect `readiness-coach`.
-3. Settings:
-   - **Runtime:** Docker
-   - **Root directory:** `backend`
-   - **Dockerfile path:** `./Dockerfile`
-   - **Instance:** Free
-4. Environment variables:
-
-| Key | Value |
-|-----|--------|
-| `DATABASE_URL` | Neon connection string |
-| `API_TOKEN` | Long random secret (same value you type into the iPhone app) |
-| `API_TOKEN_USER_ID` | **Same User ID** as in the iPhone app (Settings / onboarding). Required — the shared token only works for this user |
-| `SESSION_SECRET` | Long random secret (≥32 chars); Render can generate |
-| `APPLE_BUNDLE_ID` | Your app bundle id (e.g. `com.readinesscoach.app`) |
-| `LLM_API_KEY` | Optional OpenAI key for Ask Coach |
-| `LLM_BASE_URL` | `https://api.openai.com/v1` |
-| `LLM_MODEL` | `gpt-4o-mini` |
-
-Render injects `PORT` and `RENDER_EXTERNAL_URL` itself.
-
-5. Deploy. When healthy, open:
-
-```text
-https://<your-service>.onrender.com/health
-```
-
-You want `{ "ok": true }`.
-
-Migrations run automatically on container start (`prisma migrate deploy`).
-
-6. Add the `RENDER_HEALTH_URL` GitHub secret (see above) so the keep-alive Action can run.
-
-## 3. Point the iPhone app at it
-
-1. Xcode → Run on your iPhone (free personal team is fine).
-2. Onboarding / Settings:
-   - **API URL:** `https://<your-service>.onrender.com` (no trailing slash)
-   - **API token:** same as `API_TOKEN`
-   - **User ID:** keep the prefilled UUID forever (don’t change it later)
-3. Allow HealthKit → **Start & sync**.
-
-Use **HTTPS**. Do not use your Mac LAN IP anymore.
-
-## 4. Daily use
-
-- Open the app like any other app — with keep-alive it should stay warm.
-- About once a week (free signing), if the icon won’t open: Mac → Xcode → Run again.
-
-## 5. Shipping fixes later
+Authenticate and run the helper without arguments. It uses an installed
+Family Host CLI when available and otherwise runs the official package with
+Node.js 18+:
 
 ```bash
-git checkout main
-git pull
-# make the fix, commit, push
+npx -y https://family.georgenijo.com/cli.tgz login
+./deploy-family-host.sh
 ```
 
-Render redeploys the API from GitHub. For the phone: Xcode → Run when you want the UI fix on-device.
+If `family-host` is already installed, `family-host update` gets the current
+release and `family-host whoami` confirms the signed-in account.
 
-## Optional: Ask Coach
+The helper defaults to `--dry-run`. It shows the detected Docker build, port,
+health check, managed PostgreSQL dependency, environment variables, and Prisma
+migration without creating or changing anything. The GitHub repository must be
+available to the GitHub account connected to Family Host.
 
-Without `LLM_API_KEY`, Today still works (template advisor note). Ask Coach stays
-unavailable until you add a key.
+`./deploy-family-host.sh --deploy` is only for a brand-new installation. It
+refuses to create another `readiness-coach-api` when one already exists, and it
+never imports, replaces, or deletes production data.
 
-## If `/health` fails
+## What Shawn needs to do
 
-- Confirm `DATABASE_URL` is set and Neon project is active.
-- Check Render logs for Prisma migrate errors.
-- Confirm `API_TOKEN` is at least 8 characters (backend requirement).
-- Confirm GitHub secret `RENDER_HEALTH_URL` if the Action is skipping.
+1. Approve a brief write freeze for the final cutover.
+2. Securely provide temporary access to a **non-pooled** Neon export connection
+   string. Do not paste it into GitHub, a pull request, or chat.
+3. After the switch, use the iPhone app to verify sign-in/onboarding, HealthKit
+   sync, the Today score, history, and Ask Coach (when an LLM key is configured).
+
+That is the entire owner-facing migration. Shawn does not need to operate
+Docker, SSH, Coolify, Cloudflare, `pg_restore`, or Family Host database admin
+credentials.
+
+## What George and Family Host handle
+
+Before the final cutover:
+
+1. Create a managed PostgreSQL database for the existing app.
+2. Rehearse the Neon export/import against a detached database.
+3. Compare schema, migration history, and important row counts.
+4. Prove an off-guest backup can be restored.
+
+During the approved cutover:
+
+1. Pause writes to Neon.
+2. Take a final export and import it into the rehearsed managed database.
+3. Attach PostgreSQL to the existing Family Host app; Family Host supplies its
+   internal `DATABASE_URL`.
+4. Deploy the current commit, let `prisma migrate deploy` run, and verify
+   `/health` plus the core API flows.
+5. Keep Neon unchanged during a short observation period.
+
+If verification fails before writes reopen, switch the app back to Neon. Once
+new writes are accepted on Family Host, do not switch back without reconciling
+the two databases.
+
+## Application secrets
+
+The managed database URL is not an owner-supplied secret. Family Host creates
+and injects it. These application values still need to be present:
+
+| Variable | Purpose |
+|---|---|
+| `API_TOKEN` | Shared API credential; at least 8 characters |
+| `API_TOKEN_USER_ID` | Permanent iPhone app user ID |
+| `SESSION_SECRET` | Session signing secret; at least 32 characters |
+| `APPLE_BUNDLE_ID` | iOS bundle identifier |
+| `LLM_API_KEY` | Optional; enables Ask Coach |
+| `CORS_ORIGIN` | Optional browser origin |
+
+`LLM_BASE_URL` and `LLM_MODEL` already have application defaults. Never commit
+real secret values to this repository.
+
+## Acceptance checklist
+
+Do not retire Neon until all of these pass:
+
+- The Family Host app reports healthy and `/health` returns `{ "ok": true }`.
+- Prisma migration history and important table row counts match the final Neon
+  export.
+- The iPhone app can read existing history and create a new readiness record.
+- HealthKit sync and Ask Coach behave as expected.
+- A managed PostgreSQL backup has completed and a restore test has passed.
+
+Keep `render.yaml`, `.github/workflows/render-keepalive.yml`, and the Neon
+project intact through the observation period. Remove those legacy artifacts
+in a later cleanup only after the managed backup/restore test succeeds.
+
+## Shipping later releases
+
+Once the migration is accepted, normal backend releases are stateless from the
+owner's point of view: push a commit, let Family Host rebuild the app, watch the
+deployment phases, and keep the attached PostgreSQL data in place. Prisma
+applies any new committed migrations during startup.
+
+The iPhone still needs Xcode signing and a physical device for HealthKit. Its
+API URL remains the Family Host URL above, with the same `API_TOKEN` and
+permanent user ID.
