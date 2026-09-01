@@ -1,0 +1,29 @@
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+concurrency:
+  group: family-host-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Family Host CLI
+        run: npm install -g --ignore-scripts --no-audit --no-fund https://family.georgenijo.com/cli.tgz
+      - name: Redeploy readiness-coach-api
+        env:
+          FAMILY_HOST_CONFIG: ${{ runner.temp }}/family-host.json
+        run: |
+          printf '{"url":"https://family.georgenijo.com","token":"%s"}\n' \
+            "${{ secrets.FAMILY_HOST_TOKEN }}" > "$FAMILY_HOST_CONFIG"
+          family-host redeploy readiness-coach-api
