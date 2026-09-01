@@ -1,43 +1,77 @@
 #!/bin/zsh
-# Deploy the readiness-coach API to family-host.
-#
-# Reads API_TOKEN, API_TOKEN_USER_ID and LLM_API_KEY out of backend/.env so you
-# only have to type the two values that live nowhere on this machine.
+# Preview or create a fresh Readiness Coach API + PostgreSQL deployment on
+# Family Host. Existing production data follows docs/personal-free-deploy.md;
+# this helper never imports, replaces, or deletes a database.
 set -eu
 
 cd "$(dirname "$0")"
 
-# Pull the three known values from backend/.env without echoing them.
-eval "$(grep -E '^(API_TOKEN|API_TOKEN_USER_ID|LLM_API_KEY)=' backend/.env | sed 's/^/export /')"
+usage() {
+  print "usage: ./deploy-family-host.sh [--dry-run|--deploy]"
+  print
+  print "The default is --dry-run and creates no resources."
+}
 
-echo "Use the NON-POOLED Neon URL (no '-pooler' in the host)."
-echo "The container runs 'prisma migrate deploy' at startup and PgBouncer"
-echo "does not support the advisory lock that needs."
-echo
-read -rs "DATABASE_URL?Neon DATABASE_URL (non-pooled): "; echo
-read -rs "SESSION_SECRET?SESSION_SECRET (the one from Render): "; echo
-
-case "$DATABASE_URL" in
-  *-pooler*) echo "STOP: that is the pooled URL. Migrations will fail."; exit 1 ;;
-  postgres*) ;;
-  *) echo "STOP: that does not look like a postgres:// URL."; exit 1 ;;
+mode="${1:---dry-run}"
+case "$mode" in
+  --dry-run|--deploy) ;;
+  -h|--help) usage; exit 0 ;;
+  *) usage >&2; exit 2 ;;
 esac
-[ -n "$SESSION_SECRET" ] || { echo "STOP: SESSION_SECRET is empty."; exit 1; }
+[[ "$#" -le 1 ]] || { usage >&2; exit 2; }
 
-family-host deploy shawngeorgie06/readiness-coach \
-  --name readiness-coach-api \
-  --branch main \
-  --build-pack dockerfile \
-  --base-directory /backend \
-  --port 4000 \
-  --visibility public \
-  --auto-deploy \
-  --env "PORT=4000" \
-  --env "DATABASE_URL=$DATABASE_URL" \
-  --env "API_TOKEN=$API_TOKEN" \
-  --env "API_TOKEN_USER_ID=$API_TOKEN_USER_ID" \
-  --env "SESSION_SECRET=$SESSION_SECRET" \
-  --env "APPLE_BUNDLE_ID=com.readinesscoach.ReadinessCoach" \
-  --env "LLM_API_KEY=$LLM_API_KEY" \
-  --env "LLM_BASE_URL=https://api.openai.com/v1" \
-  --env "LLM_MODEL=gpt-4o-mini"
+if command -v family-host >/dev/null; then
+  cli=(family-host)
+else
+  command -v npx >/dev/null || {
+    print -u2 "Node.js 18+ is required; see https://family.georgenijo.com/docs"
+    exit 1
+  }
+  cli=(npx -y https://family.georgenijo.com/cli.tgz)
+fi
+
+"${cli[@]}" whoami >/dev/null
+
+deploy=(
+  "${cli[@]}" app deploy shawngeorgie06/readiness-coach
+  --name readiness-coach-api
+  --branch main
+  --base-directory /backend
+  --visibility public
+  --database postgres
+)
+
+if [[ "$mode" == "--dry-run" ]]; then
+  "${deploy[@]}" --dry-run
+  print
+  print "Nothing was deployed. Family Host supplies DATABASE_URL and runs the"
+  print "declared Prisma migration. See docs/personal-free-deploy.md for the"
+  print "already-live app's short Neon data migration."
+  exit 0
+fi
+
+apps_json="$("${cli[@]}" --json apps)"
+if python3 -c 'import json,sys; raise SystemExit(not any(app.get("name") == "readiness-coach-api" for app in json.load(sys.stdin)))' <<<"$apps_json"; then
+  print -u2 "readiness-coach-api already exists; refusing a duplicate deployment."
+  print -u2 "Use docs/personal-free-deploy.md to migrate its Neon data instead."
+  exit 1
+fi
+
+: "${API_TOKEN:?export API_TOKEN before --deploy}"
+: "${API_TOKEN_USER_ID:?export API_TOKEN_USER_ID before --deploy}"
+: "${SESSION_SECRET:?export SESSION_SECRET before --deploy}"
+: "${APPLE_BUNDLE_ID:?export APPLE_BUNDLE_ID before --deploy}"
+
+[[ "${#API_TOKEN}" -ge 8 ]] || { print -u2 "API_TOKEN must be at least 8 characters"; exit 1; }
+[[ "${#SESSION_SECRET}" -ge 32 ]] || { print -u2 "SESSION_SECRET must be at least 32 characters"; exit 1; }
+
+deploy+=(
+  --env "API_TOKEN=$API_TOKEN"
+  --env "API_TOKEN_USER_ID=$API_TOKEN_USER_ID"
+  --env "SESSION_SECRET=$SESSION_SECRET"
+  --env "APPLE_BUNDLE_ID=$APPLE_BUNDLE_ID"
+)
+[[ -z "${LLM_API_KEY:-}" ]] || deploy+=(--env "LLM_API_KEY=$LLM_API_KEY")
+[[ -z "${CORS_ORIGIN:-}" ]] || deploy+=(--env "CORS_ORIGIN=$CORS_ORIGIN")
+
+"${deploy[@]}"

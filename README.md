@@ -8,7 +8,7 @@ Watch → HealthKit → iPhone app → your API → readiness score (Push / Main
 
 - [Design spec](docs/superpowers/specs/2026-07-10-readiness-coach-design.md)
 - [Implementation plan](docs/superpowers/plans/2026-07-10-readiness-coach.md)
-- [Personal free deploy (phone app without laptop server)](docs/personal-free-deploy.md)
+- [Family Host deployment and Neon migration](docs/personal-free-deploy.md)
 
 ## Stack (planned)
 
@@ -28,6 +28,12 @@ to the API — and **compiles against the iOS SDK** (`xcodebuild` for the
 Simulator, `** BUILD SUCCEEDED **`). It still needs to be code-signed and run on
 a physical iPhone in Xcode to exercise HealthKit (device-only). See
 [`ios/README.md`](ios/README.md) and [`docs/ios-handoff.md`](docs/ios-handoff.md).
+
+The API is live on Family Host at
+[`readiness-coach-api-shawngeorgie06.georgenijo.com`](https://readiness-coach-api-shawngeorgie06.georgenijo.com)
+and its health check is passing. Family Host is ready to own the application
+and managed PostgreSQL lifecycle; moving the existing Neon data is the one
+remaining, explicitly approved cutover step.
 
 ## Local setup (after implementation begins)
 
