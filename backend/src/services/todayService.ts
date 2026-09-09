@@ -217,7 +217,7 @@ export function sleepBounds(
  *
  * `tzOffsetMinutes` is the user's local offset from UTC in minutes (EDT = −240),
  * as reported by the device. Default 0 (UTC) preserves the historical behaviour
- * when a client omits it. Render runs in UTC, so without this the boundary was
+ * when a client omits it. the server runs in UTC, so without this the boundary was
  * noon UTC = 8am Eastern, splitting nights and producing phantom ~53m "nights".
  */
 export function sleepWindowForDate(date: Date, tzOffsetMinutes = 0): { start: Date; end: Date } {

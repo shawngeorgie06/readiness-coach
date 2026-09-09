@@ -1,4 +1,4 @@
-# Build + run the Readiness Coach API for free cloud hosts (Render, etc.).
+# Build + run the Readiness Coach API container.
 FROM node:22-bookworm-slim AS build
 
 WORKDIR /app

@@ -98,9 +98,9 @@ Do not retire Neon until all of these pass:
 - HealthKit sync and Ask Coach behave as expected.
 - A managed PostgreSQL backup has completed and a restore test has passed.
 
-Keep `render.yaml`, `.github/workflows/render-keepalive.yml`, and the Neon
-project intact through the observation period. Remove those legacy artifacts
-in a later cleanup only after the managed backup/restore test succeeds.
+The Render artifacts (`render.yaml`, `.github/workflows/render-keepalive.yml`,
+and the in-process keep-alive) are removed — that service is gone. Keep the Neon
+project intact through the observation period as the rollback path.
 
 ## Shipping later releases
 

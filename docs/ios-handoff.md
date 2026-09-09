@@ -23,7 +23,7 @@ xcodebuild -project ReadinessCoach.xcodeproj -scheme ReadinessCoach \
 
 ## Personal daily use (no laptop server)
 
-To keep the API online without your Mac, use the free Neon + Render path in
+The API runs on Family Host; see
 [`personal-free-deploy.md`](personal-free-deploy.md). Point the iPhone app at
 the HTTPS URL. Free Apple signing still needs a brief Xcode re-Run about weekly.
 
