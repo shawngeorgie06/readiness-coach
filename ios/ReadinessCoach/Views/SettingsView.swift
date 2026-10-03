@@ -16,175 +16,176 @@ struct SettingsView: View {
     private let health = HealthKitService()
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section("Account") {
-                    if settings.isSignedIn {
-                        LabeledContent("Signed in", value: settings.appleDisplayName ?? "Apple ID")
-                        Button("Sign out", role: .destructive) {
-                            settings.signOut()
-                        }
-                    } else if settings.isConfigured {
-                        Label("Connected via API token", systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                        LabeledContent("User ID", value: settings.userId)
-                            .font(.caption)
-                    } else {
-                        Text("Not connected")
-                            .foregroundStyle(.secondary)
+        Form {
+            Section("Account") {
+                if settings.isSignedIn {
+                    LabeledContent("Signed in", value: settings.appleDisplayName ?? "Apple ID")
+                    Button("Sign out", role: .destructive) {
+                        settings.signOut()
                     }
-                }
-
-                Section {
-                    DisclosureGroup("Connection") {
-                        LabeledField(label: "API URL", text: $settings.apiBaseURL, keyboard: .default)
-                        LabeledField(label: "API token", text: $settings.apiToken, secure: true)
-                        LabeledField(label: "User ID", text: $settings.userId)
-                    }
-                }
-
-                Section("Sync") {
-                    Button {
-                        Task { await sync.syncNow(settings) }
-                    } label: {
-                        HStack {
-                            Text("Sync now")
-                            Spacer()
-                            if sync.isSyncing { ProgressView() }
-                        }
-                    }
-                    .disabled(sync.isSyncing)
-
-                    if let last = settings.lastSyncAt {
-                        // This is the resume point, not the last attempt: after a
-                        // partial upload it sits at the oldest data still pending.
-                        LabeledContent("Health synced through", value: last.formatted(date: .abbreviated, time: .shortened))
-                    }
-                    if let summary = sync.lastSyncSummary {
-                        Text(summary).font(.caption).foregroundStyle(.secondary)
-                    }
-                    if let uploadError = sync.lastUploadError {
-                        Text(SyncFreshness.detailLine(.fresh, settings: settings, summary: nil, uploadError: uploadError) ?? uploadError)
-                            .font(.caption)
-                            .foregroundStyle(Palette.warn)
-                    }
-                }
-
-                Section("Health") {
-                    switch healthStatus {
-                    case .connected:
-                        Label("Health access enabled", systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                    case .needsPermission, .none:
-                        Button {
-                            Task { await requestHealth() }
-                        } label: {
-                            HStack {
-                                Image(systemName: "heart.text.square")
-                                Text("Allow Health access")
-                                Spacer()
-                                if isRequestingHealth { ProgressView() }
-                            }
-                        }
-                        .disabled(isRequestingHealth)
-                    case .unavailable:
-                        Text("Health data is not available on this device.")
-                            .foregroundStyle(.secondary)
-                    }
-                    if let summary = sync.lastSyncSummary, summary.hasPrefix("Couldn't read Health") {
-                        Text(summary)
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                    }
-                    Text("Reads heart rate, resting HR, HRV, sleep, and workouts. Never writes to Health. Manage permissions in iOS Settings → Health → Data Access & Devices.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-
-                Section("Daily readiness") {
-                    Toggle("Morning notification", isOn: Binding(
-                        get: { settings.notificationsEnabled },
-                        set: { isOn in
-                            if isOn {
-                                Task {
-                                    let granted = await notifications.requestAuthorization()
-                                    if granted {
-                                        settings.notificationsEnabled = true
-                                        notificationDenied = false
-                                        notifications.refreshDailySchedule(settings: settings, latest: sync.today)
-                                    } else {
-                                        settings.notificationsEnabled = false
-                                        notificationDenied = true
-                                    }
-                                }
-                            } else {
-                                settings.notificationsEnabled = false
-                                notificationDenied = false
-                                notifications.cancelDaily()
-                            }
-                        }
-                    ))
-
-                    if settings.notificationsEnabled {
-                        DatePicker("Time", selection: notificationTime, displayedComponents: .hourAndMinute)
-                    }
-
-                    if notificationDenied {
-                        Text("Turn on notifications for Readiness Coach in iOS Settings to use this.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-
-                    Text("Delivered daily at your chosen time. Shows your latest synced score — open the app for today's fresh number.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-
-                Section("About") {
-                    LabeledContent("Version", value: AppBuild.label)
-                }
-
-                Section("Data & privacy") {
-                    Button("Delete local settings", role: .destructive) {
-                        showResetConfirm = true
-                    }
-                    Button("Delete account data", role: .destructive) {
-                        showDeleteAccountConfirm = true
-                    }
-                    Text("Account deletion permanently erases your user and all synced health samples, workouts, scores, and advisor notes on the server.")
+                } else if settings.isConfigured {
+                    Label("Connected via API token", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    LabeledContent("User ID", value: settings.userId)
                         .font(.caption)
+                } else {
+                    Text("Not connected")
                         .foregroundStyle(.secondary)
                 }
+            }
 
-                if let actionMessage {
-                    Section { Text(actionMessage).font(.footnote) }
+            Section {
+                DisclosureGroup("Connection") {
+                    LabeledField(label: "API URL", text: $settings.apiBaseURL, keyboard: .default)
+                    LabeledField(label: "API token", text: $settings.apiToken, secure: true)
+                    LabeledField(label: "User ID", text: $settings.userId)
                 }
             }
-            .navigationTitle("Settings")
-            .task { await refreshHealthStatus() }
-            .onChange(of: scenePhase) { _, phase in
-                if phase == .active { Task { await refreshHealthStatus() } }
+
+            Section("Sync") {
+                Button {
+                    Task { await sync.syncNow(settings) }
+                } label: {
+                    HStack {
+                        Text("Sync now")
+                        Spacer()
+                        if sync.isSyncing { ProgressView() }
+                    }
+                }
+                .disabled(sync.isSyncing)
+
+                if let last = settings.lastSyncAt {
+                    // This is the resume point, not the last attempt: after a
+                    // partial upload it sits at the oldest data still pending.
+                    LabeledContent("Health synced through", value: last.formatted(date: .abbreviated, time: .shortened))
+                }
+                if let summary = sync.lastSyncSummary {
+                    Text(summary).font(.caption).foregroundStyle(.secondary)
+                }
+                if let uploadError = sync.lastUploadError {
+                    Text(SyncFreshness.detailLine(.fresh, settings: settings, summary: nil, uploadError: uploadError) ?? uploadError)
+                        .font(.caption)
+                        .foregroundStyle(Palette.warn)
+                }
             }
-            .confirmationDialog(
-                "Delete all account data on the server? This cannot be undone.",
-                isPresented: $showDeleteAccountConfirm,
-                titleVisibility: .visible
-            ) {
+
+            Section("Health") {
+                switch healthStatus {
+                case .connected:
+                    Label("Health permission request completed", systemImage: "heart.text.square")
+                        .foregroundStyle(Palette.textSecondary)
+                    Text("iOS does not tell apps whether read access was granted or denied. If data is missing, check your Health permissions.")
+                        .font(.caption).foregroundStyle(Palette.textSecondary)
+                case .needsPermission, .none:
+                    Button {
+                        Task { await requestHealth() }
+                    } label: {
+                        HStack {
+                            Image(systemName: "heart.text.square")
+                            Text("Allow Health access")
+                            Spacer()
+                            if isRequestingHealth { ProgressView() }
+                        }
+                    }
+                    .disabled(isRequestingHealth)
+                case .unavailable:
+                    Text("Health data is not available on this device.")
+                        .foregroundStyle(.secondary)
+                }
+                if let summary = sync.lastSyncSummary, summary.hasPrefix("Couldn't read Health") {
+                    Text(summary)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+                Text("Reads heart rate, resting HR, HRV, sleep, and workouts. Never writes to Health. Manage permissions in iOS Settings → Health → Data Access & Devices.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section("Daily readiness") {
+                Toggle("Morning notification", isOn: Binding(
+                    get: { settings.notificationsEnabled },
+                    set: { isOn in
+                        if isOn {
+                            Task {
+                                let granted = await notifications.requestAuthorization()
+                                if granted {
+                                    settings.notificationsEnabled = true
+                                    notificationDenied = false
+                                    notifications.refreshDailySchedule(settings: settings, latest: sync.today)
+                                } else {
+                                    settings.notificationsEnabled = false
+                                    notificationDenied = true
+                                }
+                            }
+                        } else {
+                            settings.notificationsEnabled = false
+                            notificationDenied = false
+                            notifications.cancelDaily()
+                        }
+                    }
+                ))
+
+                if settings.notificationsEnabled {
+                    DatePicker("Time", selection: notificationTime, displayedComponents: .hourAndMinute)
+                }
+
+                if notificationDenied {
+                    Text("Turn on notifications for Readiness Coach in iOS Settings to use this.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
+                Text("Delivered daily at your chosen time. Shows your latest synced score — open the app for today's fresh number.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section("About") {
+                LabeledContent("Version", value: AppBuild.label)
+            }
+
+            Section("Data & privacy") {
+                Button("Delete local settings", role: .destructive) {
+                    showResetConfirm = true
+                }
                 Button("Delete account data", role: .destructive) {
-                    Task { await deleteAccount() }
+                    showDeleteAccountConfirm = true
                 }
-                Button("Cancel", role: .cancel) {}
+                Text("Account deletion permanently erases your user and all synced health samples, workouts, scores, and advisor notes on the server.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            .confirmationDialog(
-                "Clear local settings on this device?",
-                isPresented: $showResetConfirm,
-                titleVisibility: .visible
-            ) {
-                Button("Clear settings", role: .destructive) {
-                    settings.clearLocalSettings()
-                    sync.today = nil
-                    notifications.cancelDaily()
-                    actionMessage = "Local settings cleared."
-                }
-                Button("Cancel", role: .cancel) {}
+
+            if let actionMessage {
+                Section { Text(actionMessage).font(.footnote) }
             }
+        }
+        .navigationTitle("Settings")
+        .screenBackground()
+        .task { await refreshHealthStatus() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await refreshHealthStatus() } }
+        }
+        .confirmationDialog(
+            "Delete all account data on the server? This cannot be undone.",
+            isPresented: $showDeleteAccountConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Delete account data", role: .destructive) {
+                Task { await deleteAccount() }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .confirmationDialog(
+            "Clear local settings on this device?",
+            isPresented: $showResetConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Clear settings", role: .destructive) {
+                settings.clearLocalSettings()
+                sync.today = nil
+                notifications.cancelDaily()
+                actionMessage = "Local settings cleared."
+            }
+            Button("Cancel", role: .cancel) {}
         }
     }
 

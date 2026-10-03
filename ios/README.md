@@ -64,6 +64,48 @@ ReadinessCoach/
   Views/                       Onboarding, Today, Sleep, Train, Body, Ask, Settings
 ```
 
+## Navigation (redesign foundation)
+
+Four native tabs: **Today**, **Recovery** (existing Body screen), **Sleep**, and
+**Train** (existing Activity screen). Today’s score opens **History**; its avatar
+opens **Settings**. The pillar rows select their corresponding tabs, while
+**Details** opens every scoring driver. Ask Coach remains a sheet with an
+explicit Done action and the server’s locked decision.
+
+The first redesign phase is dark-only. The detailed pillar screens and
+onboarding layout are not yet redesigned. See the
+[design proposal](../docs/superpowers/specs/2026-10-02-redesign-v2-design.md).
+
+## Unit tests
+
+The shared `ReadinessCoach` scheme includes the app-hosted `ReadinessCoachTests`
+target. Select an installed iPhone simulator in Xcode and use Product → Test
+(⌘U), or run from the repository root:
+
+```bash
+xcodebuild -project ios/ReadinessCoach.xcodeproj \
+  -scheme ReadinessCoach -configuration Debug -sdk iphonesimulator \
+  -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5' \
+  CODE_SIGNING_ALLOWED=NO test
+```
+
+Replace the destination with an installed simulator. The 31 tests cover status
+resolution, missing-signal remediation, duration formatting, pillar weights and
+routing, dark contrast, Gregorian server-day parsing across time zones/calendars,
+dated Ask context, History range isolation, and unit-test launch isolation.
+The test host bypasses live app startup, so tests do not instantiate persisted
+account state or start Health sync, network requests, or notification scheduling.
+No backend is needed. GitHub CI currently checks backend/web only; iOS tests run
+locally.
+
+For UI checks, kill the app before relaunching a changed build. Use a local test
+API with synthetic data and an explicit test user/token—never seed production
+Health data to create screenshots. Exercise Today, History/range changes,
+Settings, all pillar-row destinations, Ask success/error, collapsed and expanded
+status, and the largest Dynamic Type size. An unsigned simulator can verify the
+Health authorization error alert, but real Health permissions, Watch uploads,
+background delivery and notification behavior require a signed physical device.
+
 ## API contract used
 
 | Call | Endpoint |

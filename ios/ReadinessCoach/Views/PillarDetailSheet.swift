@@ -17,7 +17,7 @@ struct PillarDetailSheet: View {
                 VStack(alignment: .leading, spacing: 16) {
                     HStack {
                         Text("\(Int(info.pillar.score.rounded()))")
-                            .font(.system(size: 44, weight: .bold, design: .rounded)).monospacedDigit()
+                            .font(.largeTitle.weight(.semibold)).monospacedDigit()
                         Text("weight \(info.weight)").font(.subheadline).foregroundStyle(.secondary)
                     }
                     Text(info.description).font(.body)
@@ -38,6 +38,7 @@ struct PillarDetailSheet: View {
                     }
                 }.padding()
             }
+            .screenBackground()
             .navigationTitle(info.name)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
         }

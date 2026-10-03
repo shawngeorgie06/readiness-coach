@@ -1,72 +1,65 @@
 import SwiftUI
 import Charts
 
-/// Insights tab — Aether prototype: range selector, readiness trend bars (tappable),
-/// pillar trends. Sleep detail lives on the Sleep tab.
+/// History — pushed from the Today score: range selector, readiness trend bars
+/// (tappable), pillar trends. Sleep detail lives on the Sleep tab.
 struct TrendsView: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var tabs: TabRouter
+    @EnvironmentObject private var sync: SyncService
     @State private var response: ReadinessHistoryResponse?
     @State private var error: String?
     @State private var isLoading = false
     @State private var rangeIndex = 1
     @State private var selectedPointID: String?
-    @State private var pillarSelection: Date?
-    @State private var pillars: Pillars?
+    @State private var pillarSelection = ChartDaySelection()
+    @State private var loadID = UUID()
 
     private let rangeLabels = ["7d", "30d", "90d"]
     private let rangeDays = [7, 30, 90]
 
     var body: some View {
-        NavigationStack {
-            ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: 16) {
-                    header
-                    SegmentedRange(rangeLabels, selection: $rangeIndex)
-                    if let points, !points.isEmpty {
-                        trendCard(points)
-                        insightCards()
-                        pillarsCard(points)
-                    } else if isLoading {
-                        ProgressView().padding(.top, 60)
-                    } else {
-                        ContentUnavailableCompat(
-                            title: "No trend yet",
-                            message: "Sync a few days of data to see your readiness trend.",
-                            systemImage: "chart.bar.fill"
-                        )
-                    }
-                    if let error {
-                        ErrorCard(message: error) { Task { await load() } }
-                    }
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(spacing: 16) {
+                SegmentedRange(rangeLabels, selection: $rangeIndex)
+                if let points, !points.isEmpty {
+                    trendCard(points)
+                    insightCards()
+                    pillarsCard(points)
+                } else if isLoading {
+                    ProgressView().padding(.top, 60)
+                } else {
+                    ContentUnavailableCompat(
+                        title: "No trend yet",
+                        message: "Sync a few days of data to see your readiness trend.",
+                        systemImage: "chart.bar.fill"
+                    )
                 }
-                .pageWidthLocked()
-                .padding()
+                if let error {
+                    ErrorCard(message: error) { Task { await load() } }
+                }
             }
-            .verticalScrollLocked()
-            .screenBackground()
-            .toolbar(.hidden, for: .navigationBar)
-            .task { await load() }
-            .refreshable { await load() }
-            .onChange(of: rangeIndex) { _, _ in
-                selectedPointID = nil
-                pillarSelection = nil
-                Task { await load() }
-            }
+            .pageWidthLocked()
+            .padding()
         }
+        .verticalScrollLocked()
+        .screenBackground()
+        .navigationTitle("History")
+        .task(id: rangeIndex) {
+            selectedPointID = nil
+            pillarSelection.date = nil
+            await load()
+        }
+        .refreshable { await load() }
     }
 
-    private var points: [ReadinessPoint]? { response?.data }
+    private var points: [ReadinessPoint]? {
+        Self.points(in: response, requestedDays: rangeDays[rangeIndex])
+    }
 
-    private var header: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 4) {
-                Eyebrow(text: "Patterns")
-                Text("Insights").font(.system(size: 30, weight: .bold, design: .rounded))
-                    .foregroundStyle(Palette.textPrimary)
-            }
-            Spacer()
-        }
+    static func points(in response: ReadinessHistoryResponse?, requestedDays: Int) -> [ReadinessPoint]? {
+        guard let response, response.days == requestedDays else { return nil }
+        return response.data
     }
 
     private func trendCard(_ points: [ReadinessPoint]) -> some View {
@@ -237,7 +230,10 @@ struct TrendsView: View {
 
     @ViewBuilder
     private func insightCards() -> some View {
-        if let pillars {
+        if let today = sync.today {
+            let pillars = today.pillars
+            Eyebrow(text: "Latest snapshot · \(StatusLineModel.formattedDay(today.date))")
+                .frame(maxWidth: .infinity, alignment: .leading)
             Button { tabs.go(to: .sleep) } label: {
                 insightCard("Sleep", .sleep, pillars.sleep,
                             meaning: "How well you rested — duration and consistency vs your need. Tap to open the Sleep tab.")
@@ -296,40 +292,56 @@ struct TrendsView: View {
                     line(point.date, point.recoveryScore, "Recovery")
                     line(point.date, point.loadScore, "Load")
                 }
-                if let sel = pillarSelection {
+                if let sel = pillarSelection.date {
                     RuleMark(x: .value("Date", sel))
                         .foregroundStyle(Palette.textTertiary.opacity(0.5))
                         .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
                 }
             }
             .chartForegroundStyleScale(domain: ["Sleep", "Recovery", "Load"],
-                                       range: [Palette.lavender, Palette.mint, Palette.accent])
+                                       range: [Palette.sleep, Palette.recovery, Palette.load])
             .chartYScale(domain: 0 ... 100)
             .chartLegend(.hidden)
             .frame(height: 180)
             .chartOverlay { proxy in
-                ChartDayScrubOverlay(proxy: proxy, dates: dates, selection: $pillarSelection)
+                ChartDayScrubOverlay(proxy: proxy, dates: dates, selection: $pillarSelection.date)
             }
             .clipped()
 
             ScrubDetailBanner(
-                date: pillarSelection,
+                date: pillarSelection.date,
                 placeholder: "Tap the chart to inspect a day",
-                lines: pillarLines(for: pillarSelection, in: points),
-                note: pillarNote(for: pillarSelection, in: points)
+                lines: pillarLines(for: pillarSelection.date, in: points),
+                note: pillarNote(for: pillarSelection.date, in: points)
             )
 
             HStack(spacing: 14) {
                 legendDot("Sleep", Palette.lavender)
                 legendDot("Recovery", Palette.mint)
-                legendDot("Load", Palette.accent)
+                legendDot("Load", Palette.load)
             }
+
+            DisclosureGroup("Daily scores") {
+                ForEach(points) { point in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(StatusLineModel.formattedDay(point.date))
+                            .font(.footnote.weight(.semibold))
+                        Text("Sleep \(Int(point.sleepScore.rounded())) · Recovery \(Int(point.recoveryScore.rounded())) · Load \(Int(point.loadScore.rounded()))")
+                            .font(.caption)
+                            .foregroundStyle(Palette.textSecondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 4)
+                    .accessibilityElement(children: .combine)
+                }
+            }
+            .font(.footnote)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .card()
         .onAppear {
-            if pillarSelection == nil, let last = dates.last {
-                pillarSelection = last
+            if pillarSelection.date == nil, let last = dates.last {
+                pillarSelection.date = last
             }
         }
     }
@@ -365,23 +377,32 @@ struct TrendsView: View {
     }
 
     private func legendDot(_ label: String, _ color: Color) -> some View {
-        Label(label, systemImage: "circle.fill")
-            .font(.caption2).foregroundStyle(color).labelStyle(.titleAndIcon)
+        HStack(spacing: 4) {
+            Circle().fill(color).frame(width: 6, height: 6)
+            Text(label).foregroundStyle(Palette.textSecondary)
+        }
+        .font(.caption2)
+        .accessibilityElement(children: .combine)
     }
 
     private func load() async {
         guard let client = settings.makeClient() else { return }
+        let requestID = UUID()
+        let requestedRange = rangeIndex
+        loadID = requestID
         isLoading = true
         error = nil
-        defer { isLoading = false }
+        defer { if loadID == requestID { isLoading = false } }
         do {
-            response = try await client.getHistory(days: rangeDays[rangeIndex])
+            let result = try await client.getHistory(days: rangeDays[requestedRange])
+            guard !Task.isCancelled, loadID == requestID, rangeIndex == requestedRange else { return }
+            response = result
             if selectedPointID == nil {
-                selectedPointID = response?.data.last?.id
+                selectedPointID = result.data.last?.id
             }
         } catch {
+            guard !Task.isCancelled, loadID == requestID, rangeIndex == requestedRange else { return }
             self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
-        pillars = try? await client.getToday().pillars
     }
 }

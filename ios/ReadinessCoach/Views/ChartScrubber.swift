@@ -1,6 +1,5 @@
 import SwiftUI
 import Charts
-import UIKit
 
 func nearestDate(_ target: Date?, in dates: [Date]) -> Date? {
     guard let target else { return nil }
@@ -59,6 +58,29 @@ struct ScrubDetailBanner: View {
     }
 }
 
+/// Parent-owned selection keeps its source zone even while the chart is absent.
+struct ChartDaySelection {
+    private var storedDate: Date?
+    private var sourceTimeZone: TimeZone
+
+    init(date: Date? = nil, timeZone: TimeZone = .current) {
+        storedDate = date
+        sourceTimeZone = timeZone
+    }
+
+    var date: Date? {
+        get { resolved() }
+        set {
+            storedDate = newValue
+            sourceTimeZone = .current
+        }
+    }
+
+    func resolved(timeZone: TimeZone = .current) -> Date? {
+        ChartDate.rebase(storedDate, from: sourceTimeZone, to: timeZone)
+    }
+}
+
 struct ChartDayScrubOverlay: View {
     let proxy: ChartProxy
     let dates: [Date]
@@ -83,6 +105,12 @@ struct ChartDayScrubOverlay: View {
                         }
                 )
         }
+        .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in
+            // The parent binding resolves the same day in the new zone; writing it
+            // back updates parent state so marks and readouts redraw together.
+            let resolvedSelection = selection
+            selection = resolvedSelection
+        }
     }
 }
 
@@ -97,40 +125,6 @@ extension View {
         self
             .frame(maxWidth: .infinity, alignment: .leading)
             .clipped()
-    }
-}
-
-/// Pins vertical ScrollView content width. Does NOT walk up and clamp ancestor
-/// scrollers — that was killing the section-pager swipe gesture.
-struct WidthPinnedVerticalScroll<Content: View>: View {
-    var onRefresh: (() async -> Void)? = nil
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        GeometryReader { geo in
-            let scroll = ScrollView(.vertical, showsIndicators: true) {
-                content
-                    .frame(width: geo.size.width, alignment: .topLeading)
-                    .clipped()
-            }
-            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
-
-            Group {
-                if let onRefresh {
-                    scroll.refreshable { await onRefresh() }
-                } else {
-                    scroll
-                }
-            }
-            .frame(width: geo.size.width, height: geo.size.height)
-        }
-    }
-}
-
-enum ScrollLockBootstrap {
-    static func apply() {
-        // Leave horizontal paging alone so section swipe works.
-        UIScrollView.appearance().isDirectionalLockEnabled = true
     }
 }
 

@@ -9,11 +9,12 @@ struct ErrorCard: View {
             Label("Something went wrong", systemImage: "exclamationmark.triangle")
                 .font(.subheadline.weight(.semibold)).foregroundStyle(Palette.warn)
             Text(message).font(.footnote).foregroundStyle(Palette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
             Button("Retry", action: retry).buttonStyle(.bordered).controlSize(.small).tint(Palette.accent)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Palette.warn.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
 
