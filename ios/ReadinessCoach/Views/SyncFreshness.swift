@@ -10,12 +10,8 @@ enum DataFreshness: Equatable {
 }
 
 enum SyncFreshness {
-    static func localCalendarDay() -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        formatter.calendar = Calendar.current
-        formatter.timeZone = .current
-        return formatter.string(from: Date())
+    static func localCalendarDay(now: Date = Date()) -> String {
+        APIClient.deviceLocalDate(now: now)
     }
 
     static func evaluate(today: TodayDTO?, settings: AppSettings, errorMessage: String?) -> DataFreshness {
@@ -75,7 +71,7 @@ enum SyncFreshness {
             if let summary = userFacingSummary(summary) { return summary }
             return "Open the app or pull to refresh for the latest score."
         case .stale(let scoreDay):
-            return "Showing score for \(formattedDay(scoreDay)). Pull to refresh for today."
+            return "Showing score for \(StatusLineModel.formattedDay(scoreDay)). Pull to refresh for today."
         case .offline:
             return "Couldn't reach the server — showing your last saved score."
         }
@@ -96,13 +92,6 @@ enum SyncFreshness {
         return "Score is loaded, but new Health data didn’t upload (\(detail)). Pull to retry."
     }
 
-    private static func formattedDay(_ isoDay: String) -> String {
-        let parser = DateFormatter()
-        parser.dateFormat = "yyyy-MM-dd"
-        parser.timeZone = .current
-        guard let date = parser.date(from: isoDay) else { return isoDay }
-        return date.formatted(date: .abbreviated, time: .omitted)
-    }
 }
 
 struct FreshnessBanner: View {

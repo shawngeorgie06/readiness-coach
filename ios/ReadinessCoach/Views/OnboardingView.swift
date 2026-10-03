@@ -57,8 +57,10 @@ struct OnboardingView: View {
                             .font(.subheadline)
                         switch healthStatus {
                         case .connected:
-                            Label("Health access enabled", systemImage: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
+                            Label("Health permission request completed", systemImage: "heart.text.square")
+                                .foregroundStyle(Palette.textSecondary)
+                            Text("iOS does not tell apps whether read access was granted or denied. If data is missing, check your Health permissions.")
+                                .font(.caption).foregroundStyle(Palette.textSecondary)
                         case .needsPermission, .none:
                             Button {
                                 Task { await requestHealth() }
@@ -92,7 +94,7 @@ struct OnboardingView: View {
                             Text("Start & sync").frame(maxWidth: .infinity)
                         }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .primaryAction()
                     .disabled(!settings.isConfigured || isFinishing)
                 }
                 .padding()

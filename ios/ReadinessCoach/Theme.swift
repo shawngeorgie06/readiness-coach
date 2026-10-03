@@ -70,41 +70,96 @@ enum StrainExplain {
         "0–21 effort score from duration + heart-rate intensity (capped at 21)."
 }
 
-/// Aether — warm, human, approachable dark. Every token explicit.
-enum Palette {
-    static let canvas     = Color(hex: 0x150E0A)
-    static let elevated   = Color(hex: 0x1F1612)
-    static let surface    = Color(hex: 0x271D18)
-    static let surfaceHi  = Color(hex: 0x322621)
-    static let textPrimary   = Color(hex: 0xF6F1EC)
-    static let textSecondary = Color(hex: 0xB2A9A2)
-    static let textTertiary  = Color(hex: 0x877E78)
-    static let stroke        = Color(hex: 0x3D332F)
-    static let strokeSoft    = Color(hex: 0x322926)
+/// Readiness is the weighted sum of three pillars. These weights mirror the
+/// backend's scoring and are only ever displayed, never used to compute.
+enum Pillar: CaseIterable, Identifiable {
+    case recovery, sleep, load
 
-    static let accent    = Color(hex: 0xF9875E)   // coral — chrome / strain
-    static let mint       = Color(hex: 0x5ED8A9)  // recovery
-    static let lavender   = Color(hex: 0xB2A6EC)  // sleep
-    static let success    = Color(hex: 0x5BD295)
-    static let warn       = Color(hex: 0xF2B95A)
-    static let danger     = Color(hex: 0xF05F5A)
+    var id: Self { self }
 
-    // Data-viz aliases (kept for chart tabs; map old names to Aether)
-    static let sleepBlue = lavender
-    static let teal      = mint
-    static let indigo    = lavender
-    static let violet    = lavender
-    static let warm      = accent
-    static let coral     = accent
-
-    // Warm decision palette (Aether): recover reads coral, not clinical red, to
-    // match the prototype's warm hero. push→mint, maintain→amber, recover→coral.
-    static func decisionColor(_ d: Decision) -> Color {
-        switch d { case .push: return success; case .maintain: return warn; case .recover: return accent }
+    var title: String {
+        switch self {
+        case .recovery: return "Recovery"
+        case .sleep: return "Sleep"
+        case .load: return "Load"
+        }
     }
-    static func gradient(for d: Decision) -> [Color] {
-        let c = decisionColor(d)
-        return [c.opacity(0.85), c]
+
+    /// Share of the readiness score, as shown to the user.
+    var weightPercent: Int {
+        switch self {
+        case .recovery: return 40
+        case .sleep: return 35
+        case .load: return 25
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .recovery: return "HRV and resting heart rate vs your baseline"
+        case .sleep: return "Last night's duration and quality vs your need"
+        case .load: return "Recent training strain vs your norm"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .recovery: return "heart.fill"
+        case .sleep: return "moon.fill"
+        case .load: return "flame.fill"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .recovery: return Palette.recovery
+        case .sleep: return Palette.sleep
+        case .load: return Palette.load
+        }
+    }
+
+    func score(in pillars: Pillars) -> PillarScore {
+        switch self {
+        case .recovery: return pillars.recovery
+        case .sleep: return pillars.sleep
+        case .load: return pillars.load
+        }
+    }
+}
+
+/// Quiet, editorial dark. One hue per pillar; a separate traffic-light set that
+/// is used only for the decision. Dark-only for now — a light scheme is a
+/// second column here, not a rewrite.
+enum Palette {
+    static let canvas  = Color(hex: 0x0E0F12)
+    static let surface = Color(hex: 0x17191E)
+    /// Raised fill inside a surface (selected segment, inset readouts).
+    static let surfaceHi = Color(hex: 0x21242B)
+
+    static let textPrimary   = Color(hex: 0xF2F2F0)
+    static let textSecondary = Color(hex: 0xA3A6AD)
+    static let textTertiary  = Color(hex: 0x8B8F98)
+    static let stroke        = Color(hex: 0x2A2D34)
+    static let strokeSoft    = Color(hex: 0x1F2228)
+
+    /// Interactive tint: bone white on dark, so controls read as type, not chrome.
+    static let accent = Color(hex: 0xE9E4DB)
+
+    static let recovery = Color(hex: 0x2CA5BF)
+    static let sleep    = Color(hex: 0x8474CE)
+    static let load     = Color(hex: 0x9C477B)
+
+    static let success = Color(hex: 0x3DD68C)
+    static let warn    = Color(hex: 0xF0B429)
+    static let danger  = Color(hex: 0xF0605B)
+
+    // Aliases kept for the pillar tabs until they are restyled in phase 3.
+    static let elevated  = surface
+    static let mint      = recovery
+    static let lavender  = sleep
+
+    static func decisionColor(_ d: Decision) -> Color {
+        switch d { case .push: return success; case .maintain: return warn; case .recover: return danger }
     }
     static func band(for score: Double) -> Color {
         if score >= 75 { return success }
@@ -113,13 +168,13 @@ enum Palette {
     }
 }
 
+/// Sentence-case section label. Replaces the mono uppercase eyebrow.
 struct Eyebrow: View {
     let text: String
     var color: Color = Palette.textSecondary
     var body: some View {
-        Text(text.uppercased())
-            .font(.system(.caption2, design: .monospaced).weight(.semibold))
-            .tracking(1.2)
+        Text(text)
+            .font(.subheadline.weight(.medium))
             .foregroundStyle(color)
     }
 }
@@ -128,51 +183,29 @@ private struct CardModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .padding(16)
-            .background {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(Palette.surface)
-                    .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Palette.strokeSoft, lineWidth: 1))
-                    .shadow(color: .black.opacity(0.34), radius: 14, y: 6)
-            }
-    }
-}
-
-private struct HeroCardModifier: ViewModifier {
-    private let radius: CGFloat = 32
-
-    func body(content: Content) -> some View {
-        content
-            .padding(EdgeInsets(top: 22, leading: 18, bottom: 20, trailing: 18))
-            .background {
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .fill(LinearGradient(colors: [Palette.surfaceHi, Palette.surface], startPoint: .top, endPoint: .bottom))
-                    .overlay(
-                        RadialGradient(colors: [Palette.accent.opacity(0.22), .clear],
-                                       center: .top, startRadius: 0, endRadius: 240)
-                            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
-                    )
-                    .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(Palette.accent.opacity(0.22), lineWidth: 1))
-            }
-            // Keep ring / type from painting past the rounded hero box.
-            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
-            // Shadow outside the clip so it still softens under the card.
-            .background {
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .fill(Color.clear)
-                    .shadow(color: .black.opacity(0.34), radius: 18, y: 8)
-            }
+            .background(Palette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 
 extension View {
+    /// High-contrast filled action, including on iOS 17's prominent-button chrome.
+    func primaryAction() -> some View {
+        self.buttonStyle(.borderedProminent)
+            .tint(Palette.accent)
+            .foregroundStyle(Palette.canvas)
+    }
+
+    /// Flat surface, no shadow or stroke.
     func card() -> some View { modifier(CardModifier()) }
-    func heroCard() -> some View { modifier(HeroCardModifier()) }
     func screenBackground() -> some View {
         self
+            .foregroundStyle(Palette.textPrimary)
             .scrollContentBackground(.hidden)
             .background(Palette.canvas.ignoresSafeArea())
             .toolbarBackground(Palette.canvas, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -181,6 +214,7 @@ struct MetricBar: View {
     let score: Double
     var height: CGFloat = 4
     var tint: Color? = nil
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var animated = false
     var body: some View {
         GeometryReader { geo in
@@ -192,7 +226,11 @@ struct MetricBar: View {
             }
         }
         .frame(height: height)
-        .onAppear { withAnimation(.easeOut(duration: 0.7)) { animated = true } }
+        .onAppear {
+            if reduceMotion { animated = true } else {
+                withAnimation(.easeOut(duration: 0.7)) { animated = true }
+            }
+        }
     }
 }
 
@@ -201,51 +239,24 @@ struct Pill: View {
     let text: String
     var tone: Tone = .neutral
     init(_ text: String, tone: Tone = .neutral) { self.text = text; self.tone = tone }
+    var textColor: Color { Palette.textPrimary }
     private var color: Color {
-        switch tone { case .good: return Palette.mint; case .warn: return Palette.warn
-        case .accent: return Palette.accent; case .sleep: return Palette.lavender; case .neutral: return Palette.textSecondary }
+        switch tone { case .good: return Palette.success; case .warn: return Palette.warn
+        case .accent: return Palette.accent; case .sleep: return Palette.sleep; case .neutral: return Palette.textSecondary }
     }
     var body: some View {
-        Text(text.uppercased())
-            .font(.system(.caption2, design: .monospaced).weight(.semibold))
-            .tracking(0.6)
+        Text(text)
+            .font(.caption.weight(.semibold))
             .padding(.horizontal, 10).padding(.vertical, 5)
-            .background(color.opacity(0.16), in: Capsule())
-            .foregroundStyle(color)
-    }
-}
-
-struct MetricTile: View {
-    enum Tone { case strain, recovery, sleep
-        var color: Color { switch self { case .strain: return Palette.accent; case .recovery: return Palette.mint; case .sleep: return Palette.lavender } } }
-    let label: String
-    let value: String
-    var unit: String? = nil
-    var delta: String? = nil
-    let fraction: Double
-    let tone: Tone
-    var showBar = true
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(label).font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.textSecondary)
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text(value).font(.system(size: 28, weight: .semibold, design: .rounded)).foregroundStyle(tone.color)
-                if let unit { Text(unit).font(.system(size: 13, weight: .medium)).foregroundStyle(Palette.textSecondary) }
-            }
-            if let delta { Text(delta).font(.system(.caption2, design: .monospaced)).foregroundStyle(Palette.textSecondary) }
-            if showBar { MetricBar(value: fraction, score: 0, height: 4, tint: tone.color) }
-        }
-        .frame(maxWidth: .infinity, minHeight: 108, alignment: .leading)
-        .padding(14)
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Palette.strokeSoft, lineWidth: 1))
+            .background(color.opacity(0.14), in: Capsule())
+            .foregroundStyle(textColor)
     }
 }
 
 /// Icon tint for `AetherListRow` (top-level so it isn't reparented per generic specialization).
 enum AetherRowTone { case neutral, accent, mint, sleep
-    var fg: Color { switch self { case .neutral: return Palette.textSecondary; case .accent: return Palette.accent; case .mint: return Palette.mint; case .sleep: return Palette.lavender } }
-    var bg: Color { switch self { case .neutral: return Palette.elevated; default: return fg.opacity(0.16) } }
+    var fg: Color { switch self { case .neutral: return Palette.textSecondary; case .accent: return Palette.load; case .mint: return Palette.recovery; case .sleep: return Palette.sleep } }
+    var bg: Color { switch self { case .neutral: return Palette.surfaceHi; default: return fg.opacity(0.14) } }
 }
 
 struct AetherListRow<Trailing: View>: View {
@@ -256,13 +267,13 @@ struct AetherListRow<Trailing: View>: View {
     @ViewBuilder var trailing: () -> Trailing
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: systemImage).font(.system(size: 16, weight: .semibold))
+            Image(systemName: systemImage).font(.callout.weight(.semibold))
                 .frame(width: 40, height: 40)
                 .foregroundStyle(tone.fg)
                 .background(tone.bg, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 15, weight: .semibold)).foregroundStyle(Palette.textPrimary)
-                if let subtitle { Text(subtitle).font(.system(size: 12)).foregroundStyle(Palette.textSecondary) }
+                Text(title).font(.body.weight(.semibold)).foregroundStyle(Palette.textPrimary)
+                if let subtitle { Text(subtitle).font(.footnote).foregroundStyle(Palette.textSecondary) }
             }
             Spacer(minLength: 8)
             trailing()
@@ -279,15 +290,44 @@ struct SegmentedRange: View {
         HStack(spacing: 4) {
             ForEach(options.indices, id: \.self) { i in
                 Button { selection = i } label: {
-                    Text(options[i]).font(.system(size: 13, weight: .semibold))
+                    Text(options[i]).font(.footnote.weight(.semibold))
                         .frame(maxWidth: .infinity, minHeight: 36)
                         .foregroundStyle(selection == i ? Palette.textPrimary : Palette.textSecondary)
-                        .background(selection == i ? Palette.surface : .clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                }.buttonStyle(.plain)
+                        .background(selection == i ? Palette.surfaceHi : .clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selection == i ? .isSelected : [])
             }
         }
         .padding(4)
-        .background(Palette.elevated, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Palette.strokeSoft, lineWidth: 1))
+        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
+/// Small stat tile used on the pillar tabs: label, big value, optional unit and
+/// delta, with a thin bar in the metric's colour.
+struct MetricTile: View {
+    enum Tone { case strain, recovery, sleep
+        var color: Color { switch self { case .strain: return Palette.load; case .recovery: return Palette.recovery; case .sleep: return Palette.sleep } } }
+    let label: String
+    let value: String
+    var unit: String? = nil
+    var delta: String? = nil
+    let fraction: Double
+    let tone: Tone
+    var showBar = true
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(label).font(.footnote.weight(.medium)).foregroundStyle(Palette.textSecondary)
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                Text(value).font(.title.weight(.semibold)).monospacedDigit().foregroundStyle(Palette.textPrimary)
+                if let unit { Text(unit).font(.footnote.weight(.medium)).foregroundStyle(Palette.textSecondary) }
+            }
+            if let delta { Text(delta).font(.caption).foregroundStyle(Palette.textSecondary) }
+            if showBar { MetricBar(value: fraction, score: 0, height: 4, tint: tone.color) }
+        }
+        .frame(maxWidth: .infinity, minHeight: 108, alignment: .leading)
+        .padding(14)
+        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }

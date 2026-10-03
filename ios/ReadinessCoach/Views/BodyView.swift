@@ -6,9 +6,9 @@ struct BodyView: View {
     @State private var response: BodyResponse?
     @State private var error: String?
     @State private var isLoading = false
-    @State private var hrvSelection: Date?
-    @State private var rhrSelection: Date?
-    @State private var hrSelection: Date?
+    @State private var hrvSelection = ChartDaySelection()
+    @State private var rhrSelection = ChartDaySelection()
+    @State private var hrSelection = ChartDaySelection()
     @State private var pillars: Pillars?
     @State private var explain: MetricExplain?
 
@@ -26,14 +26,14 @@ struct BodyView: View {
                                     title: "Heart rate variability (HRV)",
                                     body: "HRV is the tiny variation between heartbeats (SDNN, ms). Higher and rising usually means your nervous system is recovered. We compare today’s average to your recent baseline."
                                  ),
-                                 rows: response.daily, selection: $hrvSelection)
+                                 rows: response.daily, selection: $hrvSelection.date)
                         lineCard("Resting heart rate", type: "resting_heart_rate", color: Palette.accent, unit: "bpm",
                                  goodDirection: .lower, threshold: 1.5,
                                  explain: MetricExplain(
                                     title: "Resting heart rate (RHR)",
                                     body: "Your pulse at rest. Lower usually means better fitness and recovery. An unexpected rise — especially with low HRV — is a cue to ease off."
                                  ),
-                                 rows: response.daily, selection: $rhrSelection)
+                                 rows: response.daily, selection: $rhrSelection.date)
                         heartRateCard(response.daily)
                     } else if isLoading {
                         ProgressView().padding(.top, 60)
@@ -233,7 +233,7 @@ struct BodyView: View {
                     LineMark(x: .value("Date", ChartDate.day(day.date)), y: .value("Avg", day.avg))
                         .foregroundStyle(Palette.lavender)
                         .interpolationMethod(ChartStyle.smooth)
-                    if let sel = hrSelection {
+                    if let sel = hrSelection.date {
                         RuleMark(x: .value("Date", sel))
                             .foregroundStyle(Palette.textTertiary.opacity(0.5))
                             .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
@@ -241,20 +241,20 @@ struct BodyView: View {
                 }
                 .frame(height: 200)
                 .chartOverlay { proxy in
-                    ChartDayScrubOverlay(proxy: proxy, dates: dates, selection: $hrSelection)
+                    ChartDayScrubOverlay(proxy: proxy, dates: dates, selection: $hrSelection.date)
                 }
                 .clipped()
 
                 ScrubDetailBanner(
-                    date: hrSelection,
+                    date: hrSelection.date,
                     placeholder: "Tap or drag to see min · avg · max",
-                    lines: hrLines(for: hrSelection, in: series),
+                    lines: hrLines(for: hrSelection.date, in: series),
                     note: "Min is the calmest reading; max is usually exercise or stress."
                 )
             }
             .onAppear {
-                if hrSelection == nil, let last = dates.last {
-                    hrSelection = last
+                if hrSelection.date == nil, let last = dates.last {
+                    hrSelection.date = last
                 }
             }
         }

@@ -1,455 +1,269 @@
 import SwiftUI
 
+/// The decision, why, and what to do about it. Everything else is one tap away.
 struct TodayView: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var sync: SyncService
     @EnvironmentObject private var tabs: TabRouter
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     @State private var showAsk = false
-    @State private var showSettings = false
+    @State private var showHistory = false
     @State private var pillarInfo: PillarInfo?
     @State private var healthStatus: HealthKitService.AccessStatus?
-    @State private var recent: [ReadinessPoint] = []
-    @State private var hrv: Double?
-    @State private var rhr: Double?
-    @State private var sleepHours: Double?
-    @State private var strain: Double?
-    @State private var strainAvg: Double?
+    @State private var healthRequestError: String?
 
     private let health = HealthKitService()
 
-    private var freshness: DataFreshness {
-        sync.freshness(using: settings)
-    }
-
-    /// Maps raw missing-metric keys to human names for the banner.
-    static func friendlyMissing(_ keys: [String]) -> String {
-        let names = keys.map { key -> String in
-            switch key {
-            case "hrv": return "heart-rate variability"
-            case "resting_heart_rate": return "resting pulse"
-            case "sleep": return "sleep"
-            default: return key
-            }
-        }
-        return names.isEmpty ? "" : " (\(names.joined(separator: ", ")))"
+    private var statusItems: [StatusItem] {
+        StatusLineModel.items(.init(
+            freshness: sync.freshness(using: settings),
+            today: sync.today,
+            healthStatus: healthStatus,
+            healthSyncFailed: sync.healthSyncFailed,
+            healthSyncSucceeded: sync.healthSyncSucceeded,
+            uploadFailed: sync.healthUploadFailed
+        ))
     }
 
     var body: some View {
         NavigationStack {
-            // Today has unique wide chrome (hero + ring shadows). Pin width and
-            // continuously clamp horizontal UIScrollView offset — other tabs don't need this.
-            WidthPinnedVerticalScroll(onRefresh: {
-                await sync.syncNow(settings)
-                await loadRecent()
-                await loadMiniStats()
-            }) {
-                VStack(spacing: 16) {
-                    header
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    Text(Date().formatted(.dateTime.weekday(.wide).month(.wide).day()))
+                        .font(.subheadline)
+                        .foregroundStyle(Palette.textSecondary)
+
+                    StatusLine(items: statusItems, onHealthAction: healthAction)
+
                     if let today = sync.today {
                         content(today)
                     } else if sync.isLoadingToday || sync.isSyncing {
-                        ProgressView("Loading today…")
-                            .padding(.top, 60)
+                        loading
                     } else {
                         ContentUnavailableCompat(
                             title: "No readiness yet",
                             message: "Sync your Health data to compute today's score.",
                             systemImage: "sun.max"
                         )
+                        .frame(maxWidth: .infinity)
+                    }
+
+                    if sync.today == nil {
+                        Button { showHistory = true } label: {
+                            Label("Readiness history", systemImage: "chart.bar")
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                        }
+                        .buttonStyle(.bordered)
                     }
 
                     if let error = sync.errorMessage {
-                        ErrorCard(message: error) {
-                            Task { await sync.syncNow(settings); await loadRecent(); await loadMiniStats() }
+                        ErrorCard(message: error) { Task { await sync.syncNow(settings) } }
+                    }
+
+                    syncDetail
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 8)
+            }
+            .refreshable { await sync.syncNow(settings) }
+            .screenBackground()
+            .navigationTitle("Today")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        Task { await sync.syncNow(settings) }
+                    } label: {
+                        if sync.isSyncing {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "arrow.clockwise")
                         }
                     }
+                    .disabled(sync.isSyncing)
+                    .accessibilityLabel("Sync now")
                 }
-                .padding()
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink {
+                        SettingsView()
+                    } label: {
+                        Text(initials)
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(Palette.canvas)
+                            .frame(width: 30, height: 30)
+                            .background(Palette.accent, in: Circle())
+                    }
+                    .accessibilityLabel("Profile and settings")
+                }
             }
-            .screenBackground()
-            .toolbar(.hidden, for: .navigationBar)
-            .sheet(isPresented: $showAsk) { NavigationStack { AskCoachView() } }
-            .sheet(isPresented: $showSettings) { NavigationStack { SettingsView() } }
+            .safeAreaInset(edge: .bottom) {
+                if sync.today != nil {
+                    askButton
+                }
+            }
+            .navigationDestination(isPresented: $showHistory) { TrendsView() }
+            .sheet(isPresented: $showAsk) {
+                if let today = sync.today { AskCoachView(today: today) }
+            }
             .sheet(item: $pillarInfo) { PillarDetailSheet(info: $0) }
-            .task {
-                healthStatus = await health.accessStatus()
-                await loadRecent()
-                await loadMiniStats()
+            .alert("Health access", isPresented: Binding(
+                get: { healthRequestError != nil },
+                set: { if !$0 { healthRequestError = nil } }
+            )) {
+                Button("OK", role: .cancel) { healthRequestError = nil }
+            } message: {
+                Text(healthRequestError ?? "")
             }
+            .task { healthStatus = await health.accessStatus() }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { Task { healthStatus = await health.accessStatus() } }
             }
             .onChange(of: sync.lastSyncSummary) { _, _ in
-                if sync.healthSyncSucceeded { healthStatus = .connected }
+                Task { healthStatus = await health.accessStatus() }
             }
         }
-    }
-
-    /// Big in-content header matching the prototype's screen-head (date + "Today" + actions).
-    private var header: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 4) {
-                Eyebrow(text: Date().formatted(.dateTime.weekday(.wide).month().day()))
-                Text("Today")
-                    .font(.system(size: 30, weight: .bold, design: .rounded))
-                    .foregroundStyle(Palette.textPrimary)
-            }
-            Spacer()
-            HStack(spacing: 8) {
-                iconButton("gearshape") { showSettings = true }
-                iconButton("bubble.left.and.text.bubble.right") { showAsk = true }
-                iconButton(sync.isSyncing ? "hourglass" : "arrow.clockwise") {
-                    Task { await sync.syncNow(settings); await loadRecent(); await loadMiniStats() }
-                }
-            }
-        }
-    }
-
-    private func iconButton(_ system: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: system)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(Palette.textPrimary)
-                .frame(width: 40, height: 40)
-                .background(Palette.surface, in: Circle())
-                .overlay(Circle().strokeBorder(Palette.strokeSoft, lineWidth: 1))
-        }
-        .buttonStyle(.plain)
-        .disabled(sync.isSyncing && system == "hourglass")
     }
 
     @ViewBuilder
     private func content(_ today: TodayDTO) -> some View {
-        freshnessBanners
+        DecisionBlock(today: today) { showHistory = true }
 
-        if today.calibrating {
-            banner(
-                "Calibrating",
-                "Baselines are still forming from your recent history. Treat scores as provisional.",
-                color: Palette.warn,
-                icon: "gauge.with.dots.needle.33percent",
-                infoTitle: "Calibrating",
-                infoMessage: "Your baselines are still forming from recent history. Scores are provisional until ~14 days of data exist."
-            )
-        }
-        if today.isLowConfidence {
-            banner(
-                "Low confidence",
-                "Some data is missing today\(Self.friendlyMissing(today.missing)), so we're keeping the call cautious.",
-                color: Palette.warn,
-                icon: "exclamationmark.triangle.fill",
-                infoTitle: "Low confidence",
-                infoMessage: "Some signals are missing today, so the decision stays conservative. Sync your Watch data to improve it."
-            )
-        }
-
-        VStack(spacing: 16) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Eyebrow(text: "Readiness", color: Palette.accent)
-                    Text("Calibrated from sleep, HRV & load")
-                        .font(.caption)
-                        .foregroundStyle(Palette.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Eyebrow(text: "What's driving it")
+                Spacer()
+                Menu {
+                    ForEach(Pillar.allCases) { pillar in
+                        Button(pillar.title) {
+                            pillarInfo = PillarInfo(
+                                name: pillar.title, weight: "\(pillar.weightPercent)%",
+                                description: pillar.summary, pillar: pillar.score(in: today.pillars)
+                            )
+                        }
+                    }
+                } label: {
+                    if typeSize.isAccessibilitySize {
+                        Image(systemName: "info.circle")
+                            .font(.body)
+                            .frame(minWidth: 44, minHeight: 44)
+                    } else {
+                        Label("Details", systemImage: "info.circle")
+                            .font(.subheadline)
+                            .frame(minHeight: 44)
+                    }
                 }
-                Spacer(minLength: 8)
-                Pill(today.decision.title, tone: pillTone(today.decision))
+                .accessibilityLabel("All scoring drivers")
             }
-            ReadinessRing(readiness: today.readiness, decision: today.decision)
-                .frame(maxWidth: .infinity)
-            if today.isSleepPending {
-                Label("Showing last night — you haven't slept yet tonight", systemImage: "moon.zzz")
-                    .font(.caption).foregroundStyle(Palette.textSecondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity)
+            PillarBreakdown(pillars: today.pillars) { pillar in
+                tabs.go(to: AppTab(pillar))
             }
-            Text(today.decision.meaning).font(.system(.body, design: .rounded))
+        }
+
+        advisor(today.advisor)
+    }
+
+    private var loading: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+            Text("Loading today…")
+                .font(.subheadline)
                 .foregroundStyle(Palette.textSecondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity)
-            HStack(spacing: 8) {
-                miniStat("HRV", hrv.map { "\(Int($0.rounded()))" } ?? "—", "ms")
-                miniStat("RHR", rhr.map { "\(Int($0.rounded()))" } ?? "—", "bpm")
-                miniStat("Sleep", today.isSleepPending ? "Not yet" : (sleepHours.map { DurationFormat.short($0) } ?? "—"), nil)
-            }
         }
         .frame(maxWidth: .infinity)
-        .heroCard()
+        .padding(.top, 60)
+    }
 
+    private func advisor(_ note: AdvisorNote) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Eyebrow(text: "Coach")
+            VStack(alignment: .leading, spacing: 14) {
+                Text(note.prescription)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(Palette.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if !note.why.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(note.why, id: \.self) { line in
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Circle()
+                                    .fill(Palette.textTertiary)
+                                    .frame(width: 4, height: 4)
+                                    .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
+                                Text(line)
+                                    .font(.footnote)
+                                    .foregroundStyle(Palette.textSecondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                }
+                Text("If ignored: \(note.ifIgnored)")
+                    .font(.footnote)
+                    .foregroundStyle(Palette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .card()
+        }
+    }
+
+    private var askButton: some View {
+        Button { showAsk = true } label: {
+            Label("Ask the coach", systemImage: "bubble.left.and.text.bubble.right")
+                .font(.body.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+        }
+        .primaryAction()
+        .padding(.horizontal)
+        .padding(.vertical, 10)
+        .background(Palette.canvas.opacity(0.92))
+    }
+
+    @ViewBuilder
+    private var syncDetail: some View {
         if let count = sync.uploadingCount {
             Label("Uploading \(count) samples…", systemImage: "arrow.up.circle")
-                .font(.caption2).foregroundStyle(Palette.textSecondary)
+                .font(.caption)
+                .foregroundStyle(Palette.textTertiary)
         } else if let detail = SyncFreshness.detailLine(
-            freshness,
+            sync.freshness(using: settings),
             settings: settings,
             summary: sync.lastSyncSummary,
             uploadError: sync.lastUploadError
         ) {
             Text(detail)
-                .font(.caption2)
-                .foregroundStyle(freshness == .offline ? Palette.warn : Palette.textSecondary)
+                .font(.caption)
+                .foregroundStyle(Palette.textTertiary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
 
-        metricTiles(today.pillars)
-        if recent.count > 1 {
-            Button {
-                tabs.go(to: .insights)
-            } label: {
-                SectionCard(title: "Readiness trend") {
-                    ReadinessSparkline(points: recent)
-                    HStack(spacing: 4) {
-                        Text("Last \(recent.count) days · tap for Insights detail")
-                            .font(.caption)
-                            .foregroundStyle(Palette.textSecondary)
-                        Spacer(minLength: 4)
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(Palette.accent)
-                    }
+    private var initials: String {
+        let name = settings.appleDisplayName?.trimmingCharacters(in: .whitespaces) ?? ""
+        if !name.isEmpty {
+            let parts = name.split(separator: " ").prefix(2).compactMap { $0.first }
+            return String(parts).uppercased()
+        }
+        let id = settings.userId
+        return id.isEmpty ? "RC" : String(id.prefix(2)).uppercased()
+    }
+
+    private func healthAction() {
+        if healthStatus == .needsPermission {
+            Task {
+                do {
+                    try await health.requestAuthorization()
+                    healthStatus = await health.accessStatus()
+                    await sync.syncNow(settings)
+                } catch {
+                    healthRequestError = error.localizedDescription
                 }
             }
-            .buttonStyle(.plain)
-            .accessibilityHint("Opens the Insights tab")
-        }
-        advisor(today.advisor)
-        Button { showAsk = true } label: {
-            Label("Ask the coach", systemImage: "bubble.left.and.text.bubble.right")
-                .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.borderedProminent)
-        .tint(Palette.accent)
-    }
-
-    private func pillTone(_ d: Decision) -> Pill.Tone {
-        switch d { case .push: return .good; case .maintain: return .warn; case .recover: return .accent }
-    }
-
-    /// A small labeled value inside the hero card (HRV / RHR / Sleep).
-    private func miniStat(_ label: String, _ value: String, _ unit: String?) -> some View {
-        VStack(spacing: 2) {
-            Text(label).font(.system(size: 10, weight: .medium)).foregroundStyle(Palette.textSecondary)
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text(value).font(.system(size: 18, weight: .semibold, design: .rounded)).foregroundStyle(Palette.textPrimary)
-                if let unit { Text(unit).font(.system(size: 11)).foregroundStyle(Palette.textSecondary) }
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 10)
-        .background(Palette.surfaceHi, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-
-    /// 2×2 grid without LazyVGrid (avoids occasional width overflows in ScrollView).
-    private func metricTiles(_ pillars: Pillars) -> some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 12) {
-                metricTileButton("Strain", "training load",
-                    StrainExplain.scaleBlurb,
-                    PillarScore(score: min(100, (strain ?? 0) / 21 * 100),
-                                drivers: [Driver(text: strain.map { String(format: "Strain %.1f / 21" , $0) } ?? "No recent workout",
-                                                 detail: strainDelta.map { "\($0). \(StrainExplain.shortBlurb)" }
-                                                    ?? "\(StrainExplain.shortBlurb) Sync workouts from Apple Health to populate strain.")])) {
-                    MetricTile(label: "Strain",
-                               value: strain.map { fmt1($0) } ?? "—", unit: "/21",
-                               delta: strainDelta,
-                               fraction: (strain ?? 0) / 21, tone: .strain)
-                }
-                metricTileButton("Recovery", "40%",
-                    "HRV and resting heart rate vs your 30-day baseline — the strongest readiness signal.",
-                    pillars.recovery) {
-                    MetricTile(label: "Recovery", value: "\(Int(pillars.recovery.score.rounded()))",
-                               delta: "40% of readiness", fraction: pillars.recovery.score / 100, tone: .recovery)
-                }
-            }
-            HStack(spacing: 12) {
-                metricTileButton("Sleep", "35%",
-                    "Last night's duration and quality vs your ~8h need, plus recent sleep debt and consistency.",
-                    pillars.sleep,
-                    opensSleep: true) {
-                    MetricTile(label: "Sleep",
-                               value: (sync.today?.isSleepPending ?? false) ? "—" : (sleepHours.map { DurationFormat.short($0) } ?? "—"),
-                               delta: (sync.today?.isSleepPending ?? false) ? "Haven't slept yet" : sleepDelta,
-                               fraction: (sync.today?.isSleepPending ?? false) ? 0 : (sleepHours ?? 0) / 8, tone: .sleep)
-                }
-                metricTileButton("Load", "25%",
-                    "Recent training strain and the acute:chronic ratio — how hard you've pushed lately vs your norm.",
-                    pillars.load) {
-                    MetricTile(label: "Load", value: "\(Int(pillars.load.score.rounded()))",
-                               delta: "25% of readiness", fraction: pillars.load.score / 100, tone: .strain)
-                }
-            }
-        }
-    }
-
-    private func fmt1(_ v: Double) -> String { String(format: "%.1f", v) }
-    private var strainDelta: String? {
-        guard let strain, let strainAvg, strainAvg > 0 else { return nil }
-        return String(format: "%+.1f vs 7d avg", strain - strainAvg)
-    }
-    private var sleepDelta: String? {
-        guard let sleepHours else { return nil }
-        let vsNeed = sleepHours - 8
-        let sign = vsNeed >= 0 ? "+" : "−"
-        return "\(sign)\(DurationFormat.short(abs(vsNeed))) vs 8h need"
-    }
-
-    private func metricTileButton(_ name: String, _ weight: String, _ description: String, _ pillar: PillarScore,
-                                   opensSleep: Bool = false,
-                                   @ViewBuilder tile: () -> MetricTile) -> some View {
-        Button {
-            if opensSleep {
-                tabs.go(to: .sleep)
-            } else {
-                pillarInfo = PillarInfo(name: name, weight: weight, description: description, pillar: pillar)
-            }
-        } label: {
-            tile()
-                .frame(maxWidth: .infinity)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .frame(maxWidth: .infinity)
-        .accessibilityHint(opensSleep ? "Opens the Sleep tab" : "Shows more about \(name)")
-    }
-
-    private func advisor(_ note: AdvisorNote) -> some View {
-        SectionCard(title: "Strict advisor") {
-            if !note.why.isEmpty {
-                ForEach(note.why, id: \.self) { line in
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: "checkmark.circle")
-                        Text(line)
-                            .font(.subheadline)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-            }
-            Text(note.prescription)
-                .font(.subheadline.weight(.medium))
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 4)
-            Text("If ignored: \(note.ifIgnored)")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    @ViewBuilder
-    private var freshnessBanners: some View {
-        switch freshness {
-        case .offline:
-            FreshnessBanner(
-                title: "Offline",
-                message: "Showing your last saved score. Connect to refresh today's readiness.",
-                color: Palette.warn,
-                icon: "wifi.slash"
-            )
-        case .stale:
-            FreshnessBanner(
-                title: "Score may be outdated",
-                message: "This readiness ring may not reflect today yet. Pull down or tap sync to refresh.",
-                color: Palette.warn,
-                icon: "clock.arrow.circlepath"
-            )
-        case .aging:
-            FreshnessBanner(
-                title: "Not refreshed recently",
-                message: "Background sync runs when Health gets new data, but you can pull to refresh now.",
-                color: Palette.textSecondary,
-                icon: "arrow.triangle.2.circlepath"
-            )
-        default:
-            EmptyView()
-        }
-
-        if sync.healthUploadFailed {
-            FreshnessBanner(
-                title: "Health upload pending",
-                message: "Your score loaded, but new Watch data didn’t reach the server. Pull down to retry.",
-                color: Palette.warn,
-                icon: "arrow.up.circle.trianglebadge.exclamationmark"
-            )
-        }
-
-        if shouldShowHealthAccessBanner {
-            FreshnessBanner(
-                title: "Health access needed",
-                message: "Readiness needs heart rate, HRV, sleep, and workouts from Apple Health.",
-                color: Palette.accent,
-                icon: "heart.text.square",
-                actionTitle: healthStatus == .needsPermission ? "Allow Health access" : "Open Health settings",
-                action: {
-                    if healthStatus == .needsPermission {
-                        Task {
-                            try? await health.requestAuthorization()
-                            healthStatus = await health.accessStatus()
-                            await sync.syncNow(settings)
-                        }
-                    } else if let url = URL(string: "x-apple-health://") {
-                        openURL(url)
-                    }
-                }
-            )
-        }
-    }
-
-    /// Only prompt when Health access is genuinely missing — not while loading status
-    /// or after a stale Health read error while access is already granted.
-    private var shouldShowHealthAccessBanner: Bool {
-        guard let healthStatus else { return false }
-        if healthStatus == .connected { return false }
-        if healthStatus == .needsPermission { return true }
-        return sync.healthSyncFailed && !sync.healthSyncSucceeded
-    }
-
-    private func banner(_ title: String, _ message: String, color: Color, icon: String,
-                        infoTitle: String, infoMessage: String) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: icon).font(.caption).foregroundStyle(color)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.caption.weight(.semibold)).foregroundStyle(color)
-                Text(message)
-                    .font(.caption2)
-                    .foregroundStyle(Palette.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 4)
-            InfoBadge(title: infoTitle, message: infoMessage)
-        }
-        .padding(.horizontal, 12).padding(.vertical, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(color.opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(color.opacity(0.22), lineWidth: 1))
-    }
-
-    /// Loads the 7-day readiness history for the sparkline; failures hide it silently.
-    private func loadRecent() async {
-        guard let client = settings.makeClient() else { return }
-        recent = (try? await client.getHistory(days: 7).data) ?? []
-    }
-
-    /// Loads the latest HRV / RHR / sleep duration for the hero card's mini-stat row.
-    private func loadMiniStats() async {
-        guard let client = settings.makeClient() else { return }
-        async let body = try? client.getBody(days: 7)
-        async let sleep = try? client.getSleep(days: 2)
-        async let train = try? client.getTrain(days: 7)
-        if let b = await body {
-            hrv = b.daily.filter { $0.type == "hrv_sdnn" }.sorted { $0.date < $1.date }.last?.current
-            rhr = b.daily.filter { $0.type == "resting_heart_rate" }.sorted { $0.date < $1.date }.last?.current
-        }
-        if let s = await sleep { sleepHours = s.data.filter { $0.durationHours > 0 }.last?.durationHours }
-        if let t = await train {
-            let sorted = t.data.sorted { $0.startAt < $1.startAt }
-            strain = sorted.last?.strain
-            let all = t.data.map(\.strain)
-            strainAvg = all.isEmpty ? nil : all.reduce(0, +) / Double(all.count)
+        } else if let url = URL(string: "x-apple-health://") {
+            openURL(url)
         }
     }
 }
@@ -464,11 +278,11 @@ struct ContentUnavailableCompat: View {
         VStack(spacing: 8) {
             Image(systemName: systemImage)
                 .font(.largeTitle)
-                .foregroundStyle(.secondary)
-            Text(title).font(.headline)
+                .foregroundStyle(Palette.textTertiary)
+            Text(title).font(.headline).foregroundStyle(Palette.textPrimary)
             Text(message)
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Palette.textSecondary)
                 .multilineTextAlignment(.center)
         }
         .padding(.top, 60)
