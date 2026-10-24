@@ -1,17 +1,29 @@
 import SwiftUI
 import Charts
 
+/// Recovery tab: the Recovery pillar score and its drivers, a 7/30-day HRV or
+/// resting-HR trend against the server's 30-day normal, today against normal,
+/// the last seven days, and the daily heart-rate range.
 struct BodyView: View {
     @Environment(AppStore.self) private var store
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @State private var metric = RecoveryMetric.hrv
+    @State private var rangeIndex = 1
     @State private var hrvSelection = ChartDaySelection()
     @State private var rhrSelection = ChartDaySelection()
     @State private var hrSelection = ChartDaySelection()
-    @State private var explain: MetricExplain?
+    @State private var showsHeartRange = false
+    @State private var refreshCount = 0
     @State private var derived = Derived<SeriesStamp, BodySeries>()
 
-    private var resource: Resource<BodyResponse> { store.body }
+    private let ranges = [SegmentOption("7D", spoken: "7 days"), SegmentOption("30D", spoken: "30 days")]
+    private let rangeDays = [7, 30]
 
-    /// True once real content (or an empty/error state) replaces the spinner.
+    private var resource: Resource<BodyResponse> { store.body }
+    private var days: Int { rangeDays[min(max(rangeIndex, 0), rangeDays.count - 1)] }
+    private var today: Date { ChartDate.day(store.currentDay.date) }
+
+    /// True once real content (or an empty/error state) replaces the skeleton.
     private var perfContentReady: Bool { resource.value != nil || resource.error != nil }
 
     /// Per-metric chart series, rebuilt only when the resource changes.
@@ -21,288 +33,466 @@ struct BodyView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: 16) {
-                    header
-                    StaleDataBanner(resource: resource) { Task { await store.refresh(.body, force: true) } }
-                    if let pillars = store.today.value?.pillars { readoutCard(pillars) }
+            ScrollView {
+                VStack(alignment: .leading, spacing: Space.section) {
+                    PillarHead(
+                        model: PillarHeadModel(pillar: .recovery, today: store.today.value, currentDay: store.currentDay.date),
+                        isLoading: store.today.value == nil && store.today.error == nil
+                    )
+                    ResourceNotice(resource: store.today, noun: "your score", currentDay: store.currentDay.date, errorsOnly: true) {
+                        Task { await store.refresh(.today, force: true) }
+                    }
+                    ResourceNotice(resource: resource, noun: "recovery data", currentDay: store.currentDay.date) {
+                        Task { await refresh() }
+                    }
                     if let response = resource.value, !response.daily.isEmpty {
                         let metrics = series(response)
-                        vitals(metrics)
-                        lineCard("Heart rate variability", metric: metrics.hrv, color: Palette.mint, unit: "ms",
-                                 goodDirection: .higher, threshold: 2,
-                                 explain: MetricExplain(
-                                    title: "Heart rate variability (HRV)",
-                                    body: "HRV is the tiny variation between heartbeats (SDNN, ms). Higher and rising usually means your nervous system is recovered. We compare today’s average to your recent baseline."
-                                 ),
-                                 selection: $hrvSelection.date)
-                        lineCard("Resting heart rate", metric: metrics.rhr, color: Palette.accent, unit: "bpm",
-                                 goodDirection: .lower, threshold: 1.5,
-                                 explain: MetricExplain(
-                                    title: "Resting heart rate (RHR)",
-                                    body: "Your pulse at rest. Lower usually means better fitness and recovery. An unexpected rise — especially with low HRV — is a cue to ease off."
-                                 ),
-                                 selection: $rhrSelection.date)
-                        heartRateCard(metrics.hr)
-                    } else if resource.value == nil && resource.isRefreshing {
-                        ProgressView().padding(.top, 60)
+                        hero(metrics)
+                        compared
+                        lastWeek(metrics)
+                        heartRange(metrics.hr)
+                    } else if resource.value == nil, resource.error == nil {
+                        PillarSkeleton(name: "recovery trends")
                     } else {
-                        ContentUnavailableCompat(
-                            title: "No body metrics",
-                            message: "Sync from the Today tab to load HRV and heart rate.",
-                            systemImage: "heart"
-                        )
-                    }
-                    if resource.value == nil, let error = resource.error {
-                        ErrorCard(message: error) { Task { await store.refresh(.body, force: true) } }
+                        compared
+                        if resource.value != nil {
+                            PillarEmptyState(
+                                title: "No recovery readings yet",
+                                message: "HRV and resting heart rate appear after your Watch records them and Today syncs Health.",
+                                systemImage: "heart"
+                            )
+                        }
                     }
                 }
-                .pageWidthLocked()
-                .padding()
+                .padding(.horizontal, Space.margin)
+                .padding(.top, 8)
+                .padding(.bottom, 24)
             }
-            .verticalScrollLocked()
-            .screenBackground()
-            .toolbar(.hidden, for: .navigationBar)
-            .sheet(item: $explain) { item in
-                NavigationStack {
-                    ScrollView {
-                        Text(item.body).font(.body).padding()
-                    }
-                    .navigationTitle(item.title)
-                    .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { explain = nil } } }
-                }
-                .presentationDetents([.medium, .large])
-            }
+            .pillarScreen(title: "Recovery", day: store.currentDay.date)
+            .sensoryFeedback(.success, trigger: refreshCount)
             .task(id: store.taskID(.body)) { await store.refresh(.body) }
             .onAppear { if perfContentReady { PerfSignpost.endTabSwitchIfNeeded(tab: "recovery") } }
             .onChange(of: perfContentReady) { _, ready in
                 if ready { PerfSignpost.endTabSwitchIfNeeded(tab: "recovery") }
             }
-            .refreshable { await store.refresh(.body, force: true) }
+            .refreshable { await refresh() }
         }
     }
 
-    private var header: some View {
-        HStack(alignment: .top) {
+    private func refresh() async {
+        if await store.refresh(.body, force: true) { refreshCount += 1 }
+    }
+
+    // MARK: Hero
+
+    private func selection(for metric: RecoveryMetric) -> Binding<Date?> {
+        metric == .hrv ? $hrvSelection.date : $rhrSelection.date
+    }
+
+    @ViewBuilder
+    private func hero(_ metrics: BodySeries) -> some View {
+        let series = metric.series(in: metrics)
+        let points = RecoveryWindow.points(series, days: days, endingOn: today)
+        let normal = store.today.value?.baselines.flatMap { metric.vital.baseline(in: $0).baseline30d }
+        let binding = selection(for: metric)
+        let dates = points.map(\.date)
+        let shown = binding.wrappedValue.flatMap { dates.contains($0) ? $0 : nil } ?? dates.last
+
+        OpenSection("Trend") {
+            heroControls
+            if points.isEmpty {
+                Text("No \(metric.title) readings in the last \(days) days.")
+                    .font(.subheadline)
+                    .foregroundStyle(Palette.textSecondary)
+                    .frame(maxWidth: .infinity, minHeight: 120, alignment: .leading)
+            } else {
+                readout(series, day: shown)
+                trendChart(points, normal: normal, shown: shown, selection: binding)
+                trendLine(series)
+            }
+            AboutDisclosure(explain: metric.explain)
+        }
+    }
+
+    private var heroControls: some View {
+        let metricPicker = PillarPicker(
+            name: "Metric",
+            options: RecoveryMetric.allCases.map { SegmentOption($0.shortTitle, spoken: $0.title) },
+            selection: Binding(
+                get: { RecoveryMetric.allCases.firstIndex(of: metric) ?? 0 },
+                set: { metric = RecoveryMetric.allCases[$0] }
+            )
+        )
+        let rangePicker = PillarPicker(name: "Range", options: ranges, selection: $rangeIndex)
+        return Group {
+            if typeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 8) { metricPicker; rangePicker }
+            } else {
+                HStack { metricPicker; Spacer(minLength: 8); rangePicker }
+            }
+        }
+    }
+
+    /// The scrubbed (or latest) day, read out above the chart.
+    @ViewBuilder
+    private func readout(_ series: BodySeries.Metric, day: Date?) -> some View {
+        if let day, let row = series.row(on: day) {
             VStack(alignment: .leading, spacing: 4) {
-                Eyebrow(text: "Signals")
-                Text("Body").font(.system(size: 30, weight: .bold, design: .rounded))
+                Text(day, format: .dateTime.weekday(.wide).month(.wide).day())
+                    .font(.footnote)
+                    .foregroundStyle(Palette.textSecondary)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(pillarNumber(row.avg))
+                        .font(Typeface.numeral(44))
+                        .foregroundStyle(Palette.textPrimary)
+                    Text("\(metric.unit) daily avg")
+                        .font(.footnote)
+                        .foregroundStyle(Palette.textTertiary)
+                }
+                Text("Range \(pillarNumber(row.min))–\(pillarNumber(row.max)) \(metric.unit)")
+                    .font(.footnote.monospacedDigit())
+                    .foregroundStyle(Palette.textSecondary)
+                if let change = dayChange(series, on: day) {
+                    Text(change)
+                        .font(.footnote)
+                        .foregroundStyle(Palette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private func trendChart(_ points: [BodySeries.Point], normal: Double?, shown: Date?, selection: Binding<Date?>) -> some View {
+        let dates = points.map(\.date)
+        let domain = RecoveryWindow.domain(points.map(\.avg), normal: normal) ?? 0...1
+        let color = Palette.recovery
+        return Chart {
+            ForEach(points) { day in
+                AreaMark(
+                    x: .value("Date", day.date),
+                    yStart: .value("Floor", domain.lowerBound),
+                    yEnd: .value(metric.title, day.avg)
+                )
+                .interpolationMethod(ChartStyle.smooth)
+                .foregroundStyle(LinearGradient(
+                    colors: [color.opacity(0.28), color.opacity(0)],
+                    startPoint: .top, endPoint: .bottom
+                ))
+                LineMark(x: .value("Date", day.date), y: .value(metric.title, day.avg))
+                    .interpolationMethod(ChartStyle.smooth)
+                    .foregroundStyle(color)
+                    .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
+            }
+            if let normal {
+                RuleMark(y: .value("Normal", normal))
+                    .foregroundStyle(Palette.textTertiary)
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                    .annotation(position: .top, alignment: .leading, spacing: 2) {
+                        Text("normal \(pillarNumber(normal))")
+                            .font(.caption2)
+                            .foregroundStyle(Palette.textSecondary)
+                    }
+            }
+            if let shown, let point = points.first(where: { $0.date == shown }) {
+                RuleMark(x: .value("Selected", shown))
+                    .foregroundStyle(Palette.textTertiary.opacity(0.6))
+                    .lineStyle(StrokeStyle(lineWidth: 1))
+                PointMark(x: .value("Selected", shown), y: .value(metric.title, point.avg))
                     .foregroundStyle(Palette.textPrimary)
+                    .symbolSize(40)
             }
-            Spacer()
         }
-    }
-
-    @ViewBuilder
-    private func readoutCard(_ pillars: Pillars) -> some View {
-        let driver = pillars.recovery.drivers.first
-        VStack(alignment: .leading, spacing: 10) {
-            Eyebrow(text: "Readout")
-            Text(driver?.text ?? "Recovery signals")
-                .font(.system(size: 20, weight: .semibold, design: .rounded))
-                .foregroundStyle(Palette.textPrimary)
-            if let detail = driver?.detail {
-                Text(detail).font(.callout).foregroundStyle(Palette.textSecondary)
+        .chartYScale(domain: domain)
+        .chartYAxis {
+            AxisMarks(position: .trailing, values: .automatic(desiredCount: 3)) { _ in
+                AxisGridLine().foregroundStyle(Palette.hairline)
+                AxisValueLabel().font(.caption2).foregroundStyle(Palette.textTertiary)
             }
-            Text("This is today’s top recovery takeaway from HRV and resting heart rate.")
-                .font(.caption)
-                .foregroundStyle(Palette.textTertiary)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .card()
-    }
-
-    @ViewBuilder
-    private func vitals(_ metrics: BodySeries) -> some View {
-        let rhr = metrics.rhr.rows.last
-        let hrv = metrics.hrv.rows.last
-        let hr = metrics.hr.rows.last
-        LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-            if let rhr {
-                Button {
-                    explain = MetricExplain(title: "Resting heart rate",
-                                            body: "Latest resting pulse: \(fmt(rhr.avg)) bpm (range \(fmt(rhr.min))–\(fmt(rhr.max))). Lower resting heart rate usually signals better fitness and recovery.")
-                } label: {
-                    MetricTile(label: "Resting HR", value: fmt(rhr.avg), unit: "bpm", fraction: 0, tone: .strain, showBar: false)
-                }.buttonStyle(.plain)
+        .chartXAxis {
+            AxisMarks(values: .automatic(desiredCount: 4)) { _ in
+                AxisValueLabel(format: .dateTime.month(.abbreviated).day())
+                    .font(.caption2).foregroundStyle(Palette.textTertiary)
             }
-            if let hrv {
-                Button {
-                    explain = MetricExplain(title: "Heart rate variability",
-                                            body: "Latest HRV: \(fmt(hrv.avg)) ms (range \(fmt(hrv.min))–\(fmt(hrv.max))). Higher HRV generally means better nervous-system recovery.")
-                } label: {
-                    MetricTile(label: "HRV", value: fmt(hrv.avg), unit: "ms", fraction: 0, tone: .recovery, showBar: false)
-                }.buttonStyle(.plain)
-            }
-            if let hr {
-                Button {
-                    explain = MetricExplain(title: "Average heart rate",
-                                            body: "Today’s average heart rate across the day: \(fmt(hr.avg)) bpm. Useful context for overall demand, not a readiness score by itself.")
-                } label: {
-                    MetricTile(label: "Avg HR", value: fmt(hr.avg), unit: "bpm", fraction: 0, tone: .sleep, showBar: false)
-                }.buttonStyle(.plain)
-                Button {
-                    explain = MetricExplain(title: "Peak heart rate",
-                                            body: "Highest heart rate recorded today: \(fmt(hr.max)) bpm — usually from a hard effort or stress spike.")
-                } label: {
-                    MetricTile(label: "Peak HR", value: fmt(hr.max), unit: "bpm", fraction: 0, tone: .strain, showBar: false)
-                }.buttonStyle(.plain)
+        }
+        .frame(height: 200)
+        .chartOverlay { proxy in
+            ChartDayScrubOverlay(proxy: proxy, dates: dates, selection: selection)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(metric.title), last \(days) days")
+        .accessibilityValue(chartValue(points, shown: shown, normal: normal))
+        .accessibilityHint("Swipe up or down to move between days")
+        .accessibilityAdjustableAction { direction in
+            guard let index = shown.flatMap({ dates.firstIndex(of: $0) }) else { return }
+            switch direction {
+            case .increment: selection.wrappedValue = dates[min(index + 1, dates.count - 1)]
+            case .decrement: selection.wrappedValue = dates[max(index - 1, 0)]
+            @unknown default: break
             }
         }
     }
 
+    private func chartValue(_ points: [BodySeries.Point], shown: Date?, normal: Double?) -> String {
+        var parts: [String] = []
+        if let shown, let point = points.first(where: { $0.date == shown }) {
+            parts.append("\(shown.formatted(.dateTime.weekday(.wide).month(.wide).day())), \(pillarNumber(point.avg)) \(metric.spokenUnit)")
+        }
+        if let normal { parts.append("normal \(pillarNumber(normal)) \(metric.spokenUnit)") }
+        return parts.joined(separator: ", ")
+    }
+
     @ViewBuilder
-    private func lineCard(_ title: String, metric: BodySeries.Metric, color: Color, unit: String,
-                          goodDirection: GoodDirection, threshold: Double,
-                          explain: MetricExplain,
-                          selection: Binding<Date?>) -> some View {
-        let series = metric.rows
-        let dates = metric.dates
-        if !series.isEmpty {
-            SectionCard(title: title) {
-                Button { self.explain = explain } label: {
-                    HStack(spacing: 6) {
-                        if let trend = metricTrend(values: metric.averages, goodDirection: goodDirection, threshold: threshold) {
-                            Text("Averaging \(fmt(trend.recentAvg)) \(unit) — \(trend.phrase).")
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(Palette.textPrimary)
-                                .multilineTextAlignment(.leading)
-                        } else if let latest = series.last {
-                            Text("Latest \(fmt(latest.avg)) \(unit).")
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(Palette.textPrimary)
+    private func trendLine(_ series: BodySeries.Metric) -> some View {
+        if let trend = metricTrend(values: series.averages, goodDirection: metric.goodDirection, threshold: metric.threshold) {
+            Text("7-day average \(pillarNumber(trend.recentAvg)) \(metric.unit), \(trend.phrase).")
+                .font(.footnote)
+                .foregroundStyle(Palette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func dayChange(_ series: BodySeries.Metric, on day: Date) -> String? {
+        guard let index = series.index(on: day), index > 0 else { return nil }
+        let delta = series.rows[index].avg - series.rows[index - 1].avg
+        let size = pillarNumber(abs(delta))
+        if abs(delta) < 0.05 { return "About the same as the previous reading." }
+        let better = (delta > 0) == (metric.goodDirection == .higher)
+        let direction = delta > 0 ? "Up" : "Down"
+        let reading = better ? "usually better recovery" : "worth watching"
+        return "\(direction) \(size) \(metric.unit) on the previous reading, \(reading)."
+    }
+
+    // MARK: Compared with normal
+
+    @ViewBuilder
+    private var compared: some View {
+        if store.today.value != nil {
+            OpenSection("Compared with normal") {
+                if let all = MetricComparison.all(from: store.today.value?.baselines) {
+                    let rows = all.filter { ($0.metric == .hrv || $0.metric == .restingHr) && $0.today != nil }
+                    if rows.isEmpty {
+                        quiet("No HRV or resting heart rate reading today yet.")
+                    } else {
+                        VStack(alignment: .leading, spacing: 12) {
+                            ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                                ComparisonRow(comparison: row, showsRule: index > 0)
+                            }
                         }
-                        Spacer(minLength: 0)
-                        Image(systemName: "info.circle").foregroundStyle(Palette.textSecondary)
                     }
+                } else {
+                    quiet("Your normals aren't available from the server yet.")
                 }
-                .buttonStyle(.plain)
-
-                Chart(metric.points) { day in
-                    LineMark(x: .value("Date", day.date), y: .value("Avg", day.avg))
-                        .foregroundStyle(color)
-                        .interpolationMethod(ChartStyle.smooth)
-                    PointMark(x: .value("Date", day.date), y: .value("Avg", day.avg))
-                        .foregroundStyle(color).symbolSize(18)
-                    if let sel = selection.wrappedValue {
-                        RuleMark(x: .value("Date", sel))
-                            .foregroundStyle(Palette.textTertiary.opacity(0.5))
-                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                    }
-                }
-                .frame(height: 190)
-                .chartOverlay { proxy in
-                    ChartDayScrubOverlay(proxy: proxy, dates: dates, selection: selection)
-                }
-                .clipped()
-
-                ScrubDetailBanner(
-                    date: selection.wrappedValue,
-                    placeholder: "Tap or drag to inspect a day",
-                    lines: lineLines(for: selection.wrappedValue, in: metric, unit: unit),
-                    note: lineNote(for: selection.wrappedValue, in: metric, unit: unit, goodDirection: goodDirection)
-                )
             }
-            .onAppear {
-                if selection.wrappedValue == nil, let last = dates.last {
-                    selection.wrappedValue = last
+        }
+    }
+
+    private func quiet(_ text: String) -> some View {
+        Text(text)
+            .font(.subheadline)
+            .foregroundStyle(Palette.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    // MARK: Last 7 days
+
+    @ViewBuilder
+    private func lastWeek(_ metrics: BodySeries) -> some View {
+        let rows = RecoveryDayRow.lastWeek(metrics, endingOn: today)
+        if rows.contains(where: { $0.hrv != nil || $0.restingHr != nil }) {
+            OpenSection("Last 7 days") {
+                VStack(alignment: .leading, spacing: 0) {
+                    if !typeSize.isAccessibilitySize {
+                        HStack {
+                            Text("Daily average").frame(maxWidth: .infinity, alignment: .leading)
+                            Text("HRV").frame(width: 72, alignment: .trailing)
+                            Text("Resting HR").frame(width: 92, alignment: .trailing)
+                        }
+                        .font(.caption)
+                        .foregroundStyle(Palette.textTertiary)
+                        .padding(.bottom, 8)
+                        .accessibilityHidden(true)
+                    }
+                    ForEach(rows) { row in
+                        Hairline()
+                        dayRow(row)
+                    }
                 }
             }
         }
     }
 
     @ViewBuilder
-    private func heartRateCard(_ metric: BodySeries.Metric) -> some View {
-        let series = metric.rows
-        let dates = metric.dates
-        if !series.isEmpty {
-            SectionCard(title: "Heart rate — daily range") {
+    private func dayRow(_ row: RecoveryDayRow) -> some View {
+        let dayText = row.date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
+        let hrv = row.hrv.map { "\(pillarNumber($0)) ms" } ?? "—"
+        let rhr = row.restingHr.map { "\(pillarNumber($0)) bpm" } ?? "—"
+        Group {
+            if typeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(dayText).foregroundStyle(Palette.textPrimary)
+                    Text("HRV \(hrv)").foregroundStyle(Palette.textSecondary)
+                    Text("Resting HR \(rhr)").foregroundStyle(Palette.textSecondary)
+                }
+                .font(.subheadline)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 10)
+            } else {
+                HStack {
+                    Text(dayText).foregroundStyle(Palette.textPrimary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Text(hrv).frame(width: 72, alignment: .trailing)
+                    Text(rhr).frame(width: 92, alignment: .trailing)
+                }
+                .font(.subheadline.monospacedDigit())
+                .foregroundStyle(Palette.textPrimary)
+                .frame(minHeight: Space.target)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(dayAccessibility(row))
+    }
+
+    private func dayAccessibility(_ row: RecoveryDayRow) -> String {
+        let day = row.date.formatted(.dateTime.weekday(.wide).month(.wide).day())
+        let hrv = row.hrv.map { "HRV \(pillarNumber($0)) milliseconds" } ?? "No HRV reading"
+        let rhr = row.restingHr.map { "resting heart rate \(pillarNumber($0)) beats per minute" } ?? "no resting heart rate reading"
+        return "\(day). \(hrv), \(rhr)."
+    }
+
+    // MARK: Heart-rate range
+
+    @ViewBuilder
+    private func heartRange(_ series: BodySeries.Metric) -> some View {
+        let points = RecoveryWindow.points(series, days: days, endingOn: today)
+        if !series.rows.isEmpty {
+            OpenSection(title: "Heart rate · daily range", trailing: {
                 Button {
-                    explain = MetricExplain(
-                        title: "Daily heart rate range",
-                        body: "Each day shows your lowest, average, and highest heart rate from Apple Health. The band is min–max; the line is the daily average."
-                    )
+                    showsHeartRange.toggle()
                 } label: {
-                    HStack {
-                        Text("Lowest · average · highest each day.")
-                            .font(.caption).foregroundStyle(Palette.textSecondary)
-                        Spacer()
-                        Image(systemName: "info.circle").foregroundStyle(Palette.textSecondary)
-                    }
+                    Image(systemName: "chevron.down")
+                        .font(.footnote.weight(.semibold))
+                        .rotationEffect(.degrees(showsHeartRange ? 180 : 0))
+                        .foregroundStyle(Palette.textSecondary)
+                        .frame(minWidth: Space.target, minHeight: Space.target)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Heart rate daily range")
+                .accessibilityValue(showsHeartRange ? "Expanded" : "Collapsed")
+            }) {
+                if showsHeartRange {
+                    heartRangeContent(series, points: points)
+                } else {
+                    Text("Lowest, average and highest heart rate each day.")
+                        .font(.footnote)
+                        .foregroundStyle(Palette.textSecondary)
+                }
+            }
+        }
+    }
 
-                Chart(metric.points) { day in
-                    AreaMark(
-                        x: .value("Date", day.date),
-                        yStart: .value("Min", day.min),
-                        yEnd: .value("Max", day.max)
-                    )
-                    .foregroundStyle(Palette.lavender.opacity(0.15))
-                    LineMark(x: .value("Date", day.date), y: .value("Avg", day.avg))
-                        .foregroundStyle(Palette.lavender)
+    @ViewBuilder
+    private func heartRangeContent(_ series: BodySeries.Metric, points: [BodySeries.Point]) -> some View {
+        let dates = points.map(\.date)
+        let shown = hrSelection.date.flatMap { dates.contains($0) ? $0 : nil } ?? dates.last
+        if points.isEmpty {
+            quiet("No heart-rate readings in the last \(days) days.")
+        } else {
+            if let shown, let row = series.row(on: shown) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(shown, format: .dateTime.weekday(.wide).month(.wide).day())
+                        .font(.footnote)
+                        .foregroundStyle(Palette.textSecondary)
+                    Text("Min \(pillarNumber(row.min)) · Avg \(pillarNumber(row.avg)) · Max \(pillarNumber(row.max)) bpm")
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(Palette.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityElement(children: .combine)
+            }
+            Chart {
+                ForEach(points) { day in
+                    AreaMark(x: .value("Date", day.date), yStart: .value("Min", day.min), yEnd: .value("Max", day.max))
+                        .foregroundStyle(Palette.recovery.opacity(0.18))
+                    LineMark(x: .value("Date", day.date), y: .value("Average", day.avg))
+                        .foregroundStyle(Palette.recovery)
                         .interpolationMethod(ChartStyle.smooth)
-                    if let sel = hrSelection.date {
-                        RuleMark(x: .value("Date", sel))
-                            .foregroundStyle(Palette.textTertiary.opacity(0.5))
-                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                    }
                 }
-                .frame(height: 200)
-                .chartOverlay { proxy in
-                    ChartDayScrubOverlay(proxy: proxy, dates: dates, selection: $hrSelection.date)
-                }
-                .clipped()
-
-                ScrubDetailBanner(
-                    date: hrSelection.date,
-                    placeholder: "Tap or drag to see min · avg · max",
-                    lines: hrLines(for: hrSelection.date, in: metric),
-                    note: "Min is the calmest reading; max is usually exercise or stress."
-                )
-            }
-            .onAppear {
-                if hrSelection.date == nil, let last = dates.last {
-                    hrSelection.date = last
+                if let shown {
+                    RuleMark(x: .value("Selected", shown))
+                        .foregroundStyle(Palette.textTertiary.opacity(0.6))
                 }
             }
+            .chartYAxis {
+                AxisMarks(position: .trailing, values: .automatic(desiredCount: 3)) { _ in
+                    AxisGridLine().foregroundStyle(Palette.hairline)
+                    AxisValueLabel().font(.caption2).foregroundStyle(Palette.textTertiary)
+                }
+            }
+            .chartXAxis {
+                AxisMarks(values: .automatic(desiredCount: 4)) { _ in
+                    AxisValueLabel(format: .dateTime.month(.abbreviated).day())
+                        .font(.caption2).foregroundStyle(Palette.textTertiary)
+                }
+            }
+            .frame(height: 180)
+            .chartOverlay { proxy in
+                ChartDayScrubOverlay(proxy: proxy, dates: dates, selection: $hrSelection.date)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Heart rate daily range, last \(days) days")
+            .accessibilityValue(shown.flatMap { day in series.row(on: day).map { row in
+                "\(day.formatted(.dateTime.weekday(.wide).month(.wide).day())), minimum \(pillarNumber(row.min)), average \(pillarNumber(row.avg)), maximum \(pillarNumber(row.max)) beats per minute"
+            } } ?? "")
+            .accessibilityAdjustableAction { direction in
+                guard let index = shown.flatMap({ dates.firstIndex(of: $0) }) else { return }
+                switch direction {
+                case .increment: hrSelection.date = dates[min(index + 1, dates.count - 1)]
+                case .decrement: hrSelection.date = dates[max(index - 1, 0)]
+                @unknown default: break
+                }
+            }
+            Text(MetricExplain.heartRange.body)
+                .font(.footnote)
+                .foregroundStyle(Palette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
+}
 
-    private func lineLines(for selection: Date?, in metric: BodySeries.Metric, unit: String) -> [String] {
-        guard let hit = metric.row(on: selection) else { return [] }
-        return [
-            "Average \(fmt(hit.avg)) \(unit)",
-            "Range \(fmt(hit.min))–\(fmt(hit.max)) \(unit)",
-        ]
-    }
+/// The two Recovery trend metrics.
+enum RecoveryMetric: CaseIterable {
+    case hrv, restingHr
 
-    private func lineNote(for selection: Date?, in metric: BodySeries.Metric, unit: String, goodDirection: GoodDirection) -> String? {
-        guard let idx = metric.index(on: selection), idx > 0 else { return nil }
-        let hit = metric.rows[idx]
-        let prev = metric.rows[idx - 1]
-        let delta = hit.avg - prev.avg
-        let absDelta = abs(delta)
-        let nicer = absDelta == absDelta.rounded() ? String(Int(absDelta)) : String(format: "%.1f", absDelta)
-        if absDelta < 0.05 { return "About the same as the previous day." }
-        if delta > 0 {
-            return goodDirection == .higher
-                ? "Up \(nicer) \(unit) vs previous day — usually better recovery."
-                : "Up \(nicer) \(unit) vs previous day — often a cue to recover more."
-        }
-        return goodDirection == .higher
-            ? "Down \(nicer) \(unit) vs previous day — recovery may be lagging."
-            : "Down \(nicer) \(unit) vs previous day — usually better recovery."
-    }
+    var title: String { self == .hrv ? "HRV" : "Resting heart rate" }
+    var shortTitle: String { self == .hrv ? "HRV" : "Resting HR" }
+    var unit: String { self == .hrv ? "ms" : "bpm" }
+    var spokenUnit: String { self == .hrv ? "milliseconds" : "beats per minute" }
+    var vital: VitalMetric { self == .hrv ? .hrv : .restingHr }
+    var goodDirection: GoodDirection { self == .hrv ? .higher : .lower }
+    var threshold: Double { self == .hrv ? 2 : 1.5 }
+    var explain: MetricExplain { self == .hrv ? .hrv : .restingHr }
 
-    private func hrLines(for selection: Date?, in metric: BodySeries.Metric) -> [String] {
-        guard let hit = metric.row(on: selection) else { return [] }
-        return ["Min \(fmt(hit.min)) bpm", "Avg \(fmt(hit.avg)) bpm", "Max \(fmt(hit.max)) bpm"]
+    func series(in metrics: BodySeries) -> BodySeries.Metric {
+        self == .hrv ? metrics.hrv : metrics.rhr
     }
+}
 
-    private func fmt(_ value: Double) -> String {
-        value == value.rounded() ? String(Int(value)) : String(format: "%.1f", value)
-    }
+extension MetricExplain {
+    static let hrv = MetricExplain(
+        title: "About HRV",
+        body: "HRV is the tiny variation between heartbeats (SDNN, ms). Higher and rising usually means your nervous system is recovered. We compare today’s average to your recent baseline."
+    )
+    static let restingHr = MetricExplain(
+        title: "About resting heart rate",
+        body: "Your pulse at rest. Lower usually means better fitness and recovery. An unexpected rise — especially with low HRV — is a cue to ease off."
+    )
+    static let heartRange = MetricExplain(
+        title: "About the daily range",
+        body: "Each day shows your lowest, average, and highest heart rate from Apple Health. The band is min–max; the line is the daily average. Min is the calmest reading; max is usually exercise or stress."
+    )
 }
 
 /// Chart series for each Body metric, oldest first, derived once per `BodyResponse`.
@@ -347,10 +537,4 @@ struct BodySeries {
         rhr = Metric(daily, type: "resting_heart_rate", timeZone: timeZone)
         hr = Metric(daily, type: "heart_rate", timeZone: timeZone)
     }
-}
-
-struct MetricExplain: Identifiable {
-    let id = UUID()
-    let title: String
-    let body: String
 }

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import Charts
 
 func nearestDate(_ target: Date?, in dates: [Date]) -> Date? {
@@ -87,30 +88,101 @@ struct ChartDayScrubOverlay: View {
     @Binding var selection: Date?
 
     var body: some View {
-        GeometryReader { _ in
-            Rectangle()
-                .fill(Color.clear)
-                .contentShape(Rectangle())
-                .highPriorityGesture(
-                    DragGesture(minimumDistance: 0)
-                        .onChanged { value in
-                            guard let raw: Date = proxy.value(atX: value.location.x),
-                                  let snapped = nearestDate(raw, in: dates)
-                            else { return }
-                            if snapped != selection {
-                                var t = Transaction()
-                                t.disablesAnimations = true
-                                withTransaction(t) { selection = snapped }
-                            }
-                        }
-                )
-        }
+        DayScrubRecognizer { select(at: $0) }
         .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in
             // The parent binding resolves the same day in the new zone; writing it
             // back updates parent state so marks and readouts redraw together.
             let resolvedSelection = selection
             selection = resolvedSelection
         }
+    }
+
+    private func select(at x: CGFloat) {
+        guard let raw: Date = proxy.value(atX: x),
+              let snapped = nearestDate(raw, in: dates),
+              snapped != selection
+        else { return }
+        var t = Transaction()
+        t.disablesAnimations = true
+        withTransaction(t) { selection = snapped }
+    }
+}
+
+/// Tap, touch and hold, or a sideways drag picks a day; a vertical drag
+/// belongs to the page. These are UIKit recognizers because a SwiftUI
+/// gesture on scroll content keeps the touch from the enclosing scroll view,
+/// whatever its priority or composition.
+struct DayScrubRecognizer: UIViewRepresentable {
+    let onSelect: (CGFloat) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(onSelect: onSelect) }
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .clear
+        context.coordinator.install(on: view)
+        return view
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {
+        context.coordinator.onSelect = onSelect
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var onSelect: (CGFloat) -> Void
+        let tap = UITapGestureRecognizer()
+        let hold = UILongPressGestureRecognizer()
+        let pan = UIPanGestureRecognizer()
+
+        init(onSelect: @escaping (CGFloat) -> Void) {
+            self.onSelect = onSelect
+            super.init()
+            hold.minimumPressDuration = 0.25
+            for recognizer in [tap, hold, pan] as [UIGestureRecognizer] {
+                recognizer.addTarget(self, action: #selector(handle(_:)))
+                recognizer.delegate = self
+            }
+        }
+
+        func install(on view: UIView) {
+            for recognizer in [tap, hold, pan] as [UIGestureRecognizer] { view.addGestureRecognizer(recognizer) }
+        }
+
+        @objc private func handle(_ recognizer: UIGestureRecognizer) {
+            // A hold marks its day once; moving afterwards is the pan's or the page's.
+            let active: Bool = switch recognizer.state {
+            case .began: true
+            case .changed: recognizer !== hold
+            case .ended: recognizer === tap
+            default: false
+            }
+            if active { onSelect(recognizer.location(in: recognizer.view).x) }
+        }
+
+        /// The pan starts only for a mostly sideways movement.
+        func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
+            guard recognizer === pan else { return true }
+            let translation = pan.translation(in: pan.view)
+            let movement = translation == .zero ? pan.velocity(in: pan.view) : translation
+            return ScrubIntent.isSideways(movement)
+        }
+
+        /// The hold never takes the touch away from the page or the pan.
+        func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+            recognizer === hold || other === hold
+        }
+
+        /// The page's scroll waits for the pan to decline, so a vertical drag
+        /// still scrolls and a sideways one scrubs without moving the page.
+        func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldBeRequiredToFailBy other: UIGestureRecognizer) -> Bool {
+            recognizer === pan && other is UIPanGestureRecognizer && other.view is UIScrollView
+        }
+    }
+}
+
+enum ScrubIntent {
+    static func isSideways(_ movement: CGPoint) -> Bool {
+        abs(movement.x) > abs(movement.y)
     }
 }
 
