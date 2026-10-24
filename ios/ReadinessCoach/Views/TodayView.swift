@@ -28,6 +28,11 @@ struct TodayView: View {
         ))
     }
 
+    private func perfTodayContentShown() {
+        PerfSignpost.endLaunchIfNeeded()
+        PerfSignpost.endTabSwitchIfNeeded(tab: "today")
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -40,7 +45,7 @@ struct TodayView: View {
 
                     if let today = sync.today {
                         content(today)
-                    } else if sync.isLoadingToday || sync.isSyncing {
+                    } else if sync.isSyncing {
                         loading
                     } else {
                         ContentUnavailableCompat(
@@ -59,7 +64,7 @@ struct TodayView: View {
                         .buttonStyle(.bordered)
                     }
 
-                    if let error = sync.errorMessage {
+                    if let error = sync.todayError {
                         ErrorCard(message: error) { Task { await sync.syncNow(settings) } }
                     }
 
@@ -117,6 +122,10 @@ struct TodayView: View {
                 Text(healthRequestError ?? "")
             }
             .task { healthStatus = await health.accessStatus() }
+            .onAppear { if sync.today != nil { perfTodayContentShown() } }
+            .onChange(of: sync.today != nil) { _, hasToday in
+                if hasToday { perfTodayContentShown() }
+            }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { Task { healthStatus = await health.accessStatus() } }
             }

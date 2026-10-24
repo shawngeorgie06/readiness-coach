@@ -75,4 +75,55 @@ final class ChartDateTests: XCTestCase {
         let day = calendar.component(.day, from: ChartDate.day("2026-10-03T00:00:00Z"))
         XCTAssertEqual(day, 3)
     }
+
+    // MARK: - Derived chart series after travel
+
+    private let east = TimeZone(secondsFromGMT: 12 * 3600)!
+    private let west = TimeZone(secondsFromGMT: -10 * 3600)!
+    private let fetchedAt = Date(timeIntervalSince1970: 1_800_000_000)
+
+    private func bodyRow(_ date: String, _ avg: Double) -> BodyDaily {
+        BodyDaily(type: "hrv_sdnn", date: date, min: avg, avg: avg, max: avg, latest: avg, count: 1)
+    }
+
+    func testBodySeriesRebuildsAfterTravelAndMatchesTheRebasedSelection() {
+        let derived = Derived<SeriesStamp, BodySeries>()
+        let daily = [bodyRow("2026-10-02", 40), bodyRow("2026-10-03", 55)]
+        let before = derived.series(fetchedAt: fetchedAt, timeZone: east) { BodySeries(daily, timeZone: $0) }
+        let selection = ChartDaySelection(date: before.hrv.dates.last, timeZone: east)
+        XCTAssertEqual(before.hrv.row(on: selection.resolved(timeZone: east))?.avg, 55)
+
+        let after = derived.series(fetchedAt: fetchedAt, timeZone: west) { BodySeries(daily, timeZone: $0) }
+        let rebased = selection.resolved(timeZone: west)
+        XCTAssertEqual(after.hrv.dates, daily.map { ChartDate.day($0.date, timeZone: west) })
+        XCTAssertEqual(after.hrv.row(on: rebased)?.date, "2026-10-03")
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = west
+        XCTAssertEqual(calendar.component(.day, from: rebased!), 3)
+    }
+
+    func testSeriesIsReusedWhileZoneAndFetchAreUnchanged() {
+        let derived = Derived<SeriesStamp, Int>()
+        var builds = 0
+        for _ in 0..<3 { _ = derived.series(days: 30, fetchedAt: fetchedAt, timeZone: east) { _ in builds += 1; return builds } }
+        XCTAssertEqual(builds, 1)
+        _ = derived.series(days: 30, fetchedAt: fetchedAt, timeZone: west) { _ in builds += 1; return builds }
+        _ = derived.series(days: 7, fetchedAt: fetchedAt, timeZone: west) { _ in builds += 1; return builds }
+        _ = derived.series(days: 7, fetchedAt: fetchedAt.addingTimeInterval(1), timeZone: west) { _ in builds += 1; return builds }
+        XCTAssertEqual(builds, 4)
+    }
+
+    func testSleepAndTrendSeriesUseTheZoneTheyAreBuiltIn() {
+        let night = SleepDetailResponse(days: 7, data: [])
+        let sleep = Derived<SeriesStamp, SleepSeries>()
+        _ = sleep.series(days: 7, fetchedAt: fetchedAt, timeZone: east) { SleepSeries(night, timeZone: $0) }
+        var zones: [TimeZone] = []
+        _ = sleep.series(days: 7, fetchedAt: fetchedAt, timeZone: west) { zones.append($0); return SleepSeries(night, timeZone: $0) }
+        XCTAssertEqual(zones, [west])
+
+        let trend = Derived<SeriesStamp, TrendSeries?>()
+        _ = trend.series(days: 30, fetchedAt: fetchedAt, timeZone: east) { _ in nil }
+        let rebuilt = trend.series(days: 30, fetchedAt: fetchedAt, timeZone: west) { TrendSeries([], timeZone: $0) }
+        XCTAssertNotNil(rebuilt)
+    }
 }

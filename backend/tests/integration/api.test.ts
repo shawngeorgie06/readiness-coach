@@ -182,6 +182,70 @@ describe("backend API integration", () => {
     ).toBe(1);
   });
 
+  it("baselines agree with the recovery driver", async () => {
+    await request(app).post("/v1/sync").set("Authorization", authorization).send(syncPayload).expect(200);
+    const today = await request(app)
+      .get(`/v1/today?userId=${syncPayload.userId}&date=${date}`)
+      .set("Authorization", authorization)
+      .expect(200);
+
+    const driver = today.body.pillars.recovery.drivers.find(
+      (d: { detail: string }) => /30-day average of \d+ms/.test(d.detail),
+    );
+    const fromDriver = Number(/30-day average of (\d+)ms/.exec(driver.detail)![1]);
+    expect(Math.round(today.body.baselines.hrv.baseline30d)).toBe(fromDriver);
+    expect(today.body.baselines.hrv.recent14d).toHaveLength(14);
+  });
+
+  it("returns private no-store, a weak ETag, and 304 on If-None-Match", async () => {
+    await request(app)
+      .post("/v1/sync")
+      .set("Authorization", authorization)
+      .send(syncPayload)
+      .expect(200);
+
+    const first = await request(app).get(`/v1/today?date=${date}`).set("Authorization", authorization);
+    expect(first.status).toBe(200);
+    expect(first.headers["cache-control"]).toBe("private, no-store");
+    expect(first.headers.etag).toMatch(/^W\//);
+    const second = await request(app)
+      .get(`/v1/today?date=${date}`)
+      .set("Authorization", authorization)
+      .set("If-None-Match", first.headers.etag);
+    expect(second.status).toBe(304);
+  });
+
+  it("history and today agree for tz=-240", async () => {
+    // 01:00-08:52 EDT Watch night: at tz 0 the tail after 12:00Z leaks into the next day.
+    const nightDate = "2026-07-15";
+    await request(app)
+      .post("/v1/sync")
+      .set("Authorization", authorization)
+      .send({
+        userId: INTEGRATION_USER_ID,
+        samples: [
+          {
+            hkUuid: "tz-night",
+            type: "sleep_analysis",
+            startAt: "2026-07-15T05:00:00.000Z",
+            endAt: "2026-07-15T12:52:00.000Z",
+            metadata: { stage: "core" },
+          },
+        ],
+        workouts: [],
+      })
+      .expect(200);
+
+    const today = await request(app).get(`/v1/today?date=${nightDate}&tz=-240`).set("Authorization", authorization);
+    expect(today.status).toBe(200);
+    await prisma.dailyScore.deleteMany({}); // force the history backfill path
+    const history = await request(app)
+      .get(`/v1/history?days=1&date=${nightDate}&tz=-240`)
+      .set("Authorization", authorization);
+    expect(history.status).toBe(200);
+    expect(history.body.data.at(-1).readiness).toBe(today.body.readiness);
+  });
+
   it("returns 404 deleting an unknown user", async () => {
     await request(app)
       .delete("/v1/user?userId=unknown")

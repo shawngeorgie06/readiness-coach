@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 enum APIError: LocalizedError {
@@ -33,68 +34,95 @@ enum APIError: LocalizedError {
     }
 }
 
+/// Result of a conditional read: a new body (with its `ETag`) or a 304.
+enum Fetch<T> {
+    case fresh(T, etag: String?)
+    case notModified
+}
+
+/// The device's local calendar day and UTC offset at one instant. A read sends
+/// both, so a request asks about the day it started on even if it lands after
+/// midnight or a time zone change.
+struct LocalDay: Hashable {
+    let date: String
+    let utcOffsetMinutes: Int
+
+    static func current(now: Date = Date()) -> LocalDay {
+        LocalDay(date: APIClient.deviceLocalDate(now: now), utcOffsetMinutes: APIClient.tzOffsetMinutes(now: now))
+    }
+}
+
+protocol ReadAPI {
+    func today(on day: LocalDay, etag: String?) async throws -> Fetch<TodayDTO>
+    func body(days: Int, on day: LocalDay, etag: String?) async throws -> Fetch<BodyResponse>
+    func sleep(days: Int, on day: LocalDay, etag: String?) async throws -> Fetch<SleepDetailResponse>
+    func train(days: Int, on day: LocalDay, etag: String?) async throws -> Fetch<TrainResponse>
+    func history(days: Int, on day: LocalDay, etag: String?) async throws -> Fetch<ReadinessHistoryResponse>
+}
+
 /// Thin async client for the Readiness Coach API. All `/v1` routes require a
 /// bearer token; the deterministic decision is owned by the backend.
 struct APIClient {
     let baseURL: URL
     let token: String
     let userId: String
+    let session: URLSession
+
+    init(baseURL: URL, token: String, userId: String, session: URLSession = APIClient.liveSession) {
+        self.baseURL = baseURL
+        self.token = token
+        self.userId = userId
+        self.session = session
+    }
+
+    /// Which server, account, and credential a client calls with. The token is
+    /// kept only as a SHA-256 digest, so an identity can be compared and passed
+    /// around without carrying the secret.
+    struct Identity: Hashable {
+        let baseURL: URL
+        let userId: String
+        let tokenDigest: Data
+    }
+
+    var identity: Identity {
+        Identity(baseURL: baseURL, userId: userId, tokenDigest: Data(SHA256.hash(data: Data(token.utf8))))
+    }
+
+    /// `.apiUnauthorized` user-info key for the `Identity` whose request got the 401.
+    static let identityKey = "identity"
 
     private static let decoder = JSONDecoder()
     private static let encoder = JSONEncoder()
-    private static let session: URLSession = {
+    static let readTimeout: TimeInterval = 15
+    private static let writeTimeout: TimeInterval = 60
+    static let liveSession: URLSession = {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 60
-        config.timeoutIntervalForResource = 120
+        config.timeoutIntervalForRequest = readTimeout
+        config.timeoutIntervalForResource = 300
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         return URLSession(configuration: config)
     }()
 
     // MARK: Reads
 
-    func getToday(date: String? = nil) async throws -> TodayDTO {
-        try await get("v1/today", query: dateQuery(date))
+    func today(on day: LocalDay = .current(), etag: String?) async throws -> Fetch<TodayDTO> {
+        try await read("v1/today", query: dateQuery(day), etag: etag)
     }
 
-    /// Retries once after waking a cold host (Render free tier spin-up).
-    func getTodayWithRetry(date: String? = nil) async throws -> TodayDTO {
-        do {
-            return try await getToday(date: date)
-        } catch let error as APIError where Self.retryableTransport(error) {
-            // syncNow already pings /health in parallel; wait for cold boot then retry once.
-            try await Task.sleep(nanoseconds: 2_500_000_000)
-            return try await getToday(date: date)
-        }
+    func body(days: Int, on day: LocalDay = .current(), etag: String?) async throws -> Fetch<BodyResponse> {
+        try await read("v1/body", query: daysQuery(days, day), etag: etag)
     }
 
-    /// Hits `/health` so a sleeping backend can start booting while HealthKit reads.
-    func wakeServer() async {
-        var request = URLRequest(url: baseURL.appendingPathComponent("health"))
-        request.httpMethod = "GET"
-        request.timeoutInterval = 20
-        request.cachePolicy = .reloadIgnoringLocalCacheData
-        _ = try? await Self.session.data(for: request)
+    func sleep(days: Int, on day: LocalDay = .current(), etag: String?) async throws -> Fetch<SleepDetailResponse> {
+        try await read("v1/sleep", query: daysQuery(days, day), etag: etag)
     }
 
-    private static func retryableTransport(_ error: APIError) -> Bool {
-        if case .transport = error { return true }
-        return false
+    func train(days: Int, on day: LocalDay = .current(), etag: String?) async throws -> Fetch<TrainResponse> {
+        try await read("v1/train", query: daysQuery(days, day), etag: etag)
     }
 
-    func getSleep(days: Int = 30, date: String? = nil) async throws -> SleepDetailResponse {
-        try await get("v1/sleep", query: [URLQueryItem(name: "days", value: String(days))] + dateQuery(date))
-    }
-
-    func getTrain(days: Int = 28, date: String? = nil) async throws -> TrainResponse {
-        try await get("v1/train", query: [URLQueryItem(name: "days", value: String(days))] + dateQuery(date))
-    }
-
-    func getBody(days: Int = 30, date: String? = nil) async throws -> BodyResponse {
-        try await get("v1/body", query: [URLQueryItem(name: "days", value: String(days))] + dateQuery(date))
-    }
-
-    func getHistory(days: Int = 30, date: String? = nil) async throws -> ReadinessHistoryResponse {
-        try await get("v1/history", query: [URLQueryItem(name: "days", value: String(days))] + dateQuery(date))
+    func history(days: Int, on day: LocalDay = .current(), etag: String?) async throws -> Fetch<ReadinessHistoryResponse> {
+        try await read("v1/history", query: daysQuery(days, day), etag: etag)
     }
 
     // MARK: Writes
@@ -110,7 +138,7 @@ struct APIClient {
     /// rather than sitting in the foreground for minutes.
     private static let maxInlineRateLimitWait: TimeInterval = 30
 
-    /// Splits a Health payload into requests small enough for Render cold starts
+    /// Splits a Health payload into requests small enough to retry cheaply
     /// and sparse enough to stay under the `/v1` rate limit.
     ///
     /// Samples go out oldest-first so a partial upload is resumable: once a chunk
@@ -134,14 +162,10 @@ struct APIClient {
         }
     }
 
-    /// Sends one chunk, waking a cold host or riding out a brief rate-limit
+    /// Sends one chunk, riding out a brief rate-limit
     /// cool-off. Anything longer is thrown so the caller can bank its progress.
     func syncChunk(_ payload: SyncPayload) async throws -> SyncResult {
         do {
-            return try await postSync(payload)
-        } catch let error as APIError where Self.retryableTransport(error) {
-            await wakeServer()
-            try await Task.sleep(nanoseconds: 2_500_000_000)
             return try await postSync(payload)
         } catch let APIError.rateLimited(retryAfter) {
             guard let retryAfter, retryAfter <= Self.maxInlineRateLimitWait else {
@@ -153,13 +177,15 @@ struct APIClient {
     }
 
     private func postSync(_ payload: SyncPayload) async throws -> SyncResult {
-        let data = try await requestData(
-            path: "v1/sync",
-            method: "POST",
-            query: [],
-            body: payload,
-            timeout: Self.syncRequestTimeout
-        )
+        let (data, _) = try await withTransportRetry {
+            try await requestData(
+                path: "v1/sync",
+                method: "POST",
+                query: [],
+                body: payload,
+                timeout: Self.syncRequestTimeout
+            )
+        }
         return try decode(data)
     }
 
@@ -187,7 +213,7 @@ struct APIClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try Self.encoder.encode(body)
 
-        let (data, response) = try await Self.session.data(for: request)
+        let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw APIError.http(status: -1, code: nil)
         }
@@ -202,12 +228,12 @@ struct APIClient {
         // /health needs no auth but confirms the origin.
         var health = URLRequest(url: baseURL.appendingPathComponent("health"))
         health.timeoutInterval = 8
-        _ = try await Self.session.data(for: health)
-        // getToday confirms the token is accepted. A brand-new user that hasn't
+        _ = try await session.data(for: health)
+        // Today confirms the token is accepted. A brand-new user that hasn't
         // synced yet legitimately has no Today (404 user_not_found) — that still
         // proves the URL + token are correct, so count it as a successful test.
         do {
-            _ = try await getToday()
+            _ = try await today(etag: nil)
         } catch APIError.http(status: 404, code: "user_not_found") {
             return
         }
@@ -220,10 +246,10 @@ struct APIClient {
 
     // MARK: - Internals
 
-    private func dateQuery(_ date: String?) -> [URLQueryItem] {
+    private func dateQuery(_ day: LocalDay) -> [URLQueryItem] {
         [
-            URLQueryItem(name: "date", value: date ?? Self.deviceLocalDate()),
-            URLQueryItem(name: "tz", value: String(Self.tzOffsetMinutes())),
+            URLQueryItem(name: "date", value: day.date),
+            URLQueryItem(name: "tz", value: String(day.utcOffsetMinutes)),
         ]
     }
 
@@ -240,21 +266,48 @@ struct APIClient {
     /// hasn't happened yet (e.g. showing 0.9h of sleep at 11pm). Sending the
     /// device's local day keeps "today" aligned with the user's actual day.
     static func deviceLocalDate(now: Date = Date()) -> String {
+        localDateFormatter.timeZone = TimeZone.current
+        return localDateFormatter.string(from: now)
+    }
+
+    private static let localDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone.current
         formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: now)
+        return formatter
+    }()
+
+    private func daysQuery(_ days: Int, _ day: LocalDay) -> [URLQueryItem] {
+        [URLQueryItem(name: "days", value: String(days))] + dateQuery(day)
     }
 
-    private func get<T: Decodable>(_ path: String, query: [URLQueryItem]) async throws -> T {
-        let data = try await requestData(path: path, method: "GET", query: query, body: Optional<SyncPayload>.none)
-        return try decode(data)
+    /// Conditional GET. The ETag goes back verbatim in `If-None-Match`; a 304
+    /// has no body so it maps to `.notModified`.
+    private func read<T: Decodable>(_ path: String, query: [URLQueryItem], etag: String?) async throws -> Fetch<T> {
+        let (data, http) = try await withTransportRetry {
+            try await requestData(
+                path: path, method: "GET", query: query, body: Optional<SyncPayload>.none,
+                timeout: Self.readTimeout, ifNoneMatch: etag
+            )
+        }
+        if http.statusCode == 304 { return .notModified }
+        return .fresh(try decode(data), etag: http.value(forHTTPHeaderField: "ETag"))
+    }
+
+    /// One immediate retry, only for transport failures (no sleep, no wake-up ping).
+    private func withTransportRetry<R>(_ work: () async throws -> R) async throws -> R {
+        do {
+            return try await work()
+        } catch let APIError.transport(error) {
+            // A cancelled load (tab switch, refresh superseded) must not fire a second request.
+            if Task.isCancelled || (error as? URLError)?.code == .cancelled || error is CancellationError { throw APIError.transport(error) }
+            return try await work()
+        }
     }
 
     private func send<Body: Encodable, T: Decodable>(_ path: String, method: String, body: Body) async throws -> T {
-        let data = try await requestData(path: path, method: method, query: [], body: body)
+        let (data, _) = try await requestData(path: path, method: method, query: [], body: body)
         return try decode(data)
     }
 
@@ -271,8 +324,9 @@ struct APIClient {
         method: String,
         query: [URLQueryItem],
         body: Body?,
-        timeout: TimeInterval? = nil
-    ) async throws -> Data {
+        timeout: TimeInterval? = nil,
+        ifNoneMatch: String? = nil
+    ) async throws -> (Data, HTTPURLResponse) {
         var components = URLComponents(
             url: baseURL.appendingPathComponent(path),
             resolvingAgainstBaseURL: false
@@ -285,8 +339,10 @@ struct APIClient {
 
         var request = URLRequest(url: url)
         request.httpMethod = method
-        request.timeoutInterval = timeout ?? 60
+        request.timeoutInterval = timeout ?? Self.writeTimeout
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if method == "GET" { request.cachePolicy = .reloadIgnoringLocalCacheData }
+        if let ifNoneMatch { request.setValue(ifNoneMatch, forHTTPHeaderField: "If-None-Match") }
         if let body {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try Self.encoder.encode(body)
@@ -295,7 +351,7 @@ struct APIClient {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await Self.session.data(for: request)
+            (data, response) = try await session.data(for: request)
         } catch {
             throw APIError.transport(error)
         }
@@ -303,16 +359,17 @@ struct APIClient {
         guard let http = response as? HTTPURLResponse else {
             throw APIError.http(status: -1, code: nil)
         }
+        if http.statusCode == 304, ifNoneMatch != nil { return (data, http) }
         guard (200 ..< 300).contains(http.statusCode) else {
             if http.statusCode == 401 {
-                NotificationCenter.default.post(name: .apiUnauthorized, object: nil)
+                NotificationCenter.default.post(name: .apiUnauthorized, object: nil, userInfo: [Self.identityKey: identity])
             }
             if http.statusCode == 429 {
                 throw APIError.rateLimited(retryAfter: Self.retryAfterSeconds(http))
             }
             throw APIError.http(status: http.statusCode, code: Self.errorCode(from: data))
         }
-        return data
+        return (data, http)
     }
 
     /// `Retry-After` is either a delta in seconds or an HTTP date. express-rate-limit
@@ -346,8 +403,11 @@ struct APIClient {
     }
 }
 
+extension APIClient: ReadAPI {}
+
 extension Notification.Name {
-    /// Posted when an authenticated /v1 call returns 401 (session expired/invalid).
+    /// Posted when an authenticated /v1 call returns 401 (session expired/invalid),
+    /// with the request's `APIClient.Identity` under `APIClient.identityKey`.
     static let apiUnauthorized = Notification.Name("apiUnauthorized")
 }
 

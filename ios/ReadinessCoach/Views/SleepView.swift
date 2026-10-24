@@ -3,13 +3,11 @@ import Charts
 
 /// Sleep tab — Insights parity: 7d/30d/90d, tappable nights, stage detail + charts.
 struct SleepView: View {
-    @EnvironmentObject private var settings: AppSettings
+    @Environment(AppStore.self) private var store
 
-    @State private var response: SleepDetailResponse?
-    @State private var error: String?
-    @State private var isLoading = false
     @State private var rangeIndex = 1
     @State private var selectedNightID: String?
+    @State private var derived = Derived<SeriesStamp, SleepSeries>()
 
     private let rangeLabels = ["7d", "30d", "90d"]
     private let rangeDays = [7, 30, 90]
@@ -25,20 +23,29 @@ struct SleepView: View {
         ("Deep", Palette.lavender), ("REM", .purple), ("Core", .blue), ("Awake", Palette.warn),
     ]
 
+    private var days: Int { rangeDays[min(max(rangeIndex, 0), rangeDays.count - 1)] }
+    private var key: ResourceKey { .sleep(days: days) }
+    private var resource: Resource<SleepDetailResponse> { store.sleep[days] ?? Resource() }
+
+    /// True once real content (or an empty/error state) replaces the spinner.
+    private var perfContentReady: Bool { resource.value != nil || resource.error != nil }
+
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 16) {
                     header
+                    StaleDataBanner(resource: resource) { Task { await store.refresh(key, force: true) } }
                     SegmentedRange(rangeLabels, selection: $rangeIndex)
-                    if let nights, !nights.isEmpty {
-                        nightStrip(nights)
+                    if let series, !series.nights.isEmpty {
+                        let nights = series.nights
+                        nightStrip(series)
                         if let selected = selectedNight(in: nights) {
                             selectedNightCard(selected, in: nights)
                         }
-                        totalCard(nights)
-                        stageCard(nights)
-                    } else if isLoading {
+                        totalCard(series)
+                        stageCard(series)
+                    } else if resource.value == nil && resource.isRefreshing {
                         ProgressView().padding(.top, 60)
                     } else {
                         ContentUnavailableCompat(
@@ -47,8 +54,8 @@ struct SleepView: View {
                             systemImage: "bed.double"
                         )
                     }
-                    if let error {
-                        ErrorCard(message: error) { Task { await load() } }
+                    if resource.value == nil, let error = resource.error {
+                        ErrorCard(message: error) { Task { await store.refresh(key, force: true) } }
                     }
                 }
                 .pageWidthLocked()
@@ -57,11 +64,19 @@ struct SleepView: View {
             .verticalScrollLocked()
             .screenBackground()
             .toolbar(.hidden, for: .navigationBar)
-            .task { await load() }
-            .refreshable { await load() }
+            .task(id: store.taskID(key)) { await store.refresh(key) }
+            .onAppear { if perfContentReady { PerfSignpost.endTabSwitchIfNeeded(tab: "sleep") } }
+            .onChange(of: perfContentReady) { _, ready in
+                if ready { PerfSignpost.endTabSwitchIfNeeded(tab: "sleep") }
+            }
+            .refreshable { await store.refresh(key, force: true) }
             .onChange(of: rangeIndex) { _, _ in
                 selectedNightID = nil
-                Task { await load() }
+            }
+            .onChange(of: resource.fetchedAt) { _, _ in
+                if let nights = series?.nights, !nights.contains(where: { $0.id == selectedNightID }) {
+                    selectedNightID = nights.last?.id
+                }
             }
         }
     }
@@ -78,17 +93,19 @@ struct SleepView: View {
         }
     }
 
-    /// Nights that actually have sleep recorded.
-    private var nights: [SleepDay]? {
-        response?.data.filter { $0.durationHours > 0 }
+    /// Nights that actually have sleep recorded, rebuilt only when the resource changes.
+    private var series: SleepSeries? {
+        guard let response = resource.value else { return nil }
+        return derived.series(days: days, fetchedAt: resource.fetchedAt) { SleepSeries(response, timeZone: $0) }
     }
 
     private func selectedNight(in nights: [SleepDay]) -> SleepDay? {
         nights.first(where: { $0.id == selectedNightID }) ?? nights.last
     }
 
-    private func nightStrip(_ nights: [SleepDay]) -> some View {
-        let maxHours = max(nights.map(\.durationHours).max() ?? 8, 1)
+    private func nightStrip(_ series: SleepSeries) -> some View {
+        let nights = series.nights
+        let maxHours = series.maxHours
         return VStack(alignment: .leading, spacing: 10) {
             Text("Tap a night to inspect stages.")
                 .font(.caption)
@@ -274,17 +291,17 @@ struct SleepView: View {
         }
     }
 
-    private func totalCard(_ nights: [SleepDay]) -> some View {
-        SectionCard(title: "Total sleep — last \(response?.days ?? rangeDays[rangeIndex]) days") {
-            Chart(nights) { day in
+    private func totalCard(_ series: SleepSeries) -> some View {
+        SectionCard(title: "Total sleep — last \(resource.value?.days ?? days) days") {
+            Chart(series.points) { point in
                 BarMark(
-                    x: .value("Date", ChartDate.day(day.date)),
-                    y: .value("Hours", day.durationHours)
+                    x: .value("Date", point.date),
+                    y: .value("Hours", point.night.durationHours)
                 )
                 .foregroundStyle(Palette.lavender.opacity(0.45))
                 BarMark(
-                    x: .value("Date", ChartDate.day(day.date)),
-                    y: .value("Restorative", day.restorativeHours)
+                    x: .value("Date", point.date),
+                    y: .value("Restorative", point.night.restorativeHours)
                 )
                 .foregroundStyle(Palette.lavender)
             }
@@ -296,14 +313,15 @@ struct SleepView: View {
         }
     }
 
-    private func stageCard(_ nights: [SleepDay]) -> some View {
-        SectionCard(title: "Stages by night") {
+    private func stageCard(_ series: SleepSeries) -> some View {
+        let nights = series.nights
+        return SectionCard(title: "Stages by night") {
             Chart {
-                ForEach(nights) { day in
-                    stageBar(day, "Deep", day.stages.deep)
-                    stageBar(day, "REM", day.stages.rem)
-                    stageBar(day, "Core", day.stages.core)
-                    stageBar(day, "Awake", day.stages.awake)
+                ForEach(series.points) { point in
+                    stageBar(point.date, "Deep", point.night.stages.deep)
+                    stageBar(point.date, "REM", point.night.stages.rem)
+                    stageBar(point.date, "Core", point.night.stages.core)
+                    stageBar(point.date, "Awake", point.night.stages.awake)
                 }
             }
             .chartForegroundStyleScale(domain: stageColors.map(\.name), range: stageColors.map(\.color))
@@ -317,28 +335,12 @@ struct SleepView: View {
         }
     }
 
-    private func stageBar(_ day: SleepDay, _ name: String, _ hours: Double) -> some ChartContent {
+    private func stageBar(_ date: Date, _ name: String, _ hours: Double) -> some ChartContent {
         BarMark(
-            x: .value("Date", ChartDate.day(day.date)),
+            x: .value("Date", date),
             y: .value("Hours", hours)
         )
         .foregroundStyle(by: .value("Stage", name))
-    }
-
-    private func load() async {
-        guard let client = settings.makeClient() else { return }
-        isLoading = true
-        error = nil
-        defer { isLoading = false }
-        do {
-            let days = rangeDays[min(max(rangeIndex, 0), rangeDays.count - 1)]
-            response = try await client.getSleep(days: days)
-            if selectedNightID == nil || nights?.contains(where: { $0.id == selectedNightID }) != true {
-                selectedNightID = nights?.last?.id
-            }
-        } catch {
-            self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-        }
     }
 
     private func clockTime(_ iso: String?) -> String? {
@@ -358,5 +360,24 @@ struct SleepView: View {
         if hours < 7.5 { return "a bit below" }
         if hours <= 8.5 { return "right on" }
         return "above"
+    }
+}
+
+/// Recorded nights for one sleep range, derived once per `SleepDetailResponse`.
+struct SleepSeries {
+    struct Point: Identifiable {
+        let night: SleepDay
+        let date: Date
+        var id: String { night.id }
+    }
+
+    let nights: [SleepDay]
+    let points: [Point]
+    let maxHours: Double
+
+    init(_ response: SleepDetailResponse, timeZone: TimeZone = .current) {
+        nights = response.data.filter { $0.durationHours > 0 }
+        points = nights.map { Point(night: $0, date: ChartDate.day($0.date, timeZone: timeZone)) }
+        maxHours = max(nights.map(\.durationHours).max() ?? 8, 1)
     }
 }

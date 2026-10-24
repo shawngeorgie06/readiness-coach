@@ -18,6 +18,33 @@ struct ErrorCard: View {
     }
 }
 
+/// Shown above cached content when the latest refresh failed, so saved data
+/// never passes for current. Renders nothing otherwise.
+struct StaleDataBanner<Value>: View {
+    let resource: Resource<Value>
+    let retry: () -> Void
+
+    var body: some View {
+        if resource.value != nil, resource.error != nil {
+            FreshnessBanner(
+                title: "Couldn’t refresh",
+                message: message,
+                color: Palette.warn,
+                icon: "exclamationmark.triangle",
+                actionTitle: "Retry",
+                action: retry
+            )
+        }
+    }
+
+    private var message: String {
+        guard let fetchedAt = resource.fetchedAt else { return "Showing saved data." }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return "Showing data from \(formatter.localizedString(for: fetchedAt, relativeTo: Date()))."
+    }
+}
+
 /// An ⓘ button that explains a piece of state.
 struct InfoBadge: View {
     let title: String

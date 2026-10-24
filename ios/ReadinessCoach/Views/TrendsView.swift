@@ -4,29 +4,30 @@ import Charts
 /// History — pushed from the Today score: range selector, readiness trend bars
 /// (tappable), pillar trends. Sleep detail lives on the Sleep tab.
 struct TrendsView: View {
-    @EnvironmentObject private var settings: AppSettings
+    @Environment(AppStore.self) private var store
     @EnvironmentObject private var tabs: TabRouter
-    @EnvironmentObject private var sync: SyncService
-    @State private var response: ReadinessHistoryResponse?
-    @State private var error: String?
-    @State private var isLoading = false
     @State private var rangeIndex = 1
     @State private var selectedPointID: String?
     @State private var pillarSelection = ChartDaySelection()
-    @State private var loadID = UUID()
+    @State private var derived = Derived<SeriesStamp, TrendSeries?>()
 
     private let rangeLabels = ["7d", "30d", "90d"]
     private let rangeDays = [7, 30, 90]
+
+    private var days: Int { rangeDays[rangeIndex] }
+    private var key: ResourceKey { .history(days: days) }
+    private var resource: Resource<ReadinessHistoryResponse> { store.history[days] ?? Resource() }
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(spacing: 16) {
                 SegmentedRange(rangeLabels, selection: $rangeIndex)
-                if let points, !points.isEmpty {
-                    trendCard(points)
+                StaleDataBanner(resource: resource) { Task { await store.refresh(key, force: true) } }
+                if let series, !series.points.isEmpty {
+                    trendCard(series)
                     insightCards()
-                    pillarsCard(points)
-                } else if isLoading {
+                    pillarsCard(series)
+                } else if resource.value == nil && resource.isRefreshing {
                     ProgressView().padding(.top, 60)
                 } else {
                     ContentUnavailableCompat(
@@ -35,8 +36,8 @@ struct TrendsView: View {
                         systemImage: "chart.bar.fill"
                     )
                 }
-                if let error {
-                    ErrorCard(message: error) { Task { await load() } }
+                if resource.value == nil, let error = resource.error {
+                    ErrorCard(message: error) { Task { await store.refresh(key, force: true) } }
                 }
             }
             .pageWidthLocked()
@@ -45,16 +46,22 @@ struct TrendsView: View {
         .verticalScrollLocked()
         .screenBackground()
         .navigationTitle("History")
-        .task(id: rangeIndex) {
+        .onChange(of: rangeIndex) { _, _ in
             selectedPointID = nil
-            pillarSelection.date = nil
-            await load()
+            pillarSelection.date = series?.dates.last
         }
-        .refreshable { await load() }
+        .task(id: store.taskID(key)) { await store.refresh(key) }
+        .refreshable { await store.refresh(key, force: true) }
     }
 
-    private var points: [ReadinessPoint]? {
-        Self.points(in: response, requestedDays: rangeDays[rangeIndex])
+    /// This range's points with their average, span and chart dates, rebuilt
+    /// only when the resource changes.
+    private var series: TrendSeries? {
+        let response = resource.value
+        let requestedDays = days
+        return derived.series(days: requestedDays, fetchedAt: resource.fetchedAt) { zone in
+            Self.points(in: response, requestedDays: requestedDays).map { TrendSeries($0, timeZone: zone) }
+        }
     }
 
     static func points(in response: ReadinessHistoryResponse?, requestedDays: Int) -> [ReadinessPoint]? {
@@ -62,10 +69,11 @@ struct TrendsView: View {
         return response.data
     }
 
-    private func trendCard(_ points: [ReadinessPoint]) -> some View {
-        let avg = points.map(\.readiness).reduce(0, +) / Double(points.count)
+    private func trendCard(_ series: TrendSeries) -> some View {
+        let points = series.points
+        let avg = series.average
         let selected = points.first(where: { $0.id == selectedPointID }) ?? points.last
-        let deltaVsStart = (points.last?.readiness ?? 0) - (points.first?.readiness ?? 0)
+        let deltaVsStart = series.deltaVsStart
 
         return VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top) {
@@ -230,7 +238,7 @@ struct TrendsView: View {
 
     @ViewBuilder
     private func insightCards() -> some View {
-        if let today = sync.today {
+        if let today = store.today.value {
             let pillars = today.pillars
             Eyebrow(text: "Latest snapshot · \(StatusLineModel.formattedDay(today.date))")
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -280,8 +288,9 @@ struct TrendsView: View {
         .card()
     }
 
-    private func pillarsCard(_ points: [ReadinessPoint]) -> some View {
-        let dates = points.map { ChartDate.day($0.date) }
+    private func pillarsCard(_ series: TrendSeries) -> some View {
+        let points = series.points
+        let dates = series.dates
         return VStack(alignment: .leading, spacing: 12) {
             Eyebrow(text: "Pillar scores")
             Text("Drag or tap to compare Sleep · Recovery · Load for a day.")
@@ -384,25 +393,19 @@ struct TrendsView: View {
         .font(.caption2)
         .accessibilityElement(children: .combine)
     }
+}
 
-    private func load() async {
-        guard let client = settings.makeClient() else { return }
-        let requestID = UUID()
-        let requestedRange = rangeIndex
-        loadID = requestID
-        isLoading = true
-        error = nil
-        defer { if loadID == requestID { isLoading = false } }
-        do {
-            let result = try await client.getHistory(days: rangeDays[requestedRange])
-            guard !Task.isCancelled, loadID == requestID, rangeIndex == requestedRange else { return }
-            response = result
-            if selectedPointID == nil {
-                selectedPointID = result.data.last?.id
-            }
-        } catch {
-            guard !Task.isCancelled, loadID == requestID, rangeIndex == requestedRange else { return }
-            self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-        }
+/// Values the History screen derives from one range's points.
+struct TrendSeries {
+    let points: [ReadinessPoint]
+    let dates: [Date]
+    let average: Double
+    let deltaVsStart: Double
+
+    init(_ points: [ReadinessPoint], timeZone: TimeZone = .current) {
+        self.points = points
+        dates = points.map { ChartDate.day($0.date, timeZone: timeZone) }
+        average = points.isEmpty ? 0 : points.map(\.readiness).reduce(0, +) / Double(points.count)
+        deltaVsStart = (points.last?.readiness ?? 0) - (points.first?.readiness ?? 0)
     }
 }

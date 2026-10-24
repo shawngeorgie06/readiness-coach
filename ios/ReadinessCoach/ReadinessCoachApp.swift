@@ -15,6 +15,10 @@ enum AppLaunch {
 
 @main
 struct ReadinessCoachApp: App {
+    init() {
+        if !AppLaunch.isUnitTestHost { PerfSignpost.beginLaunch() }
+    }
+
     var body: some Scene {
         WindowGroup {
             if AppLaunch.isUnitTestHost {
@@ -28,11 +32,37 @@ struct ReadinessCoachApp: App {
 
 private struct LiveAppRoot: View {
     @StateObject private var settings = AppSettings()
-    @StateObject private var sync = SyncService()
+    @State private var store: AppStore
+    @StateObject private var sync: SyncService
+    @Environment(\.scenePhase) private var scenePhase
+
+    init() {
+        let store = AppStore(cache: StoreActivation.cache)
+        _store = State(initialValue: store)
+        _sync = StateObject(wrappedValue: SyncService(store: store))
+    }
 
     var body: some View {
         RootView()
             .environmentObject(settings)
             .environmentObject(sync)
+            .environment(store)
+            .onAppear(perform: activateStore)
+            .onChange(of: settings.userId) { _, _ in activateStore() }
+            .onChange(of: settings.isReady) { _, _ in activateStore() }
+            .onChange(of: settings.apiToken) { _, _ in activateStore() }
+            .onChange(of: settings.apiBaseURL) { _, _ in activateStore() }
+            // The day may have turned while suspended, when no notification arrives.
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { store.noteDayMayHaveChanged() }
+            }
+            // Covers every sign-out, including the automatic one on a 401.
+            .onChange(of: settings.isSignedIn) { wasSignedIn, isSignedIn in
+                if wasSignedIn && !isSignedIn { StoreActivation.reset(store) }
+            }
+    }
+
+    private func activateStore() {
+        StoreActivation.activate(store, settings: settings)
     }
 }
