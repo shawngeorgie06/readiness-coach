@@ -127,14 +127,21 @@ enum Pillar: CaseIterable, Identifiable {
     }
 }
 
-/// Quiet, editorial dark. One hue per pillar; a separate traffic-light set that
-/// is used only for the decision. Dark-only for now — a light scheme is a
+/// Dark, data-first. Flat near-black canvas; content sits on it, separated by
+/// hairlines. One filled surface (Ask bar, segmented controls, sheets). Bright
+/// colour is reserved for scores. One hue per pillar for identity; a separate
+/// traffic-light set for good/bad. Dark-only for now — a light scheme is a
 /// second column here, not a rewrite.
 enum Palette {
-    static let canvas  = Color(hex: 0x0E0F12)
-    static let surface = Color(hex: 0x17191E)
+    static let canvas  = Color(hex: 0x07080A)
+    /// The only filled surface: Ask bar, segmented controls, sheets.
+    static let surface = Color(hex: 0x15171B)
     /// Raised fill inside a surface (selected segment, inset readouts).
     static let surfaceHi = Color(hex: 0x21242B)
+    /// 1px rule between open sections and rows.
+    static let hairline = Color.white.opacity(0.07)
+    /// Gauge tracks and skeleton blocks.
+    static let track = Color.white.opacity(0.08)
 
     static let textPrimary   = Color(hex: 0xF2F2F0)
     static let textSecondary = Color(hex: 0xA3A6AD)
@@ -158,14 +165,79 @@ enum Palette {
     static let mint      = recovery
     static let lavender  = sleep
 
-    static func decisionColor(_ d: Decision) -> Color {
-        switch d { case .push: return success; case .maintain: return warn; case .recover: return danger }
+    static func decisionColor(_ d: Decision) -> Color { d.band.color }
+    static func band(for score: Double) -> Color { ScoreBand(score: score).color }
+}
+
+/// Where a 0–100 score sits, at the backend's push/maintain cutoffs (75 / 50).
+/// Scores only: comparison deltas use each metric's server band instead.
+enum ScoreBand: Equatable {
+    case high, mid, low
+
+    /// Banded on the displayed (rounded) value, so a numeral that reads "75"
+    /// is never coloured as below 75.
+    init(score: Double) {
+        let shown = score.rounded()
+        if shown >= 75 { self = .high } else if shown >= 50 { self = .mid } else { self = .low }
     }
-    static func band(for score: Double) -> Color {
-        if score >= 75 { return success }
-        if score >= 50 { return warn }
-        return danger
+
+    var color: Color {
+        switch self {
+        case .high: return Palette.success
+        case .mid: return Palette.warn
+        case .low: return Palette.danger
+        }
     }
+
+    /// Numerals inside pillar gauges: white when healthy (never green), so
+    /// colour only appears where a pillar is weak.
+    var numeralColor: Color {
+        switch self {
+        case .high: return Palette.textPrimary
+        case .mid: return Palette.warn
+        case .low: return Palette.danger
+        }
+    }
+}
+
+extension Decision {
+    /// The locked decision's colour family. Today's verdict uses this, never the
+    /// score band, so an override can't look greener than the call.
+    var band: ScoreBand {
+        switch self {
+        case .push: return .high
+        case .maintain: return .mid
+        case .recover: return .low
+        }
+    }
+}
+
+/// Type roles. Numerals are SF Pro Compressed/Condensed heavy with tabular
+/// digits; everything else is SF Pro at Dynamic Type text styles.
+enum Typeface {
+    /// Big score numerals. Size comes from a `@ScaledMetric` at the call site.
+    static func numeral(_ size: CGFloat, width: Font.Width = .compressed) -> Font {
+        .system(size: size, weight: .heavy).width(width).monospacedDigit()
+    }
+    /// Row values and vitals (~20pt at default size).
+    static let value = Font.title3.weight(.heavy).width(.condensed).monospacedDigit()
+    /// Section titles: sentence case, 15pt semibold, white.
+    static let sectionTitle = Font.subheadline.weight(.semibold)
+    /// The one uppercase, letter-spaced voice: the verdict beside a head numeral.
+    static let verdict = Font.title3.weight(.heavy).width(.condensed)
+    static let verdictTracking: CGFloat = 1.6
+    /// Plan headline: 20pt bold.
+    static let headline = Font.title3.weight(.bold)
+}
+
+/// Spacing scale for the open layout.
+enum Space {
+    static let margin: CGFloat = 20
+    static let section: CGFloat = 28
+    static let row: CGFloat = 14
+    static let tight: CGFloat = 6
+    /// Minimum touch target.
+    static let target: CGFloat = 44
 }
 
 /// Sentence-case section label. Replaces the mono uppercase eyebrow.
