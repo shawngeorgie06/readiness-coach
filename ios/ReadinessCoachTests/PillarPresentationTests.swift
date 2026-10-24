@@ -291,23 +291,27 @@ final class PillarPresentationTests: XCTestCase {
         XCTAssertFalse(note.localizedCaseInsensitiveContains("reserve"))
     }
 
-    /// The server averages the 7 days before the score date (todayService
-    /// strain28d.slice(-7)), not a window that includes it.
-    func testTrainLoadRowNamesTheServerWindowBeforeTheScoreDate() {
-        let note = TrainLoadCopy.dailyAverageNote(scoreDate: "2026-10-24", calendar: utcCalendar())
-        XCTAssertTrue(note.hasPrefix("Average strain per day for Oct 17"), note)
-        XCTAssertTrue(note.contains("23, the 7 days before your Oct 24 score"), note)
-        XCTAssertTrue(note.contains("daily average for the 28 days before it"), note)
-        XCTAssertTrue(note.contains("Workouts on Oct 24 aren't counted"), note)
-        XCTAssertTrue(note.hasSuffix("this isn't the 7-day total."), note)
-        XCTAssertFalse(note.contains("last 7 days"), note)
+    /// The server buckets workouts by endAt into UTC days before 00:00 UTC on
+    /// the score date (todayService dateStart, dailyStrain); the caption says
+    /// so rather than claiming local days.
+    func testTrainLoadRowNamesTheServerUTCWindow() {
+        let original = NSTimeZone.default
+        defer { NSTimeZone.default = original }
+        for zone in ["Asia/Tokyo", "America/Los_Angeles"] {
+            NSTimeZone.default = TimeZone(identifier: zone)!
+            let note = TrainLoadCopy.dailyAverageNote(scoreDate: "2026-10-24")
+            XCTAssertEqual(note, "Scoring average: strain from workouts ending Oct 17, 00:00 UTC through Oct 24, 00:00 UTC (cutoff excluded), divided by 7 days. Compared with the daily average of the 28-day window ending at the same cutoff. The chart above uses local dates.", zone)
+        }
 
-        let crossing = TrainLoadCopy.dailyAverageNote(scoreDate: "2026-11-03", calendar: utcCalendar())
-        XCTAssertTrue(crossing.contains("Oct 27"), crossing)
-        XCTAssertTrue(crossing.contains("Nov 2"), crossing)
+        let crossing = TrainLoadCopy.dailyAverageNote(scoreDate: "2026-11-03")
+        XCTAssertTrue(crossing.contains("ending Oct 27, 00:00 UTC through Nov 3, 00:00 UTC"), crossing)
 
-        let unparsed = TrainLoadCopy.dailyAverageNote(scoreDate: "bad", calendar: utcCalendar())
-        XCTAssertTrue(unparsed.contains("7 days before your score's date"))
+        let unparsed = TrainLoadCopy.dailyAverageNote(scoreDate: "bad")
+        XCTAssertTrue(unparsed.contains("before 00:00 UTC on the score date"))
+        for text in [crossing, unparsed] {
+            XCTAssertFalse(text.contains("aren't counted"))
+            XCTAssertTrue(text.contains("28-day window ending at the same cutoff"))
+        }
     }
 
     // MARK: Chart scrubbing

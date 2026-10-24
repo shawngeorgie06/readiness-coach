@@ -187,23 +187,23 @@ struct TrainDay: Identifiable, Equatable {
     var isRest: Bool { sessions == 0 }
 }
 
-/// Train's "Compared with normal" row is the server's daily average for the
-/// 7 days before the score date against the 28 days before it; the head's
-/// figure is a 7-day total that includes today, so the row names its window.
+/// Train's "Compared with normal" row is the server's scoring average: strain
+/// of workouts ending in the 7 UTC days before 00:00 UTC on the score date,
+/// over 7, against the 28-day window ending at that cutoff. The head and
+/// chart use local days, so the caption states the UTC window.
 enum TrainLoadCopy {
-    static func dailyAverageNote(scoreDate: String, calendar: Calendar = .current) -> String {
-        guard let score = ChartDate.parse(scoreDate, timeZone: calendar.timeZone),
-              let first = calendar.date(byAdding: .day, value: -7, to: score),
-              let last = calendar.date(byAdding: .day, value: -1, to: score)
+    static func dailyAverageNote(scoreDate: String) -> String {
+        let utc = TimeZone(secondsFromGMT: 0)!
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = utc
+        guard let cutoff = ChartDate.parse(scoreDate, timeZone: utc),
+              let first = calendar.date(byAdding: .day, value: -7, to: cutoff)
         else {
-            return "Average strain per day for the 7 days before your score's date, against your daily average for the 28 days before it. This isn't the 7-day total."
+            return "Scoring average: strain from workouts ending in the 7 days before 00:00 UTC on the score date, divided by 7 days. Compared with the daily average of the 28-day window ending at the same cutoff. The chart above uses local dates."
         }
-        var dayStyle = Date.FormatStyle.dateTime.month(.abbreviated).day()
-        dayStyle.timeZone = calendar.timeZone
-        var rangeStyle = Date.IntervalFormatStyle.interval.month(.abbreviated).day()
-        rangeStyle.timeZone = calendar.timeZone
-        let day = score.formatted(dayStyle)
-        return "Average strain per day for \((first..<last).formatted(rangeStyle)), the 7 days before your \(day) score, against your daily average for the 28 days before it. Workouts on \(day) aren't counted, and this isn't the 7-day total."
+        var style = Date.FormatStyle.dateTime.month(.abbreviated).day()
+        style.timeZone = utc
+        return "Scoring average: strain from workouts ending \(first.formatted(style)), 00:00 UTC through \(cutoff.formatted(style)), 00:00 UTC (cutoff excluded), divided by 7 days. Compared with the daily average of the 28-day window ending at the same cutoff. The chart above uses local dates."
     }
 }
 
