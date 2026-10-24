@@ -45,7 +45,7 @@ struct TodayView: View {
 
                     if let today = sync.today {
                         content(today)
-                    } else if sync.isLoadingToday || sync.isSyncing {
+                    } else if sync.isSyncing {
                         loading
                     } else {
                         ContentUnavailableCompat(

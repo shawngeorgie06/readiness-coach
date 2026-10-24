@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 enum APIError: LocalizedError {
@@ -73,6 +74,22 @@ struct APIClient {
         self.userId = userId
         self.session = session
     }
+
+    /// Which server, account, and credential a client calls with. The token is
+    /// kept only as a SHA-256 digest, so an identity can be compared and passed
+    /// around without carrying the secret.
+    struct Identity: Hashable {
+        let baseURL: URL
+        let userId: String
+        let tokenDigest: Data
+    }
+
+    var identity: Identity {
+        Identity(baseURL: baseURL, userId: userId, tokenDigest: Data(SHA256.hash(data: Data(token.utf8))))
+    }
+
+    /// `.apiUnauthorized` user-info key for the `Identity` whose request got the 401.
+    static let identityKey = "identity"
 
     private static let decoder = JSONDecoder()
     private static let encoder = JSONEncoder()
@@ -345,7 +362,7 @@ struct APIClient {
         if http.statusCode == 304, ifNoneMatch != nil { return (data, http) }
         guard (200 ..< 300).contains(http.statusCode) else {
             if http.statusCode == 401 {
-                NotificationCenter.default.post(name: .apiUnauthorized, object: nil)
+                NotificationCenter.default.post(name: .apiUnauthorized, object: nil, userInfo: [Self.identityKey: identity])
             }
             if http.statusCode == 429 {
                 throw APIError.rateLimited(retryAfter: Self.retryAfterSeconds(http))
@@ -389,7 +406,8 @@ struct APIClient {
 extension APIClient: ReadAPI {}
 
 extension Notification.Name {
-    /// Posted when an authenticated /v1 call returns 401 (session expired/invalid).
+    /// Posted when an authenticated /v1 call returns 401 (session expired/invalid),
+    /// with the request's `APIClient.Identity` under `APIClient.identityKey`.
     static let apiUnauthorized = Notification.Name("apiUnauthorized")
 }
 

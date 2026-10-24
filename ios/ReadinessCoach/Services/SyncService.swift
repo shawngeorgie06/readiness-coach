@@ -25,7 +25,6 @@ extension APIClient: SyncAPI {}
 @MainActor
 final class SyncService: ObservableObject {
     @Published var isSyncing = false
-    @Published var isLoadingToday = false
     @Published var errorMessage: String?
     @Published var lastSyncSummary: String?
     @Published var lastUploadError: String?
@@ -58,6 +57,20 @@ final class SyncService: ObservableObject {
         self.connect = connect
         // Remove the pre-v1.3.4 UserDefaults cache after upgrading.
         UserDefaults.standard.removeObject(forKey: Self.legacyCacheKey)
+        store.onSessionEnd { [weak self] in self?.sessionEnded() }
+    }
+
+    /// Sign-out, clear, or user switch: stop the sync so it sends no further chunk
+    /// or retry, and drop the old account's progress and messages. A request
+    /// already on the wire can't be recalled; its run writes nothing when it lands.
+    private func sessionEnded() {
+        syncRun?.task.cancel()
+        syncRun = nil
+        isSyncing = false
+        uploadingCount = nil
+        errorMessage = nil
+        lastSyncSummary = nil
+        lastUploadError = nil
     }
 
     /// Records a successful server refresh: stamp the display time.
@@ -88,8 +101,16 @@ final class SyncService: ObservableObject {
         SyncFreshness.evaluate(today: today, settings: settings, errorMessage: todayError)
     }
 
+    /// Who a sync is for: the store session plus the client's server, user, and
+    /// credential. A sign-out, clear, user switch, or credential change ends it.
+    private struct Owner: Equatable {
+        let session: Int
+        let identity: APIClient.Identity
+    }
+
     /// The sync currently in flight, if any. Owned here rather than by a view.
-    private var syncTask: Task<Void, Never>?
+    private var syncRun: (id: Int, owner: Owner, task: Task<Void, Never>)?
+    private var syncRunCount = 0
 
     var healthSyncFailed: Bool {
         lastSyncSummary?.hasPrefix("Couldn't read Health") == true
@@ -119,39 +140,55 @@ final class SyncService: ObservableObject {
     /// app. A 30-day backfill is many chunks long and was being killed
     /// mid-upload, surfacing as `CancellationError` and "new Health data
     /// didn't upload". Callers still await completion; they just no longer
-    /// take the upload down with them. A second caller joins the run already
-    /// in flight instead of starting a competing one.
+    /// take the upload down with them. A second caller for the same session
+    /// joins the run already in flight instead of starting a competing one; a
+    /// caller for another session or credentials starts its own.
     func syncNow(_ settings: AppSettings) async {
-        if let inFlight = syncTask {
-            await inFlight.value
-            return
-        }
-        let task = Task { [weak self] in
-            guard let self else { return }
-            await self.performSync(settings)
-        }
-        syncTask = task
-        await task.value
-        syncTask = nil
-    }
-
-    private func performSync(_ settings: AppSettings) async {
         guard let client = settings.makeClient() else {
             errorMessage = APIError.notConfigured.localizedDescription
             return
         }
         let api = connect(client)
         StoreActivation.activate(store, userId: client.userId, api: api)
+        let owner = Owner(session: store.session, identity: client.identity)
+        if let run = syncRun, run.owner == owner {
+            await run.task.value
+            return
+        }
+        syncRun?.task.cancel()
+        syncRunCount += 1
+        let id = syncRunCount
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.performSync(settings, api: api, run: id)
+        }
+        syncRun = (id, owner, task)
+        await task.value
+        if syncRun?.id == id { syncRun = nil }
+    }
+
+    /// Whether run `id` still owns the sync: no other run replaced it, and the
+    /// session and credentials it started under are still the current ones.
+    /// Checked after every wait, before anything else is sent or recorded.
+    private func owns(_ id: Int, _ settings: AppSettings) -> Bool {
+        guard let run = syncRun, run.id == id else { return false }
+        return run.owner.session == store.session && settings.makeClient()?.identity == run.owner.identity
+    }
+
+    private func performSync(_ settings: AppSettings, api: SyncAPI, run: Int) async {
         isSyncing = true
         errorMessage = nil
         lastUploadError = nil
-        defer { isSyncing = false; uploadingCount = nil }
+        defer {
+            if syncRun?.id == run { isSyncing = false; uploadingCount = nil }
+        }
 
         async let healthPayloadTask = loadHealthPayload(settings)
         async let preliminaryTodayTask = store.refresh(.today, force: true)
 
         let healthPayload = await healthPayloadTask
         let preliminaryTodayLoaded = await preliminaryTodayTask
+        guard owns(run, settings) else { return }
 
         if preliminaryTodayLoaded {
             didRefresh(settings)
@@ -165,7 +202,8 @@ final class SyncService: ObservableObject {
                     lastSyncSummary = "No new HealthKit samples since last sync."
                     settings.lastSyncAt = Date()
                 } else {
-                    uploadedNewSamples = await uploadHealth(payload, api: api, settings: settings)
+                    uploadedNewSamples = await uploadHealth(payload, api: api, settings: settings, run: run)
+                    guard owns(run, settings) else { return }
                 }
             case .readFailed(let error):
                 applyHealthReadFailure(error)
@@ -176,9 +214,9 @@ final class SyncService: ObservableObject {
 
         if uploadedNewSamples {
             store.noteUploadedSamples()
-            await refreshTodayFromServer(settings, keepPreliminaryOnFailure: true)
+            await refreshTodayFromServer(settings, keepPreliminaryOnFailure: true, run: run)
         } else if !preliminaryTodayLoaded {
-            await refreshTodayFromServer(settings, keepPreliminaryOnFailure: false)
+            await refreshTodayFromServer(settings, keepPreliminaryOnFailure: false, run: run)
         }
     }
 
@@ -191,11 +229,13 @@ final class SyncService: ObservableObject {
     /// permanently — a 30-day backfill outran the `/v1` rate limit, the whole
     /// batch was discarded, and every retry restarted it and hit 429 again.
     ///
-    /// Returns whether anything new reached the server.
+    /// Returns whether anything new reached the server. Stops, sending and
+    /// recording nothing more, once `run` no longer owns the sync.
     private func uploadHealth(
         _ payload: SyncPayload,
         api: SyncAPI,
-        settings: AppSettings
+        settings: AppSettings,
+        run: Int
     ) async -> Bool {
         let chunks = api.syncChunks(payload)
         let total = payload.samples.count
@@ -204,8 +244,18 @@ final class SyncService: ObservableObject {
         uploadingCount = total
 
         for chunk in chunks {
+            guard owns(run, settings) else { return false }
+            let outcome: Result<SyncResult, Error>
             do {
-                let result = try await api.syncChunk(chunk)
+                outcome = .success(try await api.syncChunk(chunk))
+            } catch {
+                outcome = .failure(error)
+            }
+            // A chunk already sent can't be recalled, but after the session ends
+            // its result belongs to nobody: no watermark, no summary.
+            guard owns(run, settings) else { return false }
+            do {
+                let result = try outcome.get()
                 uploadedSamples += result.samples
                 uploadedWorkouts += result.workouts
                 uploadingCount = max(0, total - uploadedSamples)
@@ -236,19 +286,6 @@ final class SyncService: ObservableObject {
         return uploadedSamples > 0 || uploadedWorkouts > 0
     }
 
-    /// Fetches Today without pushing new samples (e.g. on tab appear).
-    func refreshToday(_ settings: AppSettings) async {
-        guard settings.makeClient() != nil else {
-            errorMessage = APIError.notConfigured.localizedDescription
-            return
-        }
-        StoreActivation.activate(store, settings: settings)
-        isLoadingToday = true
-        errorMessage = nil
-        defer { isLoadingToday = false }
-        await refreshTodayFromServer(settings, keepPreliminaryOnFailure: false)
-    }
-
     private enum HealthPayloadResult {
         case samples(SyncPayload)
         case readFailed(Error)
@@ -271,9 +308,12 @@ final class SyncService: ObservableObject {
     /// A 401 signs the user out through `.apiUnauthorized` (see `AppSettings`).
     private func refreshTodayFromServer(
         _ settings: AppSettings,
-        keepPreliminaryOnFailure: Bool
+        keepPreliminaryOnFailure: Bool,
+        run: Int
     ) async {
-        if await store.refresh(.today, force: true) {
+        let loaded = await store.refresh(.today, force: true)
+        guard owns(run, settings) else { return }
+        if loaded {
             didRefresh(settings)
         } else if !keepPreliminaryOnFailure || today == nil {
             errorMessage = store.today.error

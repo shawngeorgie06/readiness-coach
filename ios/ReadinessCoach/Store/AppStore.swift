@@ -26,9 +26,10 @@ final class AppStore {
     @ObservationIgnored private var api: ReadAPI?
     /// Running fetches per key, with the data version and local day each one started under.
     @ObservationIgnored private var inFlight: [ResourceKey: (task: Task<Bool, Never>, version: Int, day: LocalDay)] = [:]
-    /// Bumped whenever memory is cleared; a fetch that started under an older
-    /// session never writes its result.
-    @ObservationIgnored private var session = 0
+    /// Bumped whenever memory is cleared (sign-out, clear, user switch); a fetch
+    /// or sync that started under an older session never writes its result.
+    @ObservationIgnored private(set) var session = 0
+    @ObservationIgnored private var sessionEndHandlers: [() -> Void] = []
 
     private static let rangeDays = [7, 30, 90]
     private static let bodyDays = 30
@@ -133,6 +134,11 @@ final class AppStore {
         dataVersion += 1
     }
 
+    /// Runs `handler` each time a session ends, after memory is cleared.
+    func onSessionEnd(_ handler: @escaping () -> Void) {
+        sessionEndHandlers.append(handler)
+    }
+
     /// Sign-out / account deletion: clears memory and disk.
     func reset() {
         clearMemory()
@@ -153,6 +159,7 @@ final class AppStore {
         sleep = [:]
         history = [:]
         dataVersion = 0
+        sessionEndHandlers.forEach { $0() }
     }
 
     private func needsRevalidation(_ key: ResourceKey) -> Bool {

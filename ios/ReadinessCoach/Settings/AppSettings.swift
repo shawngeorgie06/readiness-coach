@@ -60,8 +60,13 @@ final class AppSettings: ObservableObject {
         self.notificationHour = (defaults.object(forKey: Keys.notificationHour) as? Int) ?? 7
         self.notificationMinute = defaults.integer(forKey: Keys.notificationMinute)
 
-        NotificationCenter.default.addObserver(forName: .apiUnauthorized, object: nil, queue: .main) { [weak self] _ in
-            guard let self, self.isSignedIn else { return }
+        // Only a 401 for the credentials in use now signs out: a request from an
+        // earlier session or account that fails late must not end the current one.
+        NotificationCenter.default.addObserver(forName: .apiUnauthorized, object: nil, queue: .main) { [weak self] note in
+            guard let self, self.isSignedIn,
+                  let identity = note.userInfo?[APIClient.identityKey] as? APIClient.Identity,
+                  identity == self.makeClient()?.identity
+            else { return }
             self.signOut()
         }
     }

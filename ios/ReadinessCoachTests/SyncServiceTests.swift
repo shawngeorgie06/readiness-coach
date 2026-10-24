@@ -128,6 +128,14 @@ private func makeToday() -> TodayDTO {
     )
 }
 
+/// The user info of each notification seen, from whichever thread posted it.
+private final class Posted: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _userInfos: [String] = []
+    var userInfos: [String] { lock.withLock { _userInfos } }
+    func append(_ userInfo: String) { lock.withLock { _userInfos.append(userInfo) } }
+}
+
 @MainActor
 final class SyncServiceTests: XCTestCase {
     /// AppSettings keeps credentials in the Keychain; these tests put back whatever was there.
@@ -237,5 +245,152 @@ final class SyncServiceTests: XCTestCase {
 
         XCTAssertNotNil(sync.today)
         XCTAssertEqual(sync.freshness(using: settings), .offline)
+    }
+
+    // MARK: - Session ownership
+
+    func testSignOutDuringHealthReadUploadsAndRecordsNothing() async {
+        signIn("a", token: "sA")
+        let read = health.holdNextRead()
+        let run = Task { await sync.syncNow(settings) }
+        await waitUntil { self.health.reads == ["a"] }
+
+        settings.signOut()
+        StoreActivation.reset(store, legacyURL: legacyURL)
+        read.open()
+        await run.value
+
+        XCTAssertEqual(server.uploads.count, 0)
+        XCTAssertNil(settings.lastSyncAt)
+        XCTAssertNil(settings.lastRefreshAt)
+        XCTAssertNil(sync.today)
+        XCTAssertNil(sync.lastSyncSummary)
+        XCTAssertFalse(sync.isSyncing)
+        XCTAssertNil(cache.load(.today, userId: "a", as: TodayDTO.self))
+    }
+
+    func testClearDuringUploadSendsNoFurtherChunksAndRecordsNothing() async {
+        signIn("a", token: "sA")
+        server.holdUploads = true
+        let run = Task { await sync.syncNow(settings) }
+        await waitUntil { self.server.uploads.count == 1 }
+
+        settings.clearLocalSettings()
+        StoreActivation.reset(store, legacyURL: legacyURL)
+        server.holdUploads = false
+        await run.value
+
+        XCTAssertEqual(server.uploads.count, 1, "only the chunk already sent")
+        XCTAssertEqual(server.todayUsers, ["a"], "no final refresh")
+        XCTAssertNil(settings.lastSyncAt)
+        XCTAssertNil(settings.lastRefreshAt)
+        XCTAssertNil(sync.lastSyncSummary)
+        XCTAssertNil(sync.uploadingCount)
+        XCTAssertFalse(sync.isSyncing)
+    }
+
+    func testUserSwitchDuringUploadSendsNoFurtherChunksAndRecordsNothing() async {
+        signIn("a", token: "sA")
+        server.holdUploads = true
+        let run = Task { await sync.syncNow(settings) }
+        await waitUntil { self.server.uploads.count == 1 }
+        let refreshedBeforeSwitch = settings.lastRefreshAt
+
+        switchUser(to: "b", token: "sB")
+        server.holdUploads = false
+        await run.value
+
+        XCTAssertEqual(server.uploads.map(\.userId), ["a"], "only the chunk already sent")
+        XCTAssertEqual(server.todayUsers, ["a"], "no final refresh")
+        XCTAssertNil(settings.lastSyncAt, "user b gets no watermark from user a's upload")
+        XCTAssertEqual(settings.lastRefreshAt, refreshedBeforeSwitch)
+        XCTAssertNil(sync.today)
+        XCTAssertNil(sync.lastSyncSummary)
+        XCTAssertFalse(sync.isSyncing)
+        XCTAssertNil(cache.load(.today, userId: "b", as: TodayDTO.self))
+    }
+
+    func testNewSessionSyncRunsOnItsOwnAndOldRunLeavesItAlone() async {
+        signIn("a", token: "sA")
+        let readA = health.holdNextRead()
+        let runA = Task { await sync.syncNow(settings) }
+        await waitUntil { self.health.reads == ["a"] }
+
+        settings.signOut()
+        StoreActivation.reset(store, legacyURL: legacyURL)
+        signIn("b", token: "sB")
+        server.holdUploads = true
+        let runB = Task { await sync.syncNow(settings) }
+        await waitUntil { self.server.uploads.count == 1 }
+        XCTAssertEqual(health.reads, ["a", "b"], "user b's sync didn't join user a's")
+
+        readA.open()
+        await runA.value
+        XCTAssertTrue(sync.isSyncing, "user a's run finishing leaves user b's in progress")
+        XCTAssertNotNil(sync.uploadingCount)
+
+        server.holdUploads = false
+        await runB.value
+        XCTAssertEqual(server.uploads.map(\.userId), ["b", "b"])
+        XCTAssertEqual(server.todayUsers.filter { $0 == "a" }.count, 1, "only the preliminary fetch from before sign-out")
+        XCTAssertNotNil(settings.lastSyncAt)
+        XCTAssertEqual(sync.lastSyncSummary, "Synced 2 samples, 0 workouts.")
+        XCTAssertFalse(sync.isSyncing)
+        XCTAssertNotNil(cache.load(.today, userId: "b", as: TodayDTO.self))
+    }
+
+    func testRepeatedSyncForTheSameSessionJoinsTheRunInFlight() async {
+        signIn("a", token: "sA")
+        let read = health.holdNextRead()
+        let first = Task { await sync.syncNow(settings) }
+        await waitUntil { self.health.reads == ["a"] }
+        let second = Task { await sync.syncNow(settings) }
+        read.open()
+        await first.value
+        await second.value
+
+        XCTAssertEqual(health.reads, ["a"])
+        XCTAssertEqual(server.uploads.count, 2)
+    }
+
+    // MARK: - Unauthorized
+
+    private func stubbed(_ client: APIClient) -> APIClient {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [StubURLProtocol.self]
+        return APIClient(baseURL: client.baseURL, token: client.token, userId: client.userId, session: URLSession(configuration: config))
+    }
+
+    /// Runs after every main-queue notification block already enqueued.
+    private func drainMainQueue() async {
+        await withCheckedContinuation { done in OperationQueue.main.addOperation { done.resume() } }
+    }
+
+    func testUnauthorizedFromAnEarlierSessionLeavesTheCurrentOneSignedIn() async throws {
+        StubURLProtocol.reset { request in
+            (HTTPURLResponse(url: request.url!, statusCode: 401, httpVersion: nil, headerFields: nil)!, Data())
+        }
+        let today = LocalDay(date: day, utcOffsetMinutes: offset)
+        signIn("a", token: "sA")
+        let old = stubbed(try XCTUnwrap(settings.makeClient()))
+        settings.signOut()
+        signIn("b", token: "sB")
+
+        let posted = Posted()
+        let observer = NotificationCenter.default.addObserver(forName: .apiUnauthorized, object: nil, queue: nil) {
+            posted.append(String(describing: $0.userInfo ?? [:]))
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        _ = try? await old.today(on: today, etag: nil)
+        await drainMainQueue()
+
+        XCTAssertEqual(posted.userInfos.count, 1)
+        XCTAssertTrue(settings.isSignedIn)
+        XCTAssertEqual(settings.userId, "b")
+        XCTAssertFalse(posted.userInfos.joined().contains("sA"), "the token never travels")
+
+        _ = try? await stubbed(try XCTUnwrap(settings.makeClient())).today(on: today, etag: nil)
+        await drainMainQueue()
+        XCTAssertFalse(settings.isSignedIn, "the current session's own 401 still signs out")
     }
 }
