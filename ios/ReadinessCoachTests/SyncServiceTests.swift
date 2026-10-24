@@ -25,6 +25,7 @@ private final class Gate {
 private final class FakeHealth: HealthSource {
     var canRead = true
     var samples = 2
+    var readFails = false
     /// The user each read was for, in order.
     private(set) var reads: [String] = []
     private var nextGate: Gate?
@@ -41,6 +42,7 @@ private final class FakeHealth: HealthSource {
         let gate = nextGate
         nextGate = nil
         await gate?.wait()
+        if readFails { throw Boom() }
         let samples = (0..<samples).map { index in
             SyncSample(
                 hkUuid: "\(userId)-\(index)", type: "heartRate",
@@ -58,6 +60,7 @@ private final class FakeServer: @unchecked Sendable {
     private var _uploads: [SyncPayload] = []
     private var _todayUsers: [String] = []
     private var _holdUploads = false
+    private var _uploadsFail = false
     private var _todayFails: (Int) -> Bool = { _ in false }
 
     var uploads: [SyncPayload] { lock.withLock { _uploads } }
@@ -66,6 +69,10 @@ private final class FakeServer: @unchecked Sendable {
     var holdUploads: Bool {
         get { lock.withLock { _holdUploads } }
         set { lock.withLock { _holdUploads = newValue } }
+    }
+    var uploadsFail: Bool {
+        get { lock.withLock { _uploadsFail } }
+        set { lock.withLock { _uploadsFail = newValue } }
     }
     /// Whether the Today fetch at a call index (from 0) fails.
     var todayFails: (Int) -> Bool {
@@ -84,8 +91,9 @@ private final class FakeServer: @unchecked Sendable {
         return .fresh(makeToday(), etag: nil)
     }
 
-    fileprivate func upload(_ payload: SyncPayload) async -> SyncResult {
+    fileprivate func upload(_ payload: SyncPayload) async throws -> SyncResult {
         lock.withLock { _uploads.append(payload) }
+        if uploadsFail { throw Boom() }
         // Bounded, so a regression fails its assertions instead of hanging the suite.
         for _ in 0..<1500 where holdUploads {
             try? await Task.sleep(nanoseconds: 2_000_000)
@@ -114,7 +122,7 @@ private final class FakeServer: @unchecked Sendable {
         func syncChunks(_ payload: SyncPayload) -> [SyncPayload] {
             payload.samples.map { SyncPayload(userId: payload.userId, samples: [$0], workouts: []) }
         }
-        func syncChunk(_ payload: SyncPayload) async throws -> SyncResult { await server.upload(payload) }
+        func syncChunk(_ payload: SyncPayload) async throws -> SyncResult { try await server.upload(payload) }
     }
 }
 
@@ -215,6 +223,56 @@ final class SyncServiceTests: XCTestCase {
         XCTAssertNotNil(sync.today, "the saved score stays on screen")
         XCTAssertNotNil(sync.todayError)
         XCTAssertEqual(sync.freshness(using: settings), .offline)
+    }
+
+    // MARK: - Refresh outcome
+
+    func testCompleteSyncSucceeds() async {
+        signIn("a", token: "sA")
+        await sync.syncNow(settings)
+
+        XCTAssertEqual(server.uploads.count, 2)
+        XCTAssertTrue(sync.lastSyncSucceeded)
+    }
+
+    func testTodayFailureIsNotASuccess() async {
+        signIn("a", token: "sA")
+        server.todayFails = { _ in true }
+        await sync.syncNow(settings)
+
+        XCTAssertNotNil(sync.todayError)
+        XCTAssertFalse(sync.lastSyncSucceeded)
+    }
+
+    func testUploadFailureBesideAFreshScoreIsNotASuccess() async {
+        signIn("a", token: "sA")
+        server.uploadsFail = true
+        await sync.syncNow(settings)
+
+        XCTAssertNil(sync.todayError, "Today itself refreshed")
+        XCTAssertTrue(sync.healthUploadFailed)
+        XCTAssertFalse(sync.lastSyncSucceeded)
+    }
+
+    func testHealthReadFailureBesideAFreshScoreIsNotASuccess() async {
+        signIn("a", token: "sA")
+        health.readFails = true
+        await sync.syncNow(settings)
+
+        XCTAssertNil(sync.todayError, "Today itself refreshed")
+        XCTAssertTrue(sync.healthSyncFailed)
+        XCTAssertFalse(sync.lastSyncSucceeded)
+    }
+
+    func testSyncAfterAFailedOneSucceeds() async {
+        signIn("a", token: "sA")
+        server.uploadsFail = true
+        await sync.syncNow(settings)
+        XCTAssertFalse(sync.lastSyncSucceeded)
+
+        server.uploadsFail = false
+        await sync.syncNow(settings)
+        XCTAssertTrue(sync.lastSyncSucceeded)
     }
 
     func testDayChangeRefreshFailureWarnsBesideSavedScore() async {

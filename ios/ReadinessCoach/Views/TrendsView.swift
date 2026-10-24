@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import Charts
 
 /// History, pushed from the Today head: the selected day's readiness and pillar
@@ -225,20 +226,12 @@ struct TrendsView: View {
             .frame(height: 160)
             .chartOverlay { proxy in
                 GeometryReader { geo in
-                    Rectangle()
-                        .fill(Color.clear)
-                        .contentShape(Rectangle())
-                        .gesture(
-                            DragGesture(minimumDistance: 0)
-                                .onChanged { select(at: $0.location, proxy: proxy, geo: geo, series: series) }
-                                .onEnded { value in
-                                    select(at: value.location, proxy: proxy, geo: geo, series: series)
-                                    let moved = hypot(value.translation.width, value.translation.height)
-                                    if moved < 8, let point = HistoryModel.selected(selectedPointID, in: points) {
-                                        open(point)
-                                    }
-                                }
-                        )
+                    HistoryScrubSurface(
+                        onSelect: { select(atX: $0, proxy: proxy, geo: geo, series: series) },
+                        onTap: { x in
+                            if let point = select(atX: x, proxy: proxy, geo: geo, series: series) { open(point) }
+                        }
+                    )
                 }
             }
             .accessibilityElement(children: .ignore)
@@ -266,18 +259,20 @@ struct TrendsView: View {
         }
     }
 
-    private func select(at location: CGPoint, proxy: ChartProxy, geo: GeometryProxy, series: TrendSeries) {
-        guard let plotFrame = proxy.plotFrame else { return }
-        let x = location.x - geo[plotFrame].origin.x
-        guard let raw: Date = proxy.value(atX: x),
+    /// Selects the day under `x` in the overlay and returns it.
+    @discardableResult
+    private func select(atX x: CGFloat, proxy: ChartProxy, geo: GeometryProxy, series: TrendSeries) -> ReadinessPoint? {
+        guard let plotFrame = proxy.plotFrame,
+              let raw: Date = proxy.value(atX: x - geo[plotFrame].origin.x),
               let index = HistoryModel.dayIndex(for: raw, in: series.dates)
-        else { return }
-        let id = series.points[index].id
-        if id != selectedPointID {
+        else { return nil }
+        let point = series.points[index]
+        if point.id != selectedPointID {
             var transaction = Transaction()
             transaction.disablesAnimations = true
-            withTransaction(transaction) { selectedPointID = id }
+            withTransaction(transaction) { selectedPointID = point.id }
         }
+        return point
     }
 
     // MARK: Change from the previous day
@@ -371,13 +366,7 @@ struct TrendsView: View {
                 .frame(height: 170)
                 .chartOverlay { proxy in
                     GeometryReader { geo in
-                        Rectangle()
-                            .fill(Color.clear)
-                            .contentShape(Rectangle())
-                            .gesture(
-                                DragGesture(minimumDistance: 0)
-                                    .onChanged { select(at: $0.location, proxy: proxy, geo: geo, series: series) }
-                            )
+                        HistoryScrubSurface { select(atX: $0, proxy: proxy, geo: geo, series: series) }
                     }
                 }
                 .accessibilityElement(children: .ignore)
@@ -571,6 +560,96 @@ private struct HistoryRangePicker: View {
         .padding(4)
         .background(Palette.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .accessibilityElement(children: .contain)
+    }
+}
+
+/// A History chart's touch surface: a tap, a touch and hold, or a sideways
+/// drag picks a day at an overlay x, and a tap can also open it; a vertical
+/// drag belongs to the page. UIKit recognizers, because a SwiftUI gesture on
+/// scroll content keeps the touch from the enclosing scroll view.
+struct HistoryScrubSurface: UIViewRepresentable {
+    let onSelect: (CGFloat) -> Void
+    /// What a tap does instead of selecting, when set.
+    var onTap: ((CGFloat) -> Void)? = nil
+
+    func makeCoordinator() -> Coordinator { Coordinator(onSelect: onSelect, onTap: onTap) }
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .clear
+        context.coordinator.install(on: view)
+        return view
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {
+        context.coordinator.onSelect = onSelect
+        context.coordinator.onTap = onTap
+    }
+
+    enum Response { case select, tap }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var onSelect: (CGFloat) -> Void
+        var onTap: ((CGFloat) -> Void)?
+        let tap = UITapGestureRecognizer()
+        let hold = UILongPressGestureRecognizer()
+        let pan = UIPanGestureRecognizer()
+
+        init(onSelect: @escaping (CGFloat) -> Void, onTap: ((CGFloat) -> Void)?) {
+            self.onSelect = onSelect
+            self.onTap = onTap
+            super.init()
+            hold.minimumPressDuration = 0.25
+            for recognizer in [tap, hold, pan] as [UIGestureRecognizer] {
+                recognizer.addTarget(self, action: #selector(handle(_:)))
+                recognizer.delegate = self
+            }
+        }
+
+        func install(on view: UIView) {
+            for recognizer in [tap, hold, pan] as [UIGestureRecognizer] { view.addGestureRecognizer(recognizer) }
+        }
+
+        /// A tap lands once it ends; a hold marks its day once, and moving
+        /// afterwards is the pan's or the page's; a pan follows the finger.
+        func response(to recognizer: UIGestureRecognizer) -> Response? {
+            switch (recognizer, recognizer.state) {
+            case (tap, .ended): .tap
+            case (hold, .began), (pan, .began), (pan, .changed): .select
+            default: nil
+            }
+        }
+
+        @objc func handle(_ recognizer: UIGestureRecognizer) {
+            let x = recognizer.location(in: recognizer.view).x
+            switch response(to: recognizer) {
+            case .tap: (onTap ?? onSelect)(x)
+            case .select: onSelect(x)
+            case nil: break
+            }
+        }
+
+        /// The pan starts only for a mostly sideways movement.
+        func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
+            guard recognizer === pan else { return true }
+            let translation = pan.translation(in: pan.view)
+            return Self.isSideways(translation == .zero ? pan.velocity(in: pan.view) : translation)
+        }
+
+        static func isSideways(_ movement: CGPoint) -> Bool {
+            abs(movement.x) > abs(movement.y)
+        }
+
+        /// The hold never takes the touch away from the page or the pan.
+        func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+            recognizer === hold || other === hold
+        }
+
+        /// The page's scroll waits for the pan to decline, so a vertical drag
+        /// still scrolls and a sideways one scrubs without moving the page.
+        func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldBeRequiredToFailBy other: UIGestureRecognizer) -> Bool {
+            recognizer === pan && other is UIPanGestureRecognizer && other.view is UIScrollView
+        }
     }
 }
 
