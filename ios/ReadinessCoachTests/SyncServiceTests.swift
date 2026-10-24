@@ -314,7 +314,7 @@ final class SyncServiceTests: XCTestCase {
         signIn("a", token: "sA")
         let readA = health.holdNextRead()
         let runA = Task { await sync.syncNow(settings) }
-        await waitUntil { self.health.reads == ["a"] }
+        await waitUntil { self.health.reads == ["a"] && self.server.todayUsers == ["a"] }
 
         settings.signOut()
         StoreActivation.reset(store, legacyURL: legacyURL)
@@ -351,6 +351,64 @@ final class SyncServiceTests: XCTestCase {
 
         XCTAssertEqual(health.reads, ["a"])
         XCTAssertEqual(server.uploads.count, 2)
+    }
+
+    /// Starts a sync and returns after `syncNow` has scheduled its run but before
+    /// the run's first step. Main-actor jobs run in order: the sync's job, then
+    /// this continuation, then the run it scheduled.
+    private func startSyncUpToItsScheduledRun(file: StaticString = #filePath, line: UInt = #line) async -> Task<Void, Never> {
+        let session = store.session
+        let run = Task { await sync.syncNow(settings) }
+        await Task.yield()
+        XCTAssertEqual(store.session, session + 1, "syncNow activated the store and scheduled its run", file: file, line: line)
+        XCTAssertTrue(health.reads.isEmpty, "the scheduled run hasn't started", file: file, line: line)
+        XCTAssertFalse(sync.isSyncing, file: file, line: line)
+        return run
+    }
+
+    func testSignOutBeforeTheScheduledSyncStartsReadsSendsAndRecordsNothing() async {
+        signIn("a", token: "sA")
+        let run = await startSyncUpToItsScheduledRun()
+
+        settings.signOut()
+        StoreActivation.reset(store, legacyURL: legacyURL)
+        await run.value
+        await drainMainQueue()
+
+        XCTAssertEqual(health.reads, [], "no Health read")
+        XCTAssertEqual(server.todayUsers, [], "no Today request")
+        XCTAssertEqual(server.uploads.count, 0)
+        XCTAssertNil(cache.load(.today, userId: "a", as: TodayDTO.self))
+        XCTAssertFalse(sync.isSyncing)
+        XCTAssertNil(sync.uploadingCount)
+        XCTAssertNil(sync.errorMessage)
+        XCTAssertNil(sync.lastSyncSummary)
+        XCTAssertNil(settings.lastSyncAt)
+        XCTAssertNil(settings.lastRefreshAt)
+    }
+
+    func testRunEndedBeforeItStartsLeavesTheNextSessionsSyncAlone() async {
+        signIn("a", token: "sA")
+        let runA = await startSyncUpToItsScheduledRun()
+
+        settings.signOut()
+        StoreActivation.reset(store, legacyURL: legacyURL)
+        signIn("b", token: "sB")
+        server.holdUploads = true
+        let runB = Task { await sync.syncNow(settings) }
+        await runA.value
+        await waitUntil { self.server.uploads.count == 1 }
+        XCTAssertTrue(sync.isSyncing, "user a's run ending leaves user b's in progress")
+
+        server.holdUploads = false
+        await runB.value
+        XCTAssertEqual(health.reads, ["b"], "only user b's own sync read Health")
+        XCTAssertEqual(server.uploads.map(\.userId), ["b", "b"])
+        XCTAssertEqual(Set(server.todayUsers), ["b"])
+        XCTAssertEqual(sync.lastSyncSummary, "Synced 2 samples, 0 workouts.")
+        XCTAssertFalse(sync.isSyncing)
+        XCTAssertNil(cache.load(.today, userId: "a", as: TodayDTO.self))
+        XCTAssertNotNil(cache.load(.today, userId: "b", as: TodayDTO.self))
     }
 
     // MARK: - Unauthorized

@@ -167,15 +167,18 @@ final class SyncService: ObservableObject {
         if syncRun?.id == id { syncRun = nil }
     }
 
-    /// Whether run `id` still owns the sync: no other run replaced it, and the
-    /// session and credentials it started under are still the current ones.
-    /// Checked after every wait, before anything else is sent or recorded.
+    /// Whether run `id` still owns the sync: it wasn't cancelled, no other run
+    /// replaced it, and the session and credentials it started under are still
+    /// the current ones. Checked when the run and each of its reads start, and
+    /// after every wait, before anything else is read, sent, or recorded.
     private func owns(_ id: Int, _ settings: AppSettings) -> Bool {
-        guard let run = syncRun, run.id == id else { return false }
+        guard !Task.isCancelled, let run = syncRun, run.id == id else { return false }
         return run.owner.session == store.session && settings.makeClient()?.identity == run.owner.identity
     }
 
     private func performSync(_ settings: AppSettings, api: SyncAPI, run: Int) async {
+        // The session can end after `syncNow` schedules this run and before it starts.
+        guard owns(run, settings) else { return }
         isSyncing = true
         errorMessage = nil
         lastUploadError = nil
@@ -183,8 +186,9 @@ final class SyncService: ObservableObject {
             if syncRun?.id == run { isSyncing = false; uploadingCount = nil }
         }
 
-        async let healthPayloadTask = loadHealthPayload(settings)
-        async let preliminaryTodayTask = store.refresh(.today, force: true)
+        // Each child checks again as it starts: it can be scheduled after a reset.
+        async let healthPayloadTask = loadHealthPayload(settings, run: run)
+        async let preliminaryTodayTask = refreshTodayIfOwned(settings, run: run)
 
         let healthPayload = await healthPayloadTask
         let preliminaryTodayLoaded = await preliminaryTodayTask
@@ -292,7 +296,8 @@ final class SyncService: ObservableObject {
         case unavailable
     }
 
-    private func loadHealthPayload(_ settings: AppSettings) async -> HealthPayloadResult? {
+    private func loadHealthPayload(_ settings: AppSettings, run: Int) async -> HealthPayloadResult? {
+        guard owns(run, settings) else { return nil }
         guard health.canRead else { return .unavailable }
         do {
             let payload = try await health.fetchSamples(
@@ -305,13 +310,19 @@ final class SyncService: ObservableObject {
         }
     }
 
+    /// Fetches Today only while `run` owns the sync. Returns whether it loaded.
+    private func refreshTodayIfOwned(_ settings: AppSettings, run: Int) async -> Bool {
+        guard owns(run, settings) else { return false }
+        return await store.refresh(.today, force: true)
+    }
+
     /// A 401 signs the user out through `.apiUnauthorized` (see `AppSettings`).
     private func refreshTodayFromServer(
         _ settings: AppSettings,
         keepPreliminaryOnFailure: Bool,
         run: Int
     ) async {
-        let loaded = await store.refresh(.today, force: true)
+        let loaded = await refreshTodayIfOwned(settings, run: run)
         guard owns(run, settings) else { return }
         if loaded {
             didRefresh(settings)
