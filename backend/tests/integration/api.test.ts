@@ -182,6 +182,24 @@ describe("backend API integration", () => {
     ).toBe(1);
   });
 
+  it("returns private no-store, a weak ETag, and 304 on If-None-Match", async () => {
+    await request(app)
+      .post("/v1/sync")
+      .set("Authorization", authorization)
+      .send(syncPayload)
+      .expect(200);
+
+    const first = await request(app).get(`/v1/today?date=${date}`).set("Authorization", authorization);
+    expect(first.status).toBe(200);
+    expect(first.headers["cache-control"]).toBe("private, no-store");
+    expect(first.headers.etag).toMatch(/^W\//);
+    const second = await request(app)
+      .get(`/v1/today?date=${date}`)
+      .set("Authorization", authorization)
+      .set("If-None-Match", first.headers.etag);
+    expect(second.status).toBe(304);
+  });
+
   it("returns 404 deleting an unknown user", async () => {
     await request(app)
       .delete("/v1/user?userId=unknown")

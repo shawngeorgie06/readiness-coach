@@ -5,6 +5,7 @@ import rateLimit from "express-rate-limit";
 import { createAppleVerifier, type AppleVerifier } from "./auth/appleVerifier.js";
 import { prisma } from "./db.js";
 import { requireSession } from "./middleware/auth.js";
+import { createRequestTimer } from "./middleware/timing.js";
 import { createAuthRouter } from "./routes/auth.js";
 import { bodyRouter } from "./routes/body.js";
 import { coachRouter } from "./routes/coach.js";
@@ -49,6 +50,7 @@ export function createApp({
   // Most hosts terminate TLS at a proxy — needed for correct IPs.
   app.set("trust proxy", 1);
   app.use(helmet());
+  app.use(createRequestTimer());
   app.use(
     cors({
       origin: corsOrigin
@@ -95,6 +97,12 @@ export function createApp({
   }
 
   app.use("/v1", requireSession({ sessionSecret, apiToken, apiTokenUserId }));
+  // Reads are per-user: let clients revalidate with the weak ETag Express adds
+  // to res.json, but never let a shared cache store them.
+  app.use("/v1", (req, res, next) => {
+    if (req.method === "GET") res.set("Cache-Control", "private, no-store");
+    next();
+  });
   app.use("/v1/sync", syncRouter);
   app.use("/v1/today", todayRouter);
   app.use("/v1/history", historyRouter);
