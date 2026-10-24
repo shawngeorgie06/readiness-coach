@@ -1,55 +1,95 @@
 import SwiftUI
 import Charts
 
-/// History — pushed from the Today score: range selector, readiness trend bars
-/// (tappable), pillar trends. Sleep detail lives on the Sleep tab.
+/// History, pushed from the Today head: the selected day's readiness and pillar
+/// scores up top, readiness bars coloured by decision (drag to scrub, tap a day
+/// for its read-only summary), then what changed, pillar trends, the latest
+/// drivers and every day in the range. Reads the store only.
 struct TrendsView: View {
     @Environment(AppStore.self) private var store
     @EnvironmentObject private var tabs: TabRouter
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var rangeIndex = 1
     @State private var selectedPointID: String?
-    @State private var pillarSelection = ChartDaySelection()
+    @State private var summary: DaySummary?
+    @State private var showsAllDays = false
+    @State private var zoneChanges = 0
     @State private var derived = Derived<SeriesStamp, TrendSeries?>()
 
     private let rangeLabels = ["7d", "30d", "90d"]
     private let rangeDays = [7, 30, 90]
+    /// Days listed before "Show all".
+    private let collapsedDayCount = 7
 
     private var days: Int { rangeDays[rangeIndex] }
     private var key: ResourceKey { .history(days: days) }
     private var resource: Resource<ReadinessHistoryResponse> { store.history[days] ?? Resource() }
 
     var body: some View {
-        ScrollView(.vertical, showsIndicators: true) {
-            VStack(spacing: 16) {
-                SegmentedRange(rangeLabels, selection: $rangeIndex)
-                StaleDataBanner(resource: resource) { Task { await store.refresh(key, force: true) } }
-                if let series, !series.points.isEmpty {
-                    trendCard(series)
-                    insightCards()
-                    pillarsCard(series)
-                } else if resource.value == nil && resource.isRefreshing {
-                    ProgressView().padding(.top, 60)
-                } else {
-                    ContentUnavailableCompat(
-                        title: "No trend yet",
-                        message: "Sync a few days of data to see your readiness trend.",
-                        systemImage: "chart.bar.fill"
+        // Chart dates are midnights in the current zone; reading this redraws
+        // after a zone change so the series rebuilds in the new zone.
+        let _ = zoneChanges
+        let series = self.series
+        let points = series?.points ?? []
+        let selected = HistoryModel.selected(selectedPointID, in: points)
+
+        ScrollView {
+            VStack(alignment: .leading, spacing: Space.section) {
+                if let series, let selected {
+                    staleNotice
+                    head(selected)
+                    pillarReadout(selected, prior: HistoryModel.prior(of: selected, in: points))
+                    readinessSection { bars(series, selected: selected) }
+                    if let prior = HistoryModel.prior(of: selected, in: points) {
+                        changeSection(selected, prior: prior)
+                    }
+                    pillarTrendSection(series, selected: selected)
+                    snapshotSection
+                    daysSection(points)
+                    Text(HistoryModel.decisionGuide)
+                        .font(.footnote)
+                        .foregroundStyle(Palette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if resource.value == nil, let error = resource.error {
+                    readinessSection { EmptyView() }
+                    InlineNotice(
+                        title: "Couldn't load history",
+                        message: error,
+                        actionTitle: "Retry",
+                        action: retry
                     )
-                }
-                if resource.value == nil, let error = resource.error {
-                    ErrorCard(message: error) { Task { await store.refresh(key, force: true) } }
+                } else if resource.value == nil {
+                    SkeletonHead()
+                    readinessSection {
+                        SkeletonBlock(height: 160, cornerRadius: 8)
+                            .accessibilityLabel("Loading history")
+                    }
+                } else {
+                    readinessSection {
+                        ContentUnavailableCompat(
+                            title: "No trend yet",
+                            message: "Sync a few days of data to see your readiness trend.",
+                            systemImage: "chart.bar.fill"
+                        )
+                        .frame(maxWidth: .infinity)
+                    }
                 }
             }
-            .pageWidthLocked()
-            .padding()
+            .padding(.horizontal, Space.margin)
+            .padding(.top, 8)
+            .padding(.bottom, 24)
         }
-        .verticalScrollLocked()
         .screenBackground()
         .navigationTitle("History")
+        .sensoryFeedback(.selection, trigger: selectedPointID)
         .onChange(of: rangeIndex) { _, _ in
             selectedPointID = nil
-            pillarSelection.date = series?.dates.last
+            showsAllDays = false
         }
+        .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in
+            zoneChanges += 1
+        }
+        .navigationDestination(item: $summary) { DaySummaryView(summary: $0) }
         .task(id: store.taskID(key)) { await store.refresh(key) }
         .refreshable { await store.refresh(key, force: true) }
     }
@@ -69,329 +109,437 @@ struct TrendsView: View {
         return response.data
     }
 
-    private func trendCard(_ series: TrendSeries) -> some View {
-        let points = series.points
-        let avg = series.average
-        let selected = points.first(where: { $0.id == selectedPointID }) ?? points.last
-        let deltaVsStart = series.deltaVsStart
+    private func retry() { Task { await store.refresh(key, force: true) } }
 
-        return VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Eyebrow(text: "Readiness trend")
+    private func open(_ point: ReadinessPoint) { summary = DaySummary(point) }
+
+    // MARK: Head
+
+    @ViewBuilder
+    private var staleNotice: some View {
+        if resource.value != nil, resource.error != nil {
+            InlineNotice(
+                title: "Couldn't refresh",
+                message: HistoryModel.staleMessage(fetchedAt: resource.fetchedAt),
+                actionTitle: "Retry",
+                action: retry
+            )
+        }
+    }
+
+    private func head(_ point: ReadinessPoint) -> some View {
+        let day = DaySummary(point)
+        return ScoreHead(
+            score: point.readiness,
+            verdict: point.decision.title,
+            verdictColor: day.verdictBand.color,
+            meaning: "Readiness · \(day.dayText)",
+            note: point.calibrating ? "Calibrating — baseline still forming" : nil,
+            noteSystemImage: "hourglass",
+            accessibilityLabel: day.accessibilityLabel,
+            accessibilityHint: "Opens this day's summary",
+            action: { open(point) }
+        )
+    }
+
+    /// The selected day's three pillar scores, with the change from the day
+    /// before when there is one.
+    private func pillarReadout(_ point: ReadinessPoint, prior: ReadinessPoint?) -> some View {
+        let layout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
+        let day = DaySummary(point)
+        let before = prior.map(DaySummary.init)
+        return layout {
+            ForEach(Pillar.allCases) { pillar in
+                let score = day.score(pillar)
+                let delta = before.map { score - $0.score(pillar) }
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Circle().fill(pillar.color).frame(width: 7, height: 7)
+                        Text(pillar.title)
+                            .font(.footnote)
+                            .foregroundStyle(Palette.textSecondary)
+                    }
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text("\(Int(avg.rounded()))")
-                            .font(.system(size: 28, weight: .bold, design: .rounded))
+                        Text("\(Int(score.rounded()))")
+                            .font(Typeface.value)
+                            .foregroundStyle(ScoreBand(score: score).numeralColor)
+                            .contentTransition(.numericText(value: score))
+                        if let delta {
+                            Text(HistoryModel.signed(delta))
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(Palette.textTertiary)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(HistoryModel.pillarReadoutLabel(pillar, score: score, delta: delta))
+            }
+        }
+    }
+
+    // MARK: Readiness bars
+
+    private func readinessSection<Content: View>(@ViewBuilder content: @escaping () -> Content) -> some View {
+        let picker = SegmentedRange(rangeLabels, selection: $rangeIndex)
+            .accessibilityLabel("History range")
+        return Group {
+            if typeSize.isAccessibilitySize {
+                OpenSection("Readiness", showsRule: false) {
+                    picker
+                    content()
+                }
+            } else {
+                OpenSection(title: "Readiness", showsRule: false) {
+                    picker.frame(width: 176)
+                } content: {
+                    content()
+                }
+            }
+        }
+    }
+
+    private func bars(_ series: TrendSeries, selected: ReadinessPoint) -> some View {
+        let points = series.points
+        return VStack(alignment: .leading, spacing: 10) {
+            Chart {
+                ForEach(Array(zip(points, series.dates)), id: \.0.id) { point, date in
+                    BarMark(x: .value("Day", date, unit: .day), y: .value("Readiness", point.readiness))
+                        .foregroundStyle(point.decision.band.color.opacity(point.id == selected.id ? 1 : 0.4))
+                        .cornerRadius(3)
+                }
+                RuleMark(y: .value("Average", series.average))
+                    .foregroundStyle(Palette.textTertiary)
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 4]))
+            }
+            .chartYScale(domain: 0 ... 100)
+            .chartYAxis(.hidden)
+            .chartXAxis {
+                AxisMarks(values: .automatic(desiredCount: 4)) { _ in
+                    AxisValueLabel(format: .dateTime.month(.abbreviated).day())
+                        .foregroundStyle(Palette.textTertiary)
+                }
+            }
+            .chartLegend(.hidden)
+            .frame(height: 160)
+            .chartOverlay { proxy in
+                GeometryReader { geo in
+                    Rectangle()
+                        .fill(Color.clear)
+                        .contentShape(Rectangle())
+                        .gesture(
+                            DragGesture(minimumDistance: 0)
+                                .onChanged { select(at: $0.location, proxy: proxy, geo: geo, series: series) }
+                                .onEnded { value in
+                                    select(at: value.location, proxy: proxy, geo: geo, series: series)
+                                    let moved = hypot(value.translation.width, value.translation.height)
+                                    if moved < 8, let point = HistoryModel.selected(selectedPointID, in: points) {
+                                        open(point)
+                                    }
+                                }
+                        )
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Readiness by day, last \(days) days")
+            .accessibilityValue(DaySummary(selected).accessibilityLabel)
+            .accessibilityHint("Swipe up or down to change the day.")
+            .accessibilityAdjustableAction { direction in
+                let step = direction == .increment ? 1 : (direction == .decrement ? -1 : 0)
+                selectedPointID = HistoryModel.step(from: selected.id, by: step, in: points)
+            }
+            .accessibilityAction(named: "Open day summary") { open(selected) }
+
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("Average \(Int(series.average.rounded()))")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Palette.textPrimary)
+                Text("· \(HistoryModel.signed(series.deltaVsStart)) pts first to last day")
+                    .font(.footnote)
+                    .foregroundStyle(Palette.textSecondary)
+            }
+            .monospacedDigit()
+            Text("Drag to compare days. Tap a day for its summary.")
+                .font(.footnote)
+                .foregroundStyle(Palette.textTertiary)
+        }
+    }
+
+    private func select(at location: CGPoint, proxy: ChartProxy, geo: GeometryProxy, series: TrendSeries) {
+        guard let plotFrame = proxy.plotFrame else { return }
+        let x = location.x - geo[plotFrame].origin.x
+        guard let raw: Date = proxy.value(atX: x),
+              let index = HistoryModel.dayIndex(for: raw, in: series.dates)
+        else { return }
+        let id = series.points[index].id
+        if id != selectedPointID {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { selectedPointID = id }
+        }
+    }
+
+    // MARK: Change from the previous day
+
+    private func changeSection(_ hit: ReadinessPoint, prior: ReadinessPoint) -> some View {
+        let changes = HistoryModel.pillarChanges(hit, prior: prior)
+        return OpenSection("Change from \(StatusLineModel.formattedDay(prior.date))") {
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 6) {
+                    if let top = changes.first, let line = HistoryModel.driverLine(top) {
+                        Text(line)
+                            .font(.subheadline.weight(.semibold))
                             .foregroundStyle(Palette.textPrimary)
-                        Text("avg").font(.caption).foregroundStyle(Palette.textSecondary)
                     }
+                    Text(HistoryModel.deltaExplanation(hit.readiness - prior.readiness))
+                        .font(.subheadline)
+                        .foregroundStyle(Palette.textSecondary)
                 }
-                Spacer()
-                Pill(String(format: "%+d pts span", Int(deltaVsStart.rounded())),
-                     tone: deltaVsStart >= 0 ? .good : .warn)
-            }
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, 10)
 
-            Text("Tap any bar to inspect that day.")
-                .font(.caption)
-                .foregroundStyle(Palette.textSecondary)
-
-            trendBars(points)
-
-            if let selected {
-                dayDetail(selected, in: points)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .card()
-        .onAppear {
-            if selectedPointID == nil {
-                selectedPointID = points.last?.id
+                ForEach(changes, id: \.pillar) { change in
+                    Hairline()
+                    HStack(spacing: 10) {
+                        Image(systemName: change.pillar.systemImage)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(change.pillar.color)
+                            .frame(width: 20)
+                        Text(change.pillar.title)
+                            .font(.subheadline)
+                            .foregroundStyle(Palette.textSecondary)
+                        Spacer(minLength: 8)
+                        changeBadge(change.delta)
+                        Text("\(Int(change.score.rounded()))")
+                            .font(Typeface.value)
+                            .foregroundStyle(ScoreBand(score: change.score).numeralColor)
+                            .frame(minWidth: 36, alignment: .trailing)
+                    }
+                    .frame(minHeight: Space.target)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(HistoryModel.pillarReadoutLabel(change.pillar, score: change.score, delta: change.delta))
+                }
             }
         }
     }
 
-    private func trendBars(_ points: [ReadinessPoint]) -> some View {
-        GeometryReader { geo in
-            HStack(alignment: .bottom, spacing: max(2, 4 - Double(points.count) / 30)) {
-                ForEach(points) { p in
-                    let isSelected = p.id == (selectedPointID ?? points.last?.id)
-                    Button {
-                        selectedPointID = p.id
-                    } label: {
-                        RoundedRectangle(cornerRadius: 3, style: .continuous)
-                            .fill(isSelected ? Palette.accent : Palette.accent.opacity(0.45))
-                            .frame(maxWidth: .infinity)
-                            .frame(height: max(6, geo.size.height * (p.readiness / 100)))
-                            .shadow(color: isSelected ? Palette.accent.opacity(0.5) : .clear, radius: 6)
+    /// Arrow and signed points; colour never carries the change alone.
+    private func changeBadge(_ delta: Double) -> some View {
+        let n = Int(delta.rounded())
+        let color = n > 0 ? Palette.success : (n < 0 ? Palette.warn : Palette.textTertiary)
+        return HStack(spacing: 3) {
+            if n != 0 {
+                Image(systemName: n > 0 ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
+                    .font(.caption2.weight(.bold))
+            }
+            Text(HistoryModel.signed(delta)).font(.footnote.weight(.semibold)).monospacedDigit()
+        }
+        .foregroundStyle(color)
+    }
+
+    // MARK: Pillar trends
+
+    private func pillarTrendSection(_ series: TrendSeries, selected: ReadinessPoint) -> some View {
+        let points = series.points
+        let selectedDate = points.firstIndex(where: { $0.id == selected.id }).map { series.dates[$0] }
+        return OpenSection("Pillar trends") {
+            VStack(alignment: .leading, spacing: 12) {
+                Chart {
+                    ForEach(Array(zip(points, series.dates)), id: \.0.id) { point, date in
+                        line(date, point.recoveryScore, Pillar.recovery)
+                        line(date, point.sleepScore, Pillar.sleep)
+                        line(date, point.loadScore, Pillar.load)
+                    }
+                    if let selectedDate {
+                        RuleMark(x: .value("Date", selectedDate))
+                            .foregroundStyle(Palette.textTertiary.opacity(0.6))
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    }
+                }
+                .chartForegroundStyleScale(domain: Pillar.allCases.map(\.title),
+                                           range: Pillar.allCases.map(\.color))
+                .chartYScale(domain: 0 ... 100)
+                .chartYAxis(.hidden)
+                .chartXAxis {
+                    AxisMarks(values: .automatic(desiredCount: 4)) { _ in
+                        AxisValueLabel(format: .dateTime.month(.abbreviated).day())
+                            .foregroundStyle(Palette.textTertiary)
+                    }
+                }
+                .chartLegend(.hidden)
+                .frame(height: 170)
+                .chartOverlay { proxy in
+                    GeometryReader { geo in
+                        Rectangle()
+                            .fill(Color.clear)
                             .contentShape(Rectangle())
+                            .gesture(
+                                DragGesture(minimumDistance: 0)
+                                    .onChanged { select(at: $0.location, proxy: proxy, geo: geo, series: series) }
+                            )
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("\(ChartDate.day(p.date).formatted(.dateTime.month().day())), readiness \(Int(p.readiness.rounded()))")
                 }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-        }
-        .frame(height: 130)
-    }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Pillar scores by day")
+                .accessibilityValue(DaySummary(selected).pillarsSpoken)
+                .accessibilityHint("Swipe up or down to change the day.")
+                .accessibilityAdjustableAction { direction in
+                    let step = direction == .increment ? 1 : (direction == .decrement ? -1 : 0)
+                    selectedPointID = HistoryModel.step(from: selected.id, by: step, in: points)
+                }
 
-    private func dayDetail(_ hit: ReadinessPoint, in points: [ReadinessPoint]) -> some View {
-        let day = ChartDate.day(hit.date)
-        let prior = priorPoint(for: hit, in: points)
-        let delta = prior.map { hit.readiness - $0.readiness }
+                HStack(spacing: 16) {
+                    ForEach(Pillar.allCases) { pillar in
+                        HStack(spacing: 6) {
+                            Circle().fill(pillar.color).frame(width: 7, height: 7)
+                            Text(pillar.title)
+                                .font(.footnote)
+                                .foregroundStyle(Palette.textSecondary)
+                        }
+                    }
+                }
+                .accessibilityHidden(true)
 
-        return VStack(alignment: .leading, spacing: 8) {
-            Text(day, format: .dateTime.weekday(.wide).month(.wide).day().year())
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Palette.textPrimary)
-            Text("Readiness \(Int(hit.readiness.rounded())) · \(hit.decision.title)")
-                .font(.subheadline.monospacedDigit())
-                .foregroundStyle(Palette.textPrimary)
-            if let delta {
-                Text(deltaExplanation(delta))
-                    .font(.caption)
+                let weakest = HistoryModel.weakest(selected)
+                Text("\(StatusLineModel.formattedDay(selected.date)): \(weakest.pillar.title) was weakest (\(Int(weakest.score.rounded()))/100).")
+                    .font(.footnote)
                     .foregroundStyle(Palette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if let prior {
-                pillarDeltaBlock(hit: hit, prior: prior)
-            }
-            Text("Sleep \(Int(hit.sleepScore.rounded())) · Recovery \(Int(hit.recoveryScore.rounded())) · Load \(Int(hit.loadScore.rounded()))")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(Palette.textSecondary)
-            Text(decisionGuide)
-                .font(.caption2)
-                .foregroundStyle(Palette.textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Palette.surfaceHi, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
-    private var decisionGuide: String {
-        "Decision bands: 75+ Push · 50–74 Maintain · under 50 Recover. Sleep = rest quality · Recovery = HRV/RHR · Load = training strain."
+    private func line(_ date: Date, _ value: Double, _ pillar: Pillar) -> some ChartContent {
+        LineMark(x: .value("Date", date), y: .value("Score", value), series: .value("Pillar", pillar.title))
+            .foregroundStyle(by: .value("Pillar", pillar.title))
+            .interpolationMethod(ChartStyle.smooth)
+            .lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round))
     }
 
-    private func pillarDeltaBlock(hit: ReadinessPoint, prior: ReadinessPoint) -> some View {
-        let rows: [(String, Double, Double)] = [
-            ("Sleep", hit.sleepScore - prior.sleepScore, hit.sleepScore),
-            ("Recovery", hit.recoveryScore - prior.recoveryScore, hit.recoveryScore),
-            ("Load", hit.loadScore - prior.loadScore, hit.loadScore),
-        ]
-        let ranked = rows.sorted { abs($0.1) > abs($1.1) }
-        let top = ranked.first
-        return VStack(alignment: .leading, spacing: 4) {
-            if let top, abs(top.1) >= 0.5 {
-                Text(pillarDriverLine(name: top.0, delta: top.1))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Palette.textPrimary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            ForEach(ranked, id: \.0) { row in
-                HStack {
-                    Text(row.0)
-                        .font(.caption2)
-                        .foregroundStyle(Palette.textSecondary)
-                    Spacer()
-                    Text(signedPts(row.1))
-                        .font(.caption2.monospacedDigit().weight(.semibold))
-                        .foregroundStyle(row.1 >= 0 ? Palette.mint : Palette.warn)
-                    Text("→ \(Int(row.2.rounded()))")
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(Palette.textTertiary)
-                        .frame(width: 36, alignment: .trailing)
-                }
-            }
-        }
-        .padding(8)
-        .background(Palette.surface.opacity(0.65), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-    }
-
-    private func pillarDriverLine(name: String, delta: Double) -> String {
-        let n = Int(delta.rounded())
-        if n > 0 { return "Biggest lift: \(name) (\(signedPts(delta)))." }
-        if n < 0 { return "Biggest drag: \(name) (\(signedPts(delta)))." }
-        return "\(name) was unchanged vs the prior day."
-    }
-
-    private func signedPts(_ delta: Double) -> String {
-        let n = Int(delta.rounded())
-        if n > 0 { return "+\(n)" }
-        return "\(n)"
-    }
-
-    private func priorPoint(for hit: ReadinessPoint, in points: [ReadinessPoint]) -> ReadinessPoint? {
-        guard let idx = points.firstIndex(where: { $0.id == hit.id }), idx > 0 else { return nil }
-        return points[idx - 1]
-    }
-
-    private func deltaExplanation(_ delta: Double) -> String {
-        let n = Int(delta.rounded())
-        if n == 0 {
-            return "0 pts vs the previous day — readiness held steady."
-        }
-        if n > 0 {
-            return "+\(n) pts vs the previous day — overall readiness improved."
-        }
-        return "\(n) pts vs the previous day — overall readiness softened."
-    }
+    // MARK: Latest drivers
 
     @ViewBuilder
-    private func insightCards() -> some View {
+    private var snapshotSection: some View {
         if let today = store.today.value {
-            let pillars = today.pillars
-            Eyebrow(text: "Latest snapshot · \(StatusLineModel.formattedDay(today.date))")
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Button { tabs.go(to: .sleep) } label: {
-                insightCard("Sleep", .sleep, pillars.sleep,
-                            meaning: "How well you rested — duration and consistency vs your need. Tap to open the Sleep tab.")
-            }
-            .buttonStyle(.plain)
-            .accessibilityHint("Opens the Sleep tab")
-
-            insightCard("Recovery", .good, pillars.recovery,
-                        meaning: "Nervous-system recovery from HRV and resting heart rate vs your baseline.")
-            insightCard("Load", .accent, pillars.load,
-                        meaning: "Recent training stress — how hard you’ve pushed vs your norm.")
-        }
-    }
-
-    private func insightCard(_ name: String, _ tone: Pill.Tone, _ pillar: PillarScore, meaning: String) -> some View {
-        let driver = pillar.drivers.first
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Pill(name, tone: tone)
-                Spacer()
-                HStack(spacing: 6) {
-                    Text("Score \(Int(pillar.score.rounded()))")
-                        .font(.system(.caption2, design: .monospaced)).foregroundStyle(Palette.textTertiary)
-                    if name == "Sleep" {
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(Palette.accent)
+            OpenSection("Latest snapshot · \(StatusLineModel.formattedDay(today.date))") {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Pillar.allCases) { pillar in
+                        if pillar != Pillar.allCases.first { Hairline() }
+                        snapshotRow(pillar, score: pillar.score(in: today.pillars))
                     }
                 }
             }
-            Text(driver?.text ?? "No data yet")
-                .font(.system(size: 16, weight: .semibold, design: .rounded))
-                .foregroundStyle(Palette.textPrimary)
-            Text(meaning)
-                .font(.caption)
-                .foregroundStyle(Palette.textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
-            if let detail = driver?.detail {
-                Text(detail).font(.callout).foregroundStyle(Palette.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .card()
     }
 
-    private func pillarsCard(_ series: TrendSeries) -> some View {
-        let points = series.points
-        let dates = series.dates
-        return VStack(alignment: .leading, spacing: 12) {
-            Eyebrow(text: "Pillar scores")
-            Text("Drag or tap to compare Sleep · Recovery · Load for a day.")
-                .font(.caption).foregroundStyle(Palette.textSecondary)
-            Chart {
-                ForEach(points) { point in
-                    line(point.date, point.sleepScore, "Sleep")
-                    line(point.date, point.recoveryScore, "Recovery")
-                    line(point.date, point.loadScore, "Load")
-                }
-                if let sel = pillarSelection.date {
-                    RuleMark(x: .value("Date", sel))
-                        .foregroundStyle(Palette.textTertiary.opacity(0.5))
-                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                }
-            }
-            .chartForegroundStyleScale(domain: ["Sleep", "Recovery", "Load"],
-                                       range: [Palette.sleep, Palette.recovery, Palette.load])
-            .chartYScale(domain: 0 ... 100)
-            .chartLegend(.hidden)
-            .frame(height: 180)
-            .chartOverlay { proxy in
-                ChartDayScrubOverlay(proxy: proxy, dates: dates, selection: $pillarSelection.date)
-            }
-            .clipped()
-
-            ScrubDetailBanner(
-                date: pillarSelection.date,
-                placeholder: "Tap the chart to inspect a day",
-                lines: pillarLines(for: pillarSelection.date, in: points),
-                note: pillarNote(for: pillarSelection.date, in: points)
-            )
-
-            HStack(spacing: 14) {
-                legendDot("Sleep", Palette.lavender)
-                legendDot("Recovery", Palette.mint)
-                legendDot("Load", Palette.load)
-            }
-
-            DisclosureGroup("Daily scores") {
-                ForEach(points) { point in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(StatusLineModel.formattedDay(point.date))
-                            .font(.footnote.weight(.semibold))
-                        Text("Sleep \(Int(point.sleepScore.rounded())) · Recovery \(Int(point.recoveryScore.rounded())) · Load \(Int(point.loadScore.rounded()))")
-                            .font(.caption)
+    private func snapshotRow(_ pillar: Pillar, score: PillarScore) -> some View {
+        let driver = score.drivers.first
+        let tab = AppTab(pillar)
+        return Button { tabs.go(to: tab) } label: {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: pillar.systemImage)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(pillar.color)
+                    .frame(width: 22)
+                    .padding(.top, 2)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(pillar.title)
+                            .font(.subheadline)
+                            .foregroundStyle(Palette.textSecondary)
+                        Spacer(minLength: 8)
+                        Text("\(Int(score.score.rounded()))")
+                            .font(Typeface.value)
+                            .foregroundStyle(ScoreBand(score: score.score).numeralColor)
+                    }
+                    Text(driver?.text ?? "No data yet")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(Palette.textPrimary)
+                    if let detail = driver?.detail {
+                        Text(detail)
+                            .font(.subheadline)
                             .foregroundStyle(Palette.textSecondary)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 4)
-                    .accessibilityElement(children: .combine)
+                    Text(HistoryModel.meaning(pillar))
+                        .font(.footnote)
+                        .foregroundStyle(Palette.textTertiary)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Palette.textTertiary)
+                    .padding(.top, 4)
+            }
+            .padding(.vertical, Space.row)
+            .frame(minHeight: Space.target)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Opens the \(tab.title) tab")
+    }
+
+    // MARK: Days
+
+    private func daysSection(_ points: [ReadinessPoint]) -> some View {
+        let newestFirst = Array(points.reversed())
+        let shown = showsAllDays ? newestFirst : Array(newestFirst.prefix(collapsedDayCount))
+        return OpenSection("Daily scores") {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                ForEach(shown) { point in
+                    if point.id != shown.first?.id { Hairline() }
+                    dayRow(point)
+                }
+                if newestFirst.count > collapsedDayCount {
+                    Hairline()
+                    Button(showsAllDays ? "Show fewer days" : "Show all \(newestFirst.count) days") {
+                        showsAllDays.toggle()
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Palette.accent)
+                    .frame(maxWidth: .infinity, minHeight: Space.target, alignment: .leading)
                 }
             }
-            .font(.footnote)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .card()
-        .onAppear {
-            if pillarSelection.date == nil, let last = dates.last {
-                pillarSelection.date = last
+    }
+
+    private func dayRow(_ point: ReadinessPoint) -> some View {
+        let day = DaySummary(point)
+        return Button { open(point) } label: {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 8) {
+                        Text(day.dayText)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Palette.textPrimary)
+                        Text(point.decision.title)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(day.verdictBand.color)
+                    }
+                    Text(day.pillarsShort + (point.calibrating ? " · Calibrating" : ""))
+                        .font(.footnote.monospacedDigit())
+                        .foregroundStyle(Palette.textSecondary)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Text("\(Int(point.readiness.rounded()))")
+                    .font(Typeface.value)
+                    .foregroundStyle(Palette.textPrimary)
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Palette.textTertiary)
             }
+            .padding(.vertical, 10)
+            .frame(minHeight: Space.target)
+            .contentShape(Rectangle())
         }
-    }
-
-    private func pillarLines(for selection: Date?, in points: [ReadinessPoint]) -> [String] {
-        guard let selection,
-              let hit = points.first(where: { ChartDate.day($0.date) == selection })
-        else { return [] }
-        return [
-            "Sleep \(Int(hit.sleepScore.rounded())) — rest quality",
-            "Recovery \(Int(hit.recoveryScore.rounded())) — HRV & resting HR",
-            "Load \(Int(hit.loadScore.rounded())) — training strain",
-        ]
-    }
-
-    private func pillarNote(for selection: Date?, in points: [ReadinessPoint]) -> String? {
-        guard let selection,
-              let hit = points.first(where: { ChartDate.day($0.date) == selection })
-        else { return nil }
-        let ranked = [("Sleep", hit.sleepScore), ("Recovery", hit.recoveryScore), ("Load", hit.loadScore)]
-            .sorted { $0.1 < $1.1 }
-        if let weak = ranked.first {
-            return "\(weak.0) was weakest this day (\(Int(weak.1.rounded()))/100)."
-        }
-        return nil
-    }
-
-    private func line(_ date: String, _ value: Double, _ series: String) -> some ChartContent {
-        LineMark(x: .value("Date", ChartDate.day(date)), y: .value("Score", value),
-                 series: .value("Pillar", series))
-            .foregroundStyle(by: .value("Pillar", series))
-            .interpolationMethod(ChartStyle.smooth)
-    }
-
-    private func legendDot(_ label: String, _ color: Color) -> some View {
-        HStack(spacing: 4) {
-            Circle().fill(color).frame(width: 6, height: 6)
-            Text(label).foregroundStyle(Palette.textSecondary)
-        }
-        .font(.caption2)
-        .accessibilityElement(children: .combine)
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(day.accessibilityLabel + " " + day.pillarsSpoken)
+        .accessibilityHint("Opens this day's summary")
+        .accessibilityAddTraits(.isButton)
     }
 }
 
@@ -407,5 +555,119 @@ struct TrendSeries {
         dates = points.map { ChartDate.day($0.date, timeZone: timeZone) }
         average = points.isEmpty ? 0 : points.map(\.readiness).reduce(0, +) / Double(points.count)
         deltaVsStart = (points.last?.readiness ?? 0) - (points.first?.readiness ?? 0)
+    }
+}
+
+/// Pure History logic, kept out of the view so it can be tested. Every number
+/// comes from the history response; nothing is fetched or invented here.
+enum HistoryModel {
+    struct PillarChange: Equatable {
+        let pillar: Pillar
+        let delta: Double
+        let score: Double
+    }
+
+    static let decisionGuide =
+        "Decision bands: 75+ Push · 50–74 Maintain · under 50 Recover. Sleep = rest quality · Recovery = HRV/RHR · Load = training strain."
+
+    /// The selected point, or the latest when nothing (or a day outside this
+    /// range) is selected.
+    static func selected(_ id: String?, in points: [ReadinessPoint]) -> ReadinessPoint? {
+        if let id, let hit = points.first(where: { $0.id == id }) { return hit }
+        return points.last
+    }
+
+    static func prior(of point: ReadinessPoint, in points: [ReadinessPoint]) -> ReadinessPoint? {
+        guard let index = points.firstIndex(where: { $0.id == point.id }), index > 0 else { return nil }
+        return points[index - 1]
+    }
+
+    /// Moves the selection one day, clamped to the range.
+    static func step(from id: String, by offset: Int, in points: [ReadinessPoint]) -> String? {
+        guard let index = points.firstIndex(where: { $0.id == id }) else { return points.last?.id }
+        return points[min(max(index + offset, 0), points.count - 1)].id
+    }
+
+    /// The day a chart position falls in. Day bars span midnight to midnight,
+    /// so the containing day wins over the nearest midnight.
+    static func dayIndex(for raw: Date, in dates: [Date], calendar: Calendar = .current) -> Int? {
+        let start = calendar.startOfDay(for: raw)
+        if let exact = dates.firstIndex(of: start) { return exact }
+        guard let nearest = nearestDate(raw, in: dates) else { return nil }
+        return dates.firstIndex(of: nearest)
+    }
+
+    /// Pillar changes from the prior day, biggest move first.
+    static func pillarChanges(_ hit: ReadinessPoint, prior: ReadinessPoint) -> [PillarChange] {
+        let day = DaySummary(hit)
+        let before = DaySummary(prior)
+        return Pillar.allCases
+            .map { PillarChange(pillar: $0, delta: day.score($0) - before.score($0), score: day.score($0)) }
+            .sorted { abs($0.delta) > abs($1.delta) }
+    }
+
+    static func driverLine(_ change: PillarChange) -> String? {
+        guard abs(change.delta) >= 0.5 else { return nil }
+        let n = Int(change.delta.rounded())
+        if n > 0 { return "Biggest lift: \(change.pillar.title) (\(signed(change.delta)))." }
+        if n < 0 { return "Biggest drag: \(change.pillar.title) (\(signed(change.delta)))." }
+        return "\(change.pillar.title) was unchanged vs the prior day."
+    }
+
+    static func deltaExplanation(_ delta: Double) -> String {
+        let n = Int(delta.rounded())
+        if n == 0 { return "0 pts vs the previous day — readiness held steady." }
+        if n > 0 { return "+\(n) pts vs the previous day — overall readiness improved." }
+        return "\(n) pts vs the previous day — overall readiness softened."
+    }
+
+    static func signed(_ delta: Double) -> String {
+        let n = Int(delta.rounded())
+        return n > 0 ? "+\(n)" : "\(n)"
+    }
+
+    static func weakest(_ point: ReadinessPoint) -> (pillar: Pillar, score: Double) {
+        let day = DaySummary(point)
+        let pillar = Pillar.allCases.min { day.score($0) < day.score($1) } ?? .recovery
+        return (pillar, day.score(pillar))
+    }
+
+    static func pillarReadoutLabel(_ pillar: Pillar, score: Double, delta: Double?) -> String {
+        var label = "\(pillar.title) \(Int(score.rounded())) of 100"
+        if let delta {
+            let n = Int(delta.rounded())
+            label += n == 0 ? ", unchanged from the previous day" : ", \(n > 0 ? "up" : "down") \(abs(n)) from the previous day"
+        }
+        return label
+    }
+
+    static func meaning(_ pillar: Pillar) -> String {
+        switch pillar {
+        case .recovery: return "Nervous-system recovery from HRV and resting heart rate vs your baseline."
+        case .sleep: return "How well you rested — duration and consistency vs your need."
+        case .load: return "Recent training stress — how hard you’ve pushed vs your norm."
+        }
+    }
+
+    private static let relative: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter
+    }()
+
+    static func staleMessage(fetchedAt: Date?, now: Date = Date()) -> String {
+        guard let fetchedAt else { return "Showing saved data." }
+        return "Showing data from \(relative.localizedString(for: fetchedAt, relativeTo: now))."
+    }
+}
+
+extension DaySummary {
+    /// "Recovery 78 · Sleep 70 · Load 64"
+    var pillarsShort: String {
+        Pillar.allCases.map { "\($0.title) \(Int(score($0).rounded()))" }.joined(separator: " · ")
+    }
+
+    var pillarsSpoken: String {
+        Pillar.allCases.map { "\($0.title) \(Int(score($0).rounded()))" }.joined(separator: ", ") + "."
     }
 }
