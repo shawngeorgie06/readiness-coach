@@ -77,7 +77,7 @@ final class AppStoreTests: XCTestCase {
     }
 
     private func seed<V: Codable>(_ key: ResourceKey, _ value: V, user: String = "u1", ageSeconds: TimeInterval = 10, etag: String? = "old") {
-        cache.save(key, CachedEnvelope(userId: user, day: day, fetchedAt: clock.addingTimeInterval(-ageSeconds), etag: etag, value: value))
+        cache.save(key, CachedEnvelope(userId: user, day: day, utcOffsetMinutes: offset, fetchedAt: clock.addingTimeInterval(-ageSeconds), etag: etag, value: value))
     }
 
     private func waitUntil(file: StaticString = #filePath, line: UInt = #line, _ condition: () -> Bool) async {
@@ -242,7 +242,7 @@ final class AppStoreTests: XCTestCase {
         XCTAssertTrue(ok)
         XCTAssertEqual(api.calls, ["body", "body"])
         XCTAssertEqual(store.body.dataVersion, store.dataVersion)
-        XCTAssertFalse(store.body.needsRevalidation(now: clock, today: day, currentDataVersion: store.dataVersion))
+        XCTAssertFalse(store.body.needsRevalidation(now: clock, today: LocalDay(date: day, utcOffsetMinutes: offset), currentDataVersion: store.dataVersion))
     }
 
     func testForcedTodayAfterUploadDoesNotReturnPreUploadFetch() async {
@@ -369,6 +369,65 @@ final class AppStoreTests: XCTestCase {
         _ = await before.value
         _ = await after.value
         XCTAssertEqual(api.days(for: "today"), [
+            LocalDay(date: "2026-10-23", utcOffsetMinutes: -240), LocalDay(date: "2026-10-23", utcOffsetMinutes: -300),
+        ])
+    }
+
+    func testFreshResourceRefetchesAfterOffsetChangeOnTheSameDay() async {
+        store.activate(userId: "u1", api: api)
+        await store.refresh(.body, force: true)
+        offset = -300
+        await store.refresh(.body)
+        XCTAssertEqual(api.days(for: "body"), [
+            LocalDay(date: "2026-10-23", utcOffsetMinutes: -240), LocalDay(date: "2026-10-23", utcOffsetMinutes: -300),
+        ])
+        XCTAssertEqual(store.body.utcOffsetMinutes, -300)
+        XCTAssertEqual(cache.load(.body, userId: "u1", as: BodyResponse.self)?.utcOffsetMinutes, -300)
+    }
+
+    func testCachedResourceFromAnotherOffsetRevalidatesAfterReload() async {
+        store.activate(userId: "u1", api: api)
+        await store.refresh(.body, force: true)
+        offset = -300
+        let reloaded = AppStore(
+            cache: cache, now: { [unowned self] in self.clock },
+            localDay: { [unowned self] in LocalDay(date: self.day, utcOffsetMinutes: self.offset) },
+            notifications: notifications
+        )
+        reloaded.activate(userId: "u1", api: api)
+        XCTAssertNotNil(reloaded.body.value)
+        await reloaded.refresh(.body)
+        XCTAssertEqual(api.days(for: "body").last, LocalDay(date: "2026-10-23", utcOffsetMinutes: -300))
+        XCTAssertEqual(api.calls, ["body", "body"])
+    }
+
+    /// A cache written before offsets were stored still shows, but revalidates.
+    func testCachedResourceWithoutOffsetShowsAndRevalidates() async throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let fetchedAt = ISO8601DateFormatter().string(from: clock.addingTimeInterval(-10))
+        let json = """
+        {"userId":"u1","day":"2026-10-23","fetchedAt":"\(fetchedAt)","etag":"old","value":{"days":30,"daily":[]}}
+        """
+        try Data(json.utf8).write(to: directory.appendingPathComponent("body.json"))
+        store.activate(userId: "u1", api: api)
+        XCTAssertNotNil(store.body.value)
+        await store.refresh(.body)
+        XCTAssertEqual(api.calls, ["body"])
+    }
+
+    func testNonForcedRefreshJoiningFetchFromThePreviousOffsetFetchesAgain() async {
+        store.activate(userId: "u1", api: api)
+        api.setHold(true)
+        let before = Task { await store.refresh(.body, force: true) }
+        await waitUntil { self.api.calls == ["body"] }
+        offset = -300
+        let after = Task { await store.refresh(.body) }
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        api.setHold(false)
+        _ = await before.value
+        let ok = await after.value
+        XCTAssertTrue(ok)
+        XCTAssertEqual(api.days(for: "body"), [
             LocalDay(date: "2026-10-23", utcOffsetMinutes: -240), LocalDay(date: "2026-10-23", utcOffsetMinutes: -300),
         ])
     }

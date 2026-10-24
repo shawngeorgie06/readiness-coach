@@ -28,22 +28,25 @@ struct ResourceTaskID: Hashable {
 struct Resource<Value> {
     var value: Value?
     var day: String?
+    /// The UTC offset the value was fetched under; `nil` for a cache written
+    /// before offsets were stored, which still shows but always revalidates.
+    var utcOffsetMinutes: Int?
     var fetchedAt: Date?
     var etag: String?
     var dataVersion = 0
     var isRefreshing = false
     var error: String?
 
-    /// Missing, older than `maxAge`, from another local day, or fetched before
-    /// the latest sample upload.
+    /// Missing, older than `maxAge`, from another local day or UTC offset, or
+    /// fetched before the latest sample upload.
     func needsRevalidation(
         now: Date,
-        today: String,
+        today: LocalDay,
         currentDataVersion: Int,
         maxAge: TimeInterval = 300
     ) -> Bool {
         guard value != nil, let fetchedAt, let day else { return true }
-        if day != today { return true }
+        if day != today.date || utcOffsetMinutes != today.utcOffsetMinutes { return true }
         if dataVersion < currentDataVersion { return true }
         return now.timeIntervalSince(fetchedAt) > maxAge
     }
@@ -52,6 +55,8 @@ struct Resource<Value> {
 struct CachedEnvelope<Value: Codable>: Codable {
     let userId: String
     let day: String
+    /// Optional so caches written before offsets were stored still decode.
+    let utcOffsetMinutes: Int?
     let fetchedAt: Date
     let etag: String?
     let value: Value

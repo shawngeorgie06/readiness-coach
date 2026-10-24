@@ -157,7 +157,7 @@ final class AppStore {
 
     private func needsRevalidation(_ key: ResourceKey) -> Bool {
         func check<V>(_ resource: Resource<V>) -> Bool {
-            resource.needsRevalidation(now: now(), today: localDay().date, currentDataVersion: dataVersion)
+            resource.needsRevalidation(now: now(), today: localDay(), currentDataVersion: dataVersion)
         }
         switch key {
         case .today: return check(today)
@@ -225,14 +225,19 @@ final class AppStore {
             case .notModified:
                 guard next.value != nil else { return false }
             }
-            // The day the request asked for, so a response landing after midnight still revalidates.
+            // The day and offset the request asked for, so a response landing after
+            // midnight or a time zone change still revalidates.
             next.day = request.day.date
+            next.utcOffsetMinutes = request.day.utcOffsetMinutes
             next.fetchedAt = now()
             next.dataVersion = request.version
             next.error = nil
             store(self, next)
             if let value = next.value, let day = next.day, let fetchedAt = next.fetchedAt {
-                cache.save(key, CachedEnvelope(userId: request.userId, day: day, fetchedAt: fetchedAt, etag: next.etag, value: value))
+                cache.save(key, CachedEnvelope(
+                    userId: request.userId, day: day, utcOffsetMinutes: next.utcOffsetMinutes,
+                    fetchedAt: fetchedAt, etag: next.etag, value: value
+                ))
             }
             return true
         } catch {
@@ -263,6 +268,9 @@ final class AppStore {
 
     private static func resource<V>(_ envelope: CachedEnvelope<V>?) -> Resource<V>? {
         guard let envelope else { return nil }
-        return Resource(value: envelope.value, day: envelope.day, fetchedAt: envelope.fetchedAt, etag: envelope.etag)
+        return Resource(
+            value: envelope.value, day: envelope.day, utcOffsetMinutes: envelope.utcOffsetMinutes,
+            fetchedAt: envelope.fetchedAt, etag: envelope.etag
+        )
     }
 }

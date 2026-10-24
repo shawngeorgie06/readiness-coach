@@ -16,8 +16,10 @@ final class ResourceCacheTests: XCTestCase {
         try? FileManager.default.removeItem(at: legacyURL())
     }
 
+    private static let day = LocalDay(date: "2026-10-23", utcOffsetMinutes: -240)
+
     private func envelope(user: String = "a", value: [String] = ["x"]) -> CachedEnvelope<[String]> {
-        CachedEnvelope(userId: user, day: "2026-10-23", fetchedAt: Date(timeIntervalSince1970: 1_700_000_000), etag: "W/\"1\"", value: value)
+        CachedEnvelope(userId: user, day: "2026-10-23", utcOffsetMinutes: -240, fetchedAt: Date(timeIntervalSince1970: 1_700_000_000), etag: "W/\"1\"", value: value)
     }
 
     private func legacyURL() -> URL {
@@ -35,7 +37,7 @@ final class ResourceCacheTests: XCTestCase {
 
     private func saveToday(user: String, readiness: Int) throws {
         let dto = try JSONDecoder().decode(TodayDTO.self, from: Data(Self.legacyTodayJSON(readiness: readiness).utf8))
-        cache.save(.today, CachedEnvelope(userId: user, day: "2026-10-23", fetchedAt: Date(), etag: nil, value: dto))
+        cache.save(.today, CachedEnvelope(userId: user, day: "2026-10-23", utcOffsetMinutes: -240, fetchedAt: Date(), etag: nil, value: dto))
     }
 
     /// The legacy file records no owner, so a valid Today left by user A must
@@ -142,26 +144,44 @@ final class ResourceCacheTests: XCTestCase {
     func testNeedsRevalidationWhenMissingOrOld() {
         let now = Date(timeIntervalSince1970: 1_000_000)
         var resource = Resource<Int>()
-        XCTAssertTrue(resource.needsRevalidation(now: now, today: "2026-10-23", currentDataVersion: 0))
+        XCTAssertTrue(resource.needsRevalidation(now: now, today: Self.day, currentDataVersion: 0))
         resource.value = 1
         resource.day = "2026-10-23"
+        resource.utcOffsetMinutes = -240
         resource.fetchedAt = now.addingTimeInterval(-299)
-        XCTAssertFalse(resource.needsRevalidation(now: now, today: "2026-10-23", currentDataVersion: 0))
+        XCTAssertFalse(resource.needsRevalidation(now: now, today: Self.day, currentDataVersion: 0))
         resource.fetchedAt = now.addingTimeInterval(-301)
-        XCTAssertTrue(resource.needsRevalidation(now: now, today: "2026-10-23", currentDataVersion: 0))
+        XCTAssertTrue(resource.needsRevalidation(now: now, today: Self.day, currentDataVersion: 0))
     }
 
     func testDifferentLocalDayNeedsRevalidation() {
         let now = Date(timeIntervalSince1970: 1_000_000)
-        let resource = Resource(value: 1, day: "2026-10-22", fetchedAt: now.addingTimeInterval(-10))
-        XCTAssertTrue(resource.needsRevalidation(now: now, today: "2026-10-23", currentDataVersion: 0))
+        let resource = Resource(value: 1, day: "2026-10-22", utcOffsetMinutes: -240, fetchedAt: now.addingTimeInterval(-10))
+        XCTAssertTrue(resource.needsRevalidation(now: now, today: Self.day, currentDataVersion: 0))
     }
 
     func testUploadNewerThanFetchNeedsRevalidation() {
         let now = Date(timeIntervalSince1970: 1_000_000)
-        let resource = Resource(value: 1, day: "2026-10-23", fetchedAt: now.addingTimeInterval(-10), dataVersion: 1)
-        XCTAssertTrue(resource.needsRevalidation(now: now, today: "2026-10-23", currentDataVersion: 2))
-        XCTAssertFalse(resource.needsRevalidation(now: now, today: "2026-10-23", currentDataVersion: 1))
+        let resource = Resource(value: 1, day: "2026-10-23", utcOffsetMinutes: -240, fetchedAt: now.addingTimeInterval(-10), dataVersion: 1)
+        XCTAssertTrue(resource.needsRevalidation(now: now, today: Self.day, currentDataVersion: 2))
+        XCTAssertFalse(resource.needsRevalidation(now: now, today: Self.day, currentDataVersion: 1))
+    }
+
+    func testOtherOrMissingOffsetNeedsRevalidation() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        var resource = Resource(value: 1, day: "2026-10-23", utcOffsetMinutes: -300, fetchedAt: now.addingTimeInterval(-10))
+        XCTAssertTrue(resource.needsRevalidation(now: now, today: Self.day, currentDataVersion: 0))
+        resource.utcOffsetMinutes = nil
+        XCTAssertTrue(resource.needsRevalidation(now: now, today: Self.day, currentDataVersion: 0))
+    }
+
+    func testEnvelopeWithoutOffsetDecodes() throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let json = #"{"userId":"a","day":"2026-10-23","fetchedAt":"2026-10-23T12:00:00Z","value":["x"]}"#
+        try Data(json.utf8).write(to: directory.appendingPathComponent("body.json"))
+        let loaded = cache.load(.body, userId: "a", as: [String].self)
+        XCTAssertEqual(loaded?.value, ["x"])
+        XCTAssertNil(loaded?.utcOffsetMinutes)
     }
 
     func testRemoveAllDeletesEverything() {
