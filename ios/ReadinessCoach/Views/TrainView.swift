@@ -419,47 +419,29 @@ struct SportBadge: View {
 
 struct WorkoutDetailSheet: View {
     let workout: WorkoutDTO
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var typeSize
+    @ScaledMetric(relativeTo: .largeTitle) private var strainSize: CGFloat = 56
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: Space.section) {
-                    header
-                    effort
-                    session
-                    heartRate
-                    zones
-                }
-                .padding(.horizontal, Space.margin)
-                .padding(.top, 8)
-                .padding(.bottom, 24)
-            }
-            .background(Palette.surface)
-            .navigationTitle("Workout")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
-            }
+        SheetScaffold(
+            title: WorkoutSport.title(forKey: workout.sport),
+            context: "Workout",
+            systemImage: WorkoutSport.symbolName(forKey: workout.sport),
+            tone: .load
+        ) {
+            header
+            effort
+            session
+            heartRate
+            zones
         }
-        .presentationBackground(Palette.surface)
     }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 14) {
-                SportBadge(sport: workout.sport, size: 52)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(WorkoutSport.title(forKey: workout.sport))
-                        .font(.title2.weight(.bold))
-                        .foregroundStyle(Palette.textPrimary)
-                        .accessibilityAddTraits(.isHeader)
-                    Text(whenText)
-                        .font(.subheadline)
-                        .foregroundStyle(Palette.textSecondary)
-                }
-            }
+            Text(whenText)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Palette.textPrimary)
             Text(WorkoutSport.detailBlurb(forKey: workout.sport))
                 .font(.subheadline)
                 .foregroundStyle(Palette.textSecondary)
@@ -469,9 +451,12 @@ struct WorkoutDetailSheet: View {
 
     private var effort: some View {
         OpenSection("Effort") {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
+            let layout = typeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+                : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 6))
+            layout {
                 Text(String(format: "%.1f", workout.strain))
-                    .font(Typeface.numeral(56))
+                    .font(Typeface.numeral(strainSize))
                     .foregroundStyle(Palette.textPrimary)
                 Text("/ 21 strain")
                     .font(.subheadline)
@@ -538,17 +523,30 @@ struct WorkoutDetailSheet: View {
                 VStack(spacing: 0) {
                     ForEach(segments) { zone in
                         let percent = Int((zone.fraction * 100).rounded())
-                        HStack(spacing: 10) {
-                            Circle().fill(zoneColor(zone.index)).frame(width: 8, height: 8).accessibilityHidden(true)
-                            Text(zone.label).foregroundStyle(Palette.textPrimary)
-                            Spacer(minLength: 8)
-                            Text("\(Int(zone.minutes.rounded())) min").foregroundStyle(Palette.textPrimary)
-                            Text("\(percent)%")
-                                .foregroundStyle(Palette.textSecondary)
-                                .frame(minWidth: 40, alignment: .trailing)
+                        Group {
+                            if typeSize.isAccessibilitySize {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(zone.label).foregroundStyle(Palette.textPrimary)
+                                    Text("\(Int(zone.minutes.rounded())) min · \(percent)%")
+                                        .foregroundStyle(Palette.textSecondary)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 8)
+                            } else {
+                                HStack(spacing: 10) {
+                                    Circle().fill(zoneColor(zone.index)).frame(width: 8, height: 8).accessibilityHidden(true)
+                                    Text(zone.label).foregroundStyle(Palette.textPrimary)
+                                    Spacer(minLength: 8)
+                                    Text("\(Int(zone.minutes.rounded())) min").foregroundStyle(Palette.textPrimary)
+                                    Text("\(percent)%")
+                                        .foregroundStyle(Palette.textSecondary)
+                                        .frame(minWidth: 40, alignment: .trailing)
+                                }
+                            }
                         }
                         .font(.subheadline.monospacedDigit())
-                        .frame(minHeight: 32)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(minHeight: Space.target)
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel("Zone \(zone.index + 1), \(zone.name): \(Int(zone.minutes.rounded())) minutes, \(percent) percent")
                     }

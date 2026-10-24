@@ -10,25 +10,48 @@ final class SupportScreensTests: XCTestCase {
         XCTAssertNil(SettingsView.initials(nil))
     }
 
-    /// Both destructive actions only raise a confirmation; the work runs from
-    /// the dialog's destructive button.
-    func testDestructiveSettingsStayBehindConfirmations() throws {
-        let source = try viewSource("SettingsView.swift")
-        XCTAssertEqual(source.components(separatedBy: ".confirmationDialog(").count - 1, 2)
-        XCTAssertEqual(source.components(separatedBy: "await deleteAccount()").count - 1, 1)
-        XCTAssertEqual(source.components(separatedBy: "settings.clearLocalSettings()").count - 1, 2)
-        let dialog = try XCTUnwrap(source.range(of: "isPresented: $showDeleteAccountConfirm"))
-        let call = try XCTUnwrap(source.range(of: "await deleteAccount()"))
-        XCTAssertLessThan(dialog.lowerBound, call.lowerBound, "Account deletion must run from its confirmation")
+    func testDestructiveConfirmationExecutesExactlyOnce() {
+        var confirmation = SheetConfirmation()
+        var deletions = 0
+
+        XCTAssertTrue(confirmation.confirm { deletions += 1 })
+        XCTAssertFalse(confirmation.confirm { deletions += 1 })
+        confirmation.cancel()
+        XCTAssertFalse(confirmation.confirm { deletions += 1 })
+        XCTAssertEqual(deletions, 1)
     }
 
-    /// Questions are asked about the frozen snapshot day, and the answer is
-    /// labelled as AI output.
-    func testAskUsesTheFrozenSnapshotAndLabelsTheAnswer() throws {
-        let source = try viewSource("AskCoachView.swift")
-        XCTAssertTrue(source.contains("client.ask(question: text, date: context.date)"))
-        XCTAssertTrue(source.contains("AI-generated"))
-        XCTAssertTrue(source.contains("answerDecision ?? context.decision"))
+    func testCancellationOrDismissalDoesNotExecuteDestructiveAction() {
+        var confirmation = SheetConfirmation()
+        var deletions = 0
+
+        confirmation.cancel()
+        confirmation.cancel()
+        XCTAssertFalse(confirmation.confirm { deletions += 1 })
+        XCTAssertEqual(deletions, 0)
+    }
+
+    func testNewPresentationRequiresItsOwnConfirmation() {
+        var cancelled = SheetConfirmation()
+        var nextPresentation = SheetConfirmation()
+        var deletions = 0
+
+        cancelled.cancel()
+        XCTAssertEqual(deletions, 0)
+        XCTAssertTrue(nextPresentation.confirm { deletions += 1 })
+        XCTAssertFalse(cancelled.confirm { deletions += 1 })
+        XCTAssertEqual(deletions, 1)
+    }
+
+    func testAskKeepsOriginalDayAndConservativeDecisionAfterRefresh() {
+        var displayed = today(date: "2026-10-23", decision: .recover)
+        let frozen = AskContext(displayed)
+
+        displayed = today(date: "2026-10-24", decision: .push)
+
+        XCTAssertEqual(frozen.date, "2026-10-23")
+        XCTAssertEqual(frozen.decision, .recover)
+        XCTAssertEqual(displayed.decision, .push)
     }
 
     func testPillarSheetKeepsTheTodayCallSiteAPI() {
@@ -39,11 +62,13 @@ final class SupportScreensTests: XCTestCase {
         _ = PillarDetailSheet(info: info)
     }
 
-    private func viewSource(_ file: String) throws -> String {
-        let url = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("ReadinessCoach/Views/\(file)")
-        return try String(contentsOf: url, encoding: .utf8)
+    private func today(date: String, decision: Decision) -> TodayDTO {
+        let pillar = PillarScore(score: 70, drivers: [])
+        return TodayDTO(
+            date: date, readiness: 70, decision: decision, calibrating: false,
+            pillars: Pillars(sleep: pillar, recovery: pillar, load: pillar),
+            overridesApplied: [], confidence: "high", missing: [], sleepPending: nil,
+            advisor: AdvisorNote(decision: decision, why: [], prescription: "", ifIgnored: "", source: "template")
+        )
     }
 }

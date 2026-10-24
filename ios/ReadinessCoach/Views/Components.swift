@@ -51,8 +51,15 @@ struct InfoBadge: View {
     let message: String
     @State private var show = false
     var body: some View {
-        Button { show = true } label: { Image(systemName: "info.circle") }
+        Button { show = true } label: {
+            Image(systemName: "info.circle")
+                .frame(minWidth: Space.target, minHeight: Space.target)
+                .contentShape(Rectangle())
+        }
             .buttonStyle(.plain).foregroundStyle(Palette.textSecondary)
-            .alert(title, isPresented: $show) { Button("OK", role: .cancel) {} } message: { Text(message) }
+            .accessibilityLabel("About \(title)")
+            .sheet(isPresented: $show) {
+                MessageSheet(title: title, message: message, context: "About this metric")
+            }
     }
 }

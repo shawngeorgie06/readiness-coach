@@ -17,7 +17,6 @@ struct AskContext {
 struct AskCoachView: View {
     @EnvironmentObject private var settings: AppSettings
     @State private var context: AskContext
-    @Environment(\.dismiss) private var dismiss
 
     @State private var question = ""
     @State private var askedQuestion: String?
@@ -35,27 +34,14 @@ struct AskCoachView: View {
     private var trimmedQuestion: String { question.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: Space.section) {
-                    lockedCall
-                    questionField
-                    if let askedQuestion, isAsking || answer != nil || error != nil {
-                        conversation(askedQuestion)
-                    }
-                }
-                .padding(.horizontal, Space.margin)
-                .padding(.top, 8)
-                .padding(.bottom, 24)
+        SheetScaffold(title: "Ask Coach", context: "Your locked readiness call", systemImage: "text.bubble") {
+            lockedCall
+            questionField
+            if let askedQuestion, isAsking || answer != nil || error != nil {
+                conversation(askedQuestion)
             }
-            .scrollDismissesKeyboard(.interactively)
-            .sheetSurface()
-            .navigationTitle("Ask Coach")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
-            }
-            .onDisappear { askTask?.cancel() }
         }
+        .onDisappear { askTask?.cancel() }
     }
 
     // MARK: Locked call
@@ -101,6 +87,8 @@ struct AskCoachView: View {
             TextField("e.g. Can I do a hard lifting session today?", text: $question, axis: .vertical)
                 .lineLimit(2 ... 6)
                 .focused($questionFocused)
+                .submitLabel(.send)
+                .onSubmit(submit)
                 .font(.body)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
@@ -112,9 +100,9 @@ struct AskCoachView: View {
                     if isAsking { ProgressView().tint(Palette.canvas) }
                     Text(isAsking ? "Asking…" : "Ask")
                 }
-                .frame(maxWidth: .infinity, minHeight: 30)
+                .frame(maxWidth: .infinity)
             }
-            .primaryAction()
+            .buttonStyle(SheetActionStyle())
             .disabled(isAsking || trimmedQuestion.isEmpty)
         }
     }
