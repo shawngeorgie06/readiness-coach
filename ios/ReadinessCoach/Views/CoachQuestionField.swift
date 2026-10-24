@@ -59,7 +59,7 @@ struct CoachQuestionField: UIViewRepresentable {
         func textViewDidEndEditing(_ textView: UITextView) { parent.isFocused = false }
 
         func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
-            guard text == "\n" else { return true }
+            guard text == "\n", textView.markedTextRange == nil else { return true }
             parent.text = textView.text
             parent.isFocused = false
             textView.resignFirstResponder()
