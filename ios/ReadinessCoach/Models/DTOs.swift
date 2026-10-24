@@ -57,10 +57,34 @@ struct TodayDTO: Codable {
     /// last completed night. Optional so older cached payloads still decode.
     let sleepPending: Bool?
     let advisor: AdvisorNote
+    /// Additive: absent from older servers.
+    var baselines: TodayBaselinesDTO? = nil
 
     var isLowConfidence: Bool { confidence == "low" }
     /// Whether the app should show "Haven't slept yet" for the sleep tile.
     var isSleepPending: Bool { sleepPending ?? false }
+}
+
+struct NeutralBandDTO: Codable, Hashable {
+    let low: Double
+    let high: Double
+}
+
+struct MetricBaselineDTO: Codable, Hashable {
+    let today: Double?
+    let baseline30d: Double?
+    let neutralBand: NeutralBandDTO?
+    /// Oldest first, 14 entries, null for days without data.
+    let recent14d: [Double?]
+    /// "up", "down" or "none".
+    let goodDirection: String
+}
+
+struct TodayBaselinesDTO: Codable, Hashable {
+    let hrv: MetricBaselineDTO
+    let restingHr: MetricBaselineDTO
+    let sleepHours: MetricBaselineDTO
+    let load7d: MetricBaselineDTO
 }
 
 // MARK: - Detail tabs

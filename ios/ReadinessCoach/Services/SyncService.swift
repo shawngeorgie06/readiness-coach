@@ -25,7 +25,7 @@ final class SyncService: ObservableObject {
         .appendingPathComponent("cached-today.json")
 
     /// Show the last-known Today immediately on launch (stale-while-revalidate),
-    /// so a cold Render server (30–60s wake) doesn't leave the UI blank. The
+    /// so a slow network doesn't leave the UI blank. The
     /// network refresh then replaces it in the background.
     init() {
         // Remove the pre-v1.3.4 UserDefaults cache after upgrading.
@@ -134,11 +134,9 @@ final class SyncService: ObservableObject {
         lastUploadError = nil
         defer { isSyncing = false; uploadingCount = nil }
 
-        async let wakeTask: Void = client.wakeServer()
         async let healthPayloadTask = loadHealthPayload(settings)
         async let preliminaryTodayTask = loadToday(client)
 
-        _ = await wakeTask
         let healthPayload = await healthPayloadTask
         let preliminaryToday = await preliminaryTodayTask
 
@@ -256,7 +254,7 @@ final class SyncService: ObservableObject {
     }
 
     private func loadToday(_ client: APIClient) async -> TodayDTO? {
-        try? await client.getTodayWithRetry()
+        try? await client.getToday()
     }
 
     private func refreshTodayFromServer(
@@ -265,7 +263,7 @@ final class SyncService: ObservableObject {
         keepPreliminaryOnFailure: Bool
     ) async {
         do {
-            didRefresh(try await client.getTodayWithRetry(), settings)
+            didRefresh(try await client.getToday(), settings)
         } catch {
             signOutIfUnauthorized(error, settings: settings)
             if !keepPreliminaryOnFailure || today == nil {
