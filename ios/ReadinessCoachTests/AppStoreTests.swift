@@ -66,8 +66,12 @@ final class AppStoreTests: XCTestCase {
         cache.save(key, CachedEnvelope(userId: user, day: day, fetchedAt: clock.addingTimeInterval(-ageSeconds), etag: etag, value: value))
     }
 
-    private func waitUntil(_ condition: () -> Bool) async {
-        for _ in 0..<500 where !condition() { try? await Task.sleep(nanoseconds: 2_000_000) }
+    private func waitUntil(file: StaticString = #filePath, line: UInt = #line, _ condition: () -> Bool) async {
+        for _ in 0..<500 {
+            if condition() { return }
+            try? await Task.sleep(nanoseconds: 2_000_000)
+        }
+        XCTFail("Timed out waiting for condition", file: file, line: line)
     }
 
     func testActivateShowsCachedValuesWithoutNetwork() {
@@ -102,8 +106,11 @@ final class AppStoreTests: XCTestCase {
 
     func testConcurrentRefreshesShareOneRequest() async {
         store.activate(userId: "u1", api: api)
-        async let first = store.refresh(.body)
-        async let second = store.refresh(.body)
+        api.setHold(true)
+        async let first = store.refresh(.body, force: true)
+        async let second = store.refresh(.body, force: true)
+        await waitUntil { !self.api.calls.isEmpty }
+        api.setHold(false)
         let results = await [first, second]
         XCTAssertEqual(results, [true, true])
         XCTAssertEqual(api.calls, ["body"])
@@ -131,6 +138,9 @@ final class AppStoreTests: XCTestCase {
         XCTAssertEqual(store.body.value?.days, 7)
         XCTAssertNotNil(store.body.error)
         XCTAssertFalse(store.body.isRefreshing)
+        // A second call proves the in-flight entry was cleared after the error.
+        await store.refresh(.body)
+        XCTAssertEqual(api.calls, ["body", "body"])
     }
 
     func testSuccessfulTodayRefreshPrefetchesPillars() async {

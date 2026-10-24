@@ -86,7 +86,7 @@ final class AppStore {
         }
     }
 
-    /// Called by SyncService after an upload stored new samples.
+    /// Called by SyncService after an upload stored new samples. A refresh already in flight returns pre-upload data; the next refresh corrects it.
     func noteUploadedSamples() {
         dataVersion += 1
     }
