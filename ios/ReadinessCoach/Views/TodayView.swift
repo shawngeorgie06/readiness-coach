@@ -13,7 +13,7 @@ struct TodayView: View {
 
     @State private var showAsk = false
     @State private var showHistory = false
-    @State private var pillarInfo: PillarInfo?
+    @State private var showScoringDrivers = false
     @State private var healthStatus: HealthKitService.AccessStatus?
     @State private var healthRequestError: String?
     @State private var refreshCount = 0
@@ -128,14 +128,20 @@ struct TodayView: View {
             .sheet(isPresented: $showAsk) {
                 if let today = sync.today { AskCoachView(today: today) }
             }
-            .sheet(item: $pillarInfo) { PillarDetailSheet(info: $0) }
-            .alert("Health access", isPresented: Binding(
+            .sheet(isPresented: $showScoringDrivers) {
+                if let today = sync.today { ScoringDriversSheet(pillars: today.pillars) }
+            }
+            .sheet(isPresented: Binding(
                 get: { healthRequestError != nil },
                 set: { if !$0 { healthRequestError = nil } }
             )) {
-                Button("OK", role: .cancel) { healthRequestError = nil }
-            } message: {
-                Text(healthRequestError ?? "")
+                MessageSheet(
+                    title: "Health access",
+                    message: healthRequestError ?? "Health access couldn't be updated. Try again from Today.",
+                    systemImage: "heart.text.square",
+                    tone: .danger,
+                    context: "Health connection"
+                )
             }
             .task { healthStatus = await health.accessStatus() }
             .onAppear { if sync.today != nil { perfTodayContentShown() } }
@@ -168,16 +174,7 @@ struct TodayView: View {
                     .foregroundStyle(Palette.textPrimary)
                     .accessibilityAddTraits(.isHeader)
                 Spacer()
-                Menu {
-                    ForEach(Pillar.allCases) { pillar in
-                        Button(pillar.title) {
-                            pillarInfo = PillarInfo(
-                                name: pillar.title, weight: "\(pillar.weightPercent)%",
-                                description: pillar.summary, pillar: pillar.score(in: today.pillars)
-                            )
-                        }
-                    }
-                } label: {
+                Button { showScoringDrivers = true } label: {
                     if typeSize.isAccessibilitySize {
                         Image(systemName: "info.circle")
                             .font(.body)
