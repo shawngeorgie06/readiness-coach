@@ -201,7 +201,7 @@ Work starts from the latest `origin/main` (v2 was merged as PR #13) in a separat
 
 - Keep the four tabs from v2; change the look and loading, not the structure.
 - Direction C (rings + plan) is Shawn's pick; I extended it to the pillar tabs as: big numeral head, one hero visual, then open sections. Rings appear only on Today.
-- Pillar rings use the pillar's own color, and the numeral inside carries green/amber/red, so the ring row stays colorful without hiding a weak score.
+- Pillar rings use the pillar's own color. The numeral is white at scores of 75 or higher, amber at 50–74, and red below 50, so a weak score remains visible.
 - Today's sparklines need 14 days of history, so `baselines` also carries `recent14d`.
 - No day stepping on Today; past days open as a read-only summary from History (avoids recompute writes and LLM cost).
 - Baseline arrows use server-provided baselines, so they always agree with the score's drivers.
