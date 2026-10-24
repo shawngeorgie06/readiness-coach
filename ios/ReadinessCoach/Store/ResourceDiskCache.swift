@@ -41,23 +41,6 @@ final class ResourceDiskCache {
         try? FileManager.default.removeItem(at: directory)
     }
 
-    /// One-time: moves legacy `cached-today.json` into the `today` slot for
-    /// `userId`, then deletes it. The legacy file holds a bare `TodayDTO`
-    /// written with a default `JSONEncoder`, so it is read with a default
-    /// decoder. An existing `today` entry for this user is kept.
-    func migrateLegacyToday(from legacyURL: URL, userId: String, day: String) {
-        defer { try? FileManager.default.removeItem(at: legacyURL) }
-        guard let data = try? Data(contentsOf: legacyURL),
-              let dto = try? JSONDecoder().decode(TodayDTO.self, from: data),
-              load(.today, userId: userId, as: TodayDTO.self) == nil
-        else { return }
-        let modified = (try? legacyURL.resourceValues(forKeys: [.contentModificationDateKey]))?
-            .contentModificationDate
-        save(.today, CachedEnvelope(
-            userId: userId, day: day, fetchedAt: modified ?? Date(), etag: nil, value: dto
-        ))
-    }
-
     private func write(_ data: Data, to fileURL: URL) {
         do {
             try FileManager.default.createDirectory(

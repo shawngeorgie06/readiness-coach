@@ -13,30 +13,96 @@ final class ResourceCacheTests: XCTestCase {
 
     override func tearDownWithError() throws {
         try? FileManager.default.removeItem(at: directory)
-        try? FileManager.default.removeItem(at: directory.deletingLastPathComponent().appendingPathComponent("legacy-\(directory.lastPathComponent).json"))
+        try? FileManager.default.removeItem(at: legacyURL())
     }
 
     private func envelope(user: String = "a", value: [String] = ["x"]) -> CachedEnvelope<[String]> {
         CachedEnvelope(userId: user, day: "2026-10-23", fetchedAt: Date(timeIntervalSince1970: 1_700_000_000), etag: "W/\"1\"", value: value)
     }
 
-    /// With no user (account deleted or cleared), the legacy Today belongs to
-    /// nobody: it must be deleted, never kept for the next user to inherit.
+    private func legacyURL() -> URL {
+        directory.deletingLastPathComponent().appendingPathComponent("legacy-\(directory.lastPathComponent).json")
+    }
+
+    private static func legacyTodayJSON(readiness: Int) -> String {
+        """
+        {"date":"2026-10-23","readiness":\(readiness),"decision":"push","calibrating":false,
+         "pillars":{"sleep":{"score":80,"drivers":[]},"recovery":{"score":80,"drivers":[]},"load":{"score":80,"drivers":[]}},
+         "overridesApplied":[],"confidence":"high","missing":[],
+         "advisor":{"decision":"push","why":["w"],"prescription":"p","ifIgnored":"i","source":"template"}}
+        """
+    }
+
+    private func saveToday(user: String, readiness: Int) throws {
+        let dto = try JSONDecoder().decode(TodayDTO.self, from: Data(Self.legacyTodayJSON(readiness: readiness).utf8))
+        cache.save(.today, CachedEnvelope(userId: user, day: "2026-10-23", fetchedAt: Date(), etag: nil, value: dto))
+    }
+
+    /// The legacy file records no owner, so a valid Today left by user A must
+    /// not reach user B, in memory or on disk.
     @MainActor
-    func testLegacyTodayWithoutUserIsDeletedNotDeferred() throws {
-        try Data("{}".utf8).write(to: legacyURL())
-        StoreActivation.migrateLegacyToday(cache: cache, legacyURL: legacyURL(), userId: "")
+    func testValidLegacyTodayNeverReachesSignedInUser() throws {
+        try Data(Self.legacyTodayJSON(readiness: 81).utf8).write(to: legacyURL())
+        let store = AppStore(cache: cache)
+        StoreActivation.activate(store, userId: "b", api: nil, legacyURL: legacyURL())
+        XCTAssertNil(store.today.value)
+        XCTAssertNil(cache.load(.today, userId: "b", as: TodayDTO.self))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("today.json").path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: legacyURL().path))
-        StoreActivation.migrateLegacyToday(cache: cache, legacyURL: legacyURL(), userId: "new-user")
+    }
+
+    @MainActor
+    func testLegacyTodayWithoutUserIsDeleted() throws {
+        try Data(Self.legacyTodayJSON(readiness: 81).utf8).write(to: legacyURL())
+        let store = AppStore(cache: cache)
+        StoreActivation.activate(store, userId: "", api: nil, legacyURL: legacyURL())
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacyURL().path))
+        StoreActivation.activate(store, userId: "new-user", api: nil, legacyURL: legacyURL())
+        XCTAssertNil(store.today.value)
         XCTAssertNil(cache.load(.today, userId: "new-user", as: TodayDTO.self))
     }
 
     @MainActor
-    func testResetDeletesLegacyToday() throws {
-        try Data("{}".utf8).write(to: legacyURL())
+    func testCorruptLegacyTodayIsDeletedAndWritesNothing() throws {
+        try Data("garbage".utf8).write(to: legacyURL())
         let store = AppStore(cache: cache)
+        StoreActivation.activate(store, userId: "a", api: nil, legacyURL: legacyURL())
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacyURL().path))
+        XCTAssertNil(store.today.value)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
+    }
+
+    @MainActor
+    func testMissingLegacyTodayStillLoadsUserCache() throws {
+        try saveToday(user: "a", readiness: 81)
+        let store = AppStore(cache: cache)
+        StoreActivation.activate(store, userId: "a", api: nil, legacyURL: legacyURL())
+        XCTAssertEqual(store.today.value?.readiness, 81)
+    }
+
+    /// Removing the legacy file leaves the user-scoped cache alone, and the
+    /// legacy value never replaces it.
+    @MainActor
+    func testUserScopedCacheSurvivesLegacyRemoval() throws {
+        try saveToday(user: "a", readiness: 81)
+        try Data(Self.legacyTodayJSON(readiness: 42).utf8).write(to: legacyURL())
+        let store = AppStore(cache: cache)
+        StoreActivation.activate(store, userId: "a", api: nil, legacyURL: legacyURL())
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacyURL().path))
+        XCTAssertEqual(store.today.value?.readiness, 81)
+        XCTAssertEqual(cache.load(.today, userId: "a", as: TodayDTO.self)?.value.readiness, 81)
+    }
+
+    @MainActor
+    func testResetDeletesLegacyTodayAndUserCache() throws {
+        try saveToday(user: "a", readiness: 81)
+        let store = AppStore(cache: cache)
+        StoreActivation.activate(store, userId: "a", api: nil, legacyURL: legacyURL())
+        try Data(Self.legacyTodayJSON(readiness: 42).utf8).write(to: legacyURL())
         StoreActivation.reset(store, legacyURL: legacyURL())
         XCTAssertFalse(FileManager.default.fileExists(atPath: legacyURL().path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
+        XCTAssertNil(store.today.value)
     }
 
     func testRoundTripKeepsValueEtagAndDay() {
@@ -105,55 +171,5 @@ final class ResourceCacheTests: XCTestCase {
         XCTAssertNil(cache.load(.today, userId: "a", as: [String].self))
         XCTAssertNil(cache.load(.history(days: 90), userId: "b", as: [String].self))
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
-    }
-
-    func testLegacyTodayMigratesOnce() throws {
-        let legacy = directory.deletingLastPathComponent().appendingPathComponent("legacy-\(directory.lastPathComponent).json")
-        let json = """
-        {"date":"2026-10-23","readiness":81,"decision":"push","calibrating":false,
-         "pillars":{"sleep":{"score":80,"drivers":[]},"recovery":{"score":80,"drivers":[]},"load":{"score":80,"drivers":[]}},
-         "overridesApplied":[],"confidence":"high","missing":[],
-         "advisor":{"decision":"push","why":["w"],"prescription":"p","ifIgnored":"i","source":"template"}}
-        """
-        try Data(json.utf8).write(to: legacy)
-        cache.migrateLegacyToday(from: legacy, userId: "a", day: "2026-10-23")
-        let loaded = cache.load(.today, userId: "a", as: TodayDTO.self)
-        XCTAssertEqual(loaded?.value.readiness, 81)
-        XCTAssertEqual(loaded?.day, "2026-10-23")
-        XCTAssertNil(cache.load(.today, userId: "b", as: TodayDTO.self))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: legacy.path))
-
-        // A second call with the legacy file gone changes nothing.
-        cache.migrateLegacyToday(from: legacy, userId: "b", day: "2026-10-24")
-        XCTAssertNil(cache.load(.today, userId: "b", as: TodayDTO.self))
-        XCTAssertEqual(cache.load(.today, userId: "a", as: TodayDTO.self)?.value.readiness, 81)
-    }
-
-    private func legacyURL() -> URL {
-        directory.deletingLastPathComponent().appendingPathComponent("legacy-\(directory.lastPathComponent).json")
-    }
-
-    func testCorruptLegacyFileWritesNothingAndIsDeleted() throws {
-        let legacy = legacyURL()
-        try Data("garbage".utf8).write(to: legacy)
-        cache.migrateLegacyToday(from: legacy, userId: "a", day: "2026-10-23")
-        XCTAssertNil(cache.load(.today, userId: "a", as: TodayDTO.self))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: legacy.path))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("today.json").path))
-    }
-
-    func testMissingLegacyFileIsANoOp() {
-        cache.migrateLegacyToday(from: legacyURL(), userId: "a", day: "2026-10-23")
-        XCTAssertNil(cache.load(.today, userId: "a", as: TodayDTO.self))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
-    }
-
-    func testExistingTodayEntrySurvivesMigration() throws {
-        cache.save(.today, envelope(user: "a", value: ["keep"]))
-        let legacy = legacyURL()
-        try Data("{}".utf8).write(to: legacy)
-        cache.migrateLegacyToday(from: legacy, userId: "a", day: "2026-10-23")
-        XCTAssertEqual(cache.load(.today, userId: "a", as: [String].self)?.value, ["keep"])
-        XCTAssertFalse(FileManager.default.fileExists(atPath: legacy.path))
     }
 }

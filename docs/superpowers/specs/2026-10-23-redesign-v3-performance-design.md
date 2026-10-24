@@ -93,7 +93,7 @@ Shawn's feedback on the first mockup was that the boxed sections still looked li
 
 - Head: Recovery score, "RECOVERY" in band color, one-line meaning; driver chips (outlined pills) under it.
 - Hero: 30-day HRV/RHR area chart with a metric toggle and a dashed 30-day-normal line; 7D/30D via tap-and-hold scrub range.
-- Compared with normal: HRV, resting HR, heart-rate daily range.
+- Compared with normal: HRV and resting HR, from `/v1/today` `baselines`. Heart-rate daily range is shown only once the server supplies its normal (see Backend, "Comparison normals not yet supplied").
 - Detail: daily list of the last 7 days as hairline rows.
 
 ### Sleep (pillar 35%)
@@ -102,7 +102,7 @@ Shawn's feedback on the first mockup was that the boxed sections still looked li
 - Nights strip: bars of hours per night for the 7/30/90 range (segmented control at the right of the section title), latest highlighted; selecting a night updates everything below.
 - Selected night: hypnogram with time axis, then a stacked stage bar with Deep / REM / Core / Awake durations.
 - Sleep stage colors (hypnogram, stage bar and legend dots): Awake `#F5A35C` (warm orange), REM `#7DD3FC` (sky), Core `#3F7FE8` (blue), Deep `#6A4BD8` (indigo). Lighter means lighter sleep; Awake is the only warm color so wake-ups stand out. These replace the earlier all-purple shades, which were hard to tell apart. The Sleep identity purple `#8474CE` stays on the nights bars and the Today ring.
-- Compared with normal: total sleep, restorative sleep, bedtime.
+- Compared with normal: total sleep, from `/v1/today` `baselines`. Restorative sleep and bedtime are shown only once the server supplies their normals (see Backend, "Comparison normals not yet supplied").
 
 ### Train (pillar 25%, "Load")
 
@@ -125,7 +125,7 @@ Restyled with the same tokens and components; behavior unchanged. Ask shows the 
 - **Canvas:** near-black `#07080A`, flat. **No cards**: content sits on the canvas, separated by 1px hairlines `#FFFFFF10`-`#FFFFFF12` and spacing. The only filled surface is `#15171B` for the Ask bar, segmented controls and sheets. No shadows; the one glow is a soft one on ring fills.
 - **Numerals:** SF Pro **Compressed/Condensed** (`.fontWidth(.compressed)` / `.condensed`, iOS 16+, system font, no licensing), heavy weight, tabular. Head numeral ~64pt, ring numerals ~26pt, row values ~20pt. Scaled with Dynamic Type.
 - **Text:** SF Pro for body. Section titles are sentence case, 15pt semibold, white; no uppercase eyebrow labels. The only uppercase, letter-spaced text is the verdict word next to the head numeral.
-- **Score color bands** (verdict words, ring numerals and comparison deltas): ≥75 green `#3DD68C`, 50-74 amber `#F0B429`, <50 red `#F0605B`, matching the backend's `decisionFromScore` thresholds and the existing `Palette.band(for:)`.
+- **Score color bands** apply to 0-100 scores only (pillar-tab verdict words and the colors below 75 on ring numerals): ≥75 green `#3DD68C`, 50-74 amber `#F0B429`, <50 red `#F0605B`, matching the backend's `decisionFromScore` thresholds and the existing `Palette.band(for:)`. A ring numeral at ≥75 is always white, never green. Comparison deltas are not scores and never use these thresholds; they use each metric's server neutral band (see Baseline arrows).
 - **Today's verdict word is colored by `today.decision`, not by its score band.** Overrides (for example under 5 h of sleep) can make the decision more conservative than the score alone; it must never look greener than the locked call.
 - **Pillar identity colors** (v2's CVD-validated set) are used for icons, chart lines and pillar labels, never for good/bad meaning.
 - **Rings:** used only for the three pillars on Today. 270° arc, rounded caps, track at 8% white, fill in the pillar identity color with a soft glow; the numeral inside carries the band (white ≥75, amber 50-74, red <50) so a weak pillar still reads as weak.
@@ -141,7 +141,7 @@ Restyled with the same tokens and components; behavior unchanged. Ask shows the 
 ### iOS
 
 1. **One `AppStore`** (`@Observable`, iOS 17) owns `today`, `body`, `sleep`, `train`, `history` as `Resource<T>` values: `{ value, fetchedAt, isRefreshing, error }`. Views read only the fields they need, so an upload counter no longer re-renders charts. `SyncService` keeps sync/upload logic and writes into the store.
-2. **Stale-while-revalidate disk cache per resource**, generalizing today's `cached-today.json` (same file protection and backup exclusion), keyed by user and date. Tabs render cached data immediately.
+2. **Stale-while-revalidate disk cache per resource**, generalizing today's `cached-today.json` (same file protection and backup exclusion), keyed by user and date. Tabs render cached data immediately. The old `cached-today.json` records no owner, so it is deleted rather than migrated; the first launch after upgrading fetches Today once.
 3. **Prefetch:** after Today loads (launch, foreground, post-sync), fetch body, sleep and train in parallel in the background. Revalidate a resource on tab appear only if older than 5 minutes or a sync uploaded new samples since it was fetched.
 4. **Remove** the extra `getToday` in Recovery, `wakeServer()`, and the fixed 2.5 s retry sleep (replace with one immediate retry on transport error). Lower the read timeout from 60 s to 15 s; uploads keep their longer timeout.
 5. **Precompute view models** (chart series, baselines, arrows) once when a resource changes, not inside `body`. Shared static formatters.
@@ -150,13 +150,20 @@ Restyled with the same tokens and components; behavior unchanged. Ask shows the 
 ### Backend
 
 1. **Memoize `getToday`** in an in-process LRU keyed `(userId, date, tz)`. An entry expires at the earliest of: 10 minutes, the end of that date's sleep window (when `sleepPending` flips), any sync for the user, a change to `sleepNeedHours`, or account deletion. The builder confirms Family Host runs a single API instance; if it runs more, use a short TTL only and skip cross-instance invalidation.
-2. **Add `baselines` to `/v1/today`** (additive): for HRV, resting HR, sleep hours and 7-day load, `{ today, baseline30d, neutralBand, recent14d }` taken from the values `computeScore` already uses; `recent14d` is the daily series (oldest first, nulls for missing days) that feeds the Today sparklines.
+2. **Add `baselines` to `/v1/today`** (additive): for HRV, resting HR, sleep hours and 7-day load, `{ today, baseline30d, neutralBand, recent14d }` taken from the values `computeScore` already uses; `recent14d` is the daily series (oldest first, nulls for missing days) that feeds the Today sparklines. Phase 1 covers these four metrics only.
 3. **History uses the caller's tz** (additive `tz` param, defaulting to today's 0 behavior) so History and Today agree.
 4. **Aggregate body metrics in SQL** (`GROUP BY` local day with `min/avg/max`, plus latest via `DISTINCT ON`) instead of loading raw rows into Node.
 5. **Optional sleep timeline trim:** an additive `timelineNights=N` param; when absent, behavior is unchanged so the installed build keeps every hypnogram. The app asks for timelines only for the visible window and fetches an older night's timeline on demand. Only ship this if measurement shows Sleep payload matters.
 6. Keep `Cache-Control: private, no-store`; add **ETag/If-None-Match** on read endpoints so unchanged revalidations return 304.
 7. **Request timing log** middleware (method, route, status, ms; no user IDs or bodies) so server p95 can be measured.
 8. No change to scoring logic or response fields the app relies on; additive changes only, so the current App Store-less build on Shawn's phone keeps working until updated.
+
+**Comparison normals not yet supplied.** The Recovery heart-rate daily range row and the Sleep restorative sleep and bedtime rows have no server normal today: `baselines` carries only HRV, resting HR, sleep hours and 7-day load, and no other endpoint returns a 30-day normal or neutral band for these three. The app must not compute one client-side. These rows are deferred until a data contract exists. Adding it is a prerequisite at the start of Phase 2, before any screen shows the rows:
+
+- Additive fields in `baselines` on `/v1/today`: `hrDailyRange`, `restorativeSleep` and `bedtime`, each in the same `{ today, baseline30d, neutralBand, recent14d, goodDirection }` shape. Units: bpm (daily max minus min), hours, and minutes from the local midnight that begins the wake day for bedtime (so 23:30 is -30 and 00:30 is 30).
+- Source: heart-rate samples per local day for the range; the same night summaries `computeScore` uses for restorative hours; the start of the main sleep for bedtime. Each value states which of these it came from in the backend contract and tests.
+- Null semantics: `today` is `null` when there is no data for the day; `baseline30d` and `neutralBand` are `null` when fewer than a minimum number of days (set with the band rules) have data. The app hides the row when `today` is `null`, shows "Not enough data yet" with no arrow when `baseline30d` is `null`, and never shows an arrow without a band.
+- The band values and minimum-day counts are set and tested with the backend change; this spec does not claim they already exist.
 
 ### Performance targets (measured, before and after)
 

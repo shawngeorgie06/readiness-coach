@@ -215,7 +215,7 @@ export function buildBaselines(input: {
   - `rhr band is ±3% and direction down`: with `rhrBaseline: 50`, expect the band `{ low: 48.5, high: 51.5 }`.
   - `null baseline gives null band`.
   - `sleep baseline ignores zero nights`: with `sleepPrior30: [7, 0, 8]`, expect `baseline30d` 7.5 and band `{ low: 6.75, high: 8.25 }`.
-  - `load7d series is a 7-day rolling mean`: 28 values of `[0…0, 7, 7, 7, 7, 7, 7, 7]`. The last entry is 7, and the entry 7 days earlier is 1.
+  - `load7d series is a 7-day rolling mean`: `strain28d` is 21 zeros followed by 7 sevens. The last `recent14d` entry is 7. `recent14d[7]`, the window ending on the first 7 (six days before the final day), is 1. `recent14d[6]`, seven days before the final day, is 0.
   - `recent14d always has 14 entries`.
 - [ ] **Step 2: Run them and confirm they fail.** Run `npx vitest run tests/services/todayBaselines.test.ts`.
 - [ ] **Step 3: Implement** `buildBaselines` and wire it into `computeScore`'s returned response. The pending-night fallback already returns the previous day's full response, so baselines follow it.
@@ -295,8 +295,6 @@ final class ResourceDiskCache {
     func load<V: Codable>(_ key: ResourceKey, userId: String, as: V.Type) -> CachedEnvelope<V>?
     func save<V: Codable>(_ key: ResourceKey, _ envelope: CachedEnvelope<V>)
     func removeAll()
-    /// One-time: moves legacy `cached-today.json` into the `today` slot for `userId`, then deletes it.
-    func migrateLegacyToday(from legacyURL: URL, userId: String, day: String)
 }
 ```
 
@@ -309,7 +307,7 @@ final class ResourceDiskCache {
   - `testDifferentLocalDayNeedsRevalidation`: with `day "2026-10-22"`, `today "2026-10-23"` and age 10 s, it returns true.
   - `testUploadNewerThanFetchNeedsRevalidation`: with `dataVersion 1` and `currentDataVersion 2`, it returns true.
   - `testRemoveAllDeletesEverything`
-  - `testLegacyTodayMigratesOnce`
+  - Legacy `cached-today.json` is deleted, never migrated. It holds a bare `TodayDTO` with no record of whose data it is, so copying it into the signed-in user's slot could show user A's Today to user B. `StoreActivation.activate` deletes it on every activation (signed in or not) and `StoreActivation.reset` deletes it with the user-scoped cache. Tests: `testValidLegacyTodayNeverReachesSignedInUser` (a valid user-A file reaches neither user B's memory nor disk), `testLegacyTodayWithoutUserIsDeleted`, `testCorruptLegacyTodayIsDeletedAndWritesNothing`, `testMissingLegacyTodayStillLoadsUserCache`, `testUserScopedCacheSurvivesLegacyRemoval` and `testResetDeletesLegacyTodayAndUserCache`. Tradeoff: the first launch after upgrading has no cached Today and waits for the network once.
 - [ ] **Step 2: Run them and confirm they fail.** Run `xcodebuild test … -only-testing:ReadinessCoachTests/ResourceCacheTests`.
 - [ ] **Step 3: Implement.** Write with `[.atomic, .completeFileProtection]`, then set `isExcludedFromBackup`, which is the same sequence `SyncService.didRefresh` uses today. Use a shared static `JSONEncoder` and `JSONDecoder` with `.iso8601` dates.
 - [ ] **Step 4: Re-run the tests and confirm they pass.**
@@ -400,9 +398,12 @@ extension APIClient: ReadAPI {}
   - `testUploadMakesResourcesStale`: after `noteUploadedSamples()`, a fresh `.body` refetches.
   - `testIfNoneMatchOnlyWithCachedValue`: the fake sees `etag == nil` when `value == nil`.
   - `testResetClearsMemoryAndDisk`
+  - `testActivateDifferentUserClearsPreviousUsersValues`
+  - `testRefreshCompletingAfterUserSwitchDoesNotWrite`: a fetch for the old user is held, the store activates a new user, then the old fetch completes; neither memory nor disk gets the old user's result.
 - [ ] **Step 2: Run them and confirm they fail.**
 - [ ] **Step 3: Implement.**
   - Keep in-flight tasks in `[ResourceKey: Task<Bool, Never>]`.
+  - Activating a different user, or `reset`, clears memory, cancels in-flight tasks and bumps a session generation. Each fetch records the generation it started under and checks it again before writing to memory or disk, so a result for the previous user is dropped.
   - Persist every `.fresh` result with `day = localDay()`.
   - `dataVersion` starts at 0 per session. A resource stores the `dataVersion` it was fetched at.
   - `refresh(.today)` calls `prefetchPillars()` on success.
@@ -418,7 +419,7 @@ extension APIClient: ReadAPI {}
     - It takes `store` in `init`. `today` becomes a computed `store.today.value`. `refreshToday` and `performSync` call `store.refresh(.today, force: true)`.
     - `errorMessage` comes from `store.today.error` when the refresh fails.
     - After `uploadHealth` returns true, call `store.noteUploadedSamples()` before the refresh.
-    - Remove the `wakeTask`, the `cached-today.json` code (migrated by Task 8) and `didRefresh`'s file writing. Keep `settings.lastRefreshAt`.
+    - Remove the `wakeTask`, the `cached-today.json` code (the file itself is deleted on activation; see Task 8) and `didRefresh`'s file writing. Keep `settings.lastRefreshAt`.
   - `ios/ReadinessCoach/Views/SettingsView.swift`: replace `sync.today = nil` with `store.reset()`.
   - `BodyView.swift`, `SleepView.swift`, `TrainView.swift`, `TrendsView.swift`:
     - Read data from `@Environment(AppStore.self)`, drop `@EnvironmentObject settings`, and drop the private `response`, `isLoading` and `error` state.
