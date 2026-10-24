@@ -80,7 +80,7 @@ struct DaySummaryView: View {
                 OpenSection("About this summary") {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Decision bands: 75+ Push · 50–74 Maintain · under 50 Recover. Overrides can make a call more conservative than its score.")
-                        Text("Saved scores from your readiness history. Opening a past day doesn't recompute it or load a coach note.")
+                        Text("A saved snapshot of your readiness and pillar scores for this day.")
                     }
                     .font(.footnote)
                     .foregroundStyle(Palette.textSecondary)
