@@ -1,0 +1,9 @@
+# App icon
+
+Concept: **tuned momentum**. A cyan open gauge and forward cut form a compact abstract mark on near-black. Keep at least one quarter of the mark width clear around the mark in other placements; use it at 24 pt or larger in the app. The iOS icon asset fills its square canvas and relies on the system mask.
+
+Generated with the built-in image-generation tool, then resized to the required 1024 × 1024 app-icon size with macOS `sips`. The original generated output remains in the image-generation library. The project asset is `ios/ReadinessCoach/Assets.xcassets/AppIcon.appiconset/AppIcon.png`.
+
+Prompt:
+
+> Use case: logo-brand. Asset type: final production iOS app icon, square 1024 x 1024. Design a distinctive premium identity mark for Readiness Coach, a personal training readiness app. Concept: tuned momentum. A single bold cyan emblem combines an open orbital gauge with one decisive forward diagonal cut, subtly suggesting an abstract R without using typeset letters. One clear coherent silhouette, restrained asymmetry, precise circular geometry and clean negative space. Style: exceptionally crisp flat vector-like graphic, two colors only, luminous muted cyan #2CA5BF on uniform near-black #07080A. Center the emblem optically, occupy about 66 percent of the canvas with generous clear space. Full-bleed opaque near-black background all the way to the four perfectly square corners; iOS will apply its own mask. No baked-in rounded icon container, no white frame or border, no text, names, initials set in a font, numbers, heartbeat traces, hearts, bar charts, dumbbells, bolts, gradients, texture, shadows, bevels, gloss, 3D, glow, tiny details or watermark. This should feel like a confident professional performance instrument and remain legible at 40 pixels, with an original silhouette rather than a generic fitness icon.
