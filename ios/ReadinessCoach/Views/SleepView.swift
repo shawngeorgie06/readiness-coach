@@ -47,13 +47,16 @@ struct SleepView: View {
                         ),
                         isLoading: store.today.value == nil && store.today.error == nil
                     )
+                    ResourceNotice(resource: store.today, noun: "your score", currentDay: store.currentDay.date, errorsOnly: true) {
+                        Task { await store.refresh(.today, force: true) }
+                    }
                     ResourceNotice(resource: resource, noun: "sleep data", currentDay: store.currentDay.date) {
                         Task { await refresh() }
                     }
                     if let series = loaded, let night = NightSelection.night(selectedNightID, in: series.nights) {
                         nightSection(series, selected: night)
                         timelineSection(night)
-                        compared
+                        compared(selectedNight: night.id)
                         schedule(series.nights)
                         stagesByNight(series, selected: night)
                     } else if resource.value == nil, resource.error == nil {
@@ -61,7 +64,7 @@ struct SleepView: View {
                         PillarSkeleton(name: "sleep history", heroHeight: 160)
                     } else {
                         rangeOnly
-                        compared
+                        compared(selectedNight: nil)
                         if resource.value != nil {
                             PillarEmptyState(
                                 title: "No nights in the last \(days) days",
@@ -153,7 +156,7 @@ struct SleepView: View {
             .accessibilityElement(children: .combine)
             nightBars(series, selected: night)
             if let average = NightSelection.averageHours(series.nights) {
-                Text("Average across these \(series.nights.count) nights: \(DurationFormat.short(average)). Tap or drag across the bars to pick a night.")
+                Text("Average across these \(series.nights.count) nights: \(DurationFormat.short(average)). Tap a bar to pick a night, or touch and hold, then drag, to move through them.")
                     .font(.footnote)
                     .foregroundStyle(Palette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -324,12 +327,24 @@ struct SleepView: View {
 
     // MARK: Compared with normal
 
+    /// The server's comparison under today's score, so it always names that
+    /// night, including when another night is selected above.
     @ViewBuilder
-    private var compared: some View {
+    private func compared(selectedNight: String?) -> some View {
         if let today = store.today.value {
             OpenSection("Compared with normal") {
                 if let row = MetricComparison.all(from: today.baselines)?.first(where: { $0.metric == .sleepHours }), row.today != nil {
-                    ComparisonRow(comparison: row, showsRule: false)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(SleepComparisonSource.caption(
+                            scoreDate: today.date,
+                            selectedNight: selectedNight,
+                            currentDay: store.currentDay.date
+                        ))
+                        .font(.footnote)
+                        .foregroundStyle(Palette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        ComparisonRow(comparison: row, showsRule: false)
+                    }
                 } else if today.baselines == nil {
                     quiet("Your normals aren't available from the server yet.")
                 } else {

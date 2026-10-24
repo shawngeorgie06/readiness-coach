@@ -39,6 +39,9 @@ struct BodyView: View {
                         model: PillarHeadModel(pillar: .recovery, today: store.today.value, currentDay: store.currentDay.date),
                         isLoading: store.today.value == nil && store.today.error == nil
                     )
+                    ResourceNotice(resource: store.today, noun: "your score", currentDay: store.currentDay.date, errorsOnly: true) {
+                        Task { await store.refresh(.today, force: true) }
+                    }
                     ResourceNotice(resource: resource, noun: "recovery data", currentDay: store.currentDay.date) {
                         Task { await refresh() }
                     }

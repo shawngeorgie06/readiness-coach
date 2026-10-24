@@ -45,6 +45,9 @@ struct TrainView: View {
                         ),
                         isLoading: store.today.value == nil && store.today.error == nil
                     )
+                    ResourceNotice(resource: store.today, noun: "your score", currentDay: store.currentDay.date, errorsOnly: true) {
+                        Task { await store.refresh(.today, force: true) }
+                    }
                     ResourceNotice(resource: resource, noun: "training data", currentDay: store.currentDay.date) {
                         Task { await refresh() }
                     }
@@ -170,7 +173,13 @@ struct TrainView: View {
         if let today = store.today.value {
             OpenSection("Compared with normal") {
                 if let row = MetricComparison.all(from: today.baselines)?.first(where: { $0.metric == .load7d }), row.today != nil {
-                    ComparisonRow(comparison: row, showsRule: false)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(TrainLoadCopy.dailyAverageNote)
+                            .font(.footnote)
+                            .foregroundStyle(Palette.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        ComparisonRow(comparison: row, showsRule: false)
+                    }
                 } else {
                     Text(today.baselines == nil ? "Your normals aren't available from the server yet." : "No 7-day load yet.")
                         .font(.subheadline)
@@ -544,7 +553,7 @@ struct WorkoutDetailSheet: View {
                         .accessibilityLabel("Zone \(zone.index + 1), \(zone.name): \(Int(zone.minutes.rounded())) minutes, \(percent) percent")
                     }
                 }
-                Text("Estimated from your heart rate against your resting-to-max reserve.")
+                Text(HRZoneSegment.estimateNote)
                     .font(.footnote)
                     .foregroundStyle(Palette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)

@@ -91,18 +91,15 @@ struct ChartDayScrubOverlay: View {
             Rectangle()
                 .fill(Color.clear)
                 .contentShape(Rectangle())
-                .highPriorityGesture(
-                    DragGesture(minimumDistance: 0)
+                // A tap picks a day; touch and hold, then drag, scrubs. A quick
+                // swipe fails the hold, so the page underneath keeps scrolling.
+                .gesture(
+                    LongPressGesture(minimumDuration: 0.25)
+                        .sequenced(before: DragGesture(minimumDistance: 0))
                         .onChanged { value in
-                            guard let raw: Date = proxy.value(atX: value.location.x),
-                                  let snapped = nearestDate(raw, in: dates)
-                            else { return }
-                            if snapped != selection {
-                                var t = Transaction()
-                                t.disablesAnimations = true
-                                withTransaction(t) { selection = snapped }
-                            }
+                            if case .second(true, let drag?) = value { select(at: drag.location.x) }
                         }
+                        .exclusively(before: SpatialTapGesture().onEnded { select(at: $0.location.x) })
                 )
         }
         .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in
@@ -111,6 +108,16 @@ struct ChartDayScrubOverlay: View {
             let resolvedSelection = selection
             selection = resolvedSelection
         }
+    }
+
+    private func select(at x: CGFloat) {
+        guard let raw: Date = proxy.value(atX: x),
+              let snapped = nearestDate(raw, in: dates),
+              snapped != selection
+        else { return }
+        var t = Transaction()
+        t.disablesAnimations = true
+        withTransaction(t) { selection = snapped }
     }
 }
 

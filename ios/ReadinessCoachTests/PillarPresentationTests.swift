@@ -236,6 +236,65 @@ final class PillarPresentationTests: XCTestCase {
         XCTAssertEqual(zones.map(\.fraction), [0.25, 0.5, 0.25])
     }
 
+    // MARK: Review fixes
+
+    /// The sleep row is today's server comparison; another selected night is
+    /// called out, never compared client-side.
+    func testSleepComparisonNamesTheScoreNightAndCallsOutAnotherSelection() {
+        let latest = SleepComparisonSource.caption(scoreDate: "2026-10-24", selectedNight: "2026-10-24", currentDay: "2026-10-24")
+        XCTAssertTrue(latest.hasPrefix("Last night ("))
+        XCTAssertTrue(latest.contains("today's score"))
+        XCTAssertFalse(latest.contains("selected night"))
+        XCTAssertEqual(SleepComparisonSource.caption(scoreDate: "2026-10-24", selectedNight: nil, currentDay: "2026-10-24"), latest)
+
+        let other = SleepComparisonSource.caption(scoreDate: "2026-10-24", selectedNight: "2026-10-20", currentDay: "2026-10-24")
+        XCTAssertTrue(other.hasPrefix(latest))
+        XCTAssertTrue(other.contains("selected night"))
+        XCTAssertTrue(other.hasSuffix("isn't compared here."))
+
+        let stale = SleepComparisonSource.caption(scoreDate: "2026-10-23", selectedNight: "2026-10-23", currentDay: "2026-10-24")
+        XCTAssertTrue(stale.hasPrefix("Night of "))
+        XCTAssertFalse(stale.contains("Last night"))
+        XCTAssertFalse(stale.contains("today's score"))
+    }
+
+    /// The score notice shows refresh and load failures whatever the detail
+    /// resource does, but leaves the healthy saved-day note to the head.
+    func testScoreNoticeShowsFailuresButNotHealthySavedDays() {
+        var score = Resource<Int>()
+        score.error = "Offline"
+        XCTAssertEqual(ResourceNoticeState.of(score, currentDay: "2026-10-24", errorsOnly: true), .loadFailed(error: "Offline"))
+
+        score.value = 72
+        score.day = "2026-10-24"
+        XCTAssertEqual(ResourceNoticeState.of(score, currentDay: "2026-10-24", errorsOnly: true), .refreshFailed(error: "Offline"))
+
+        score.error = nil
+        score.day = "2026-10-23"
+        XCTAssertNil(ResourceNoticeState.of(score, currentDay: "2026-10-24", errorsOnly: true))
+        XCTAssertEqual(
+            ResourceNoticeState.of(score, currentDay: "2026-10-24"),
+            .savedFromOtherDay(day: "2026-10-23", refreshing: false)
+        )
+
+        score.day = "2026-10-24"
+        XCTAssertNil(ResourceNoticeState.of(score, currentDay: "2026-10-24"))
+        XCTAssertNil(ResourceNoticeState.of(Resource<Int>(), currentDay: "2026-10-24"))
+    }
+
+    /// The server buckets samples by % of a fixed 190 bpm max with no resting HR.
+    func testZoneNoteDescribesTheServerEstimate() {
+        let note = HRZoneSegment.estimateNote
+        XCTAssertTrue(note.contains("assumed 190 bpm maximum"))
+        XCTAssertTrue(note.contains("resting heart rate aren't used"))
+        XCTAssertFalse(note.localizedCaseInsensitiveContains("reserve"))
+    }
+
+    func testTrainLoadRowIsLabelledADailyAverage() {
+        XCTAssertTrue(TrainLoadCopy.dailyAverageNote.contains("per day"))
+        XCTAssertTrue(TrainLoadCopy.dailyAverageNote.contains("28-day daily average"))
+    }
+
     // MARK: Source guards
 
     private func viewSource(_ file: String) throws -> String {
@@ -252,6 +311,26 @@ final class PillarPresentationTests: XCTestCase {
         let source = try viewSource("SleepView.swift")
         XCTAssertFalse(source.contains("needHours"))
         XCTAssertFalse(source.localizedCaseInsensitiveContains("target"))
+    }
+
+    /// A high-priority zero-distance drag swallowed vertical scrolls that began
+    /// on a chart. Scrubbing now starts with a tap or a touch and hold.
+    func testDayScrubberLeavesVerticalScrollToThePage() throws {
+        let source = try viewSource("ChartScrubber.swift")
+        XCTAssertFalse(source.contains("highPriorityGesture"))
+        XCTAssertTrue(source.contains("LongPressGesture"))
+        XCTAssertTrue(source.contains("SpatialTapGesture"))
+    }
+
+    /// Each pillar tab surfaces today's score failures with a forced retry.
+    func testEveryPillarTabShowsScoreFailures() throws {
+        for file in ["BodyView.swift", "SleepView.swift", "TrainView.swift"] {
+            let source = try viewSource(file)
+            XCTAssertTrue(source.contains("ResourceNotice(resource: store.today"), file)
+            XCTAssertTrue(source.contains("errorsOnly: true"), file)
+            XCTAssertTrue(source.contains("store.refresh(.today, force: true)"), file)
+        }
+        XCTAssertFalse(try viewSource("TrainView.swift").contains("resting-to-max"))
     }
 
     /// Pillar helpers render inside the pillar tabs, so they inherit the rule

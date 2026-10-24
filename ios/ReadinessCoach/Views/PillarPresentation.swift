@@ -155,6 +155,26 @@ enum NightSelection {
     }
 }
 
+/// Names the night behind Sleep's "Compared with normal" row. That row is
+/// the server's comparison for today's score; other nights have none, so a
+/// different selection is called out rather than compared client-side.
+enum SleepComparisonSource {
+    static func caption(scoreDate: String, selectedNight: String?, currentDay: String) -> String {
+        let day = short(scoreDate)
+        var text = scoreDate == currentDay
+            ? "Last night (\(day)), from today's score."
+            : "Night of \(day), from your \(day) score."
+        if let selectedNight, selectedNight != scoreDate {
+            text += " The selected night (\(short(selectedNight))) isn't compared here."
+        }
+        return text
+    }
+
+    private static func short(_ day: String) -> String {
+        ChartDate.parse(day)?.formatted(.dateTime.month(.abbreviated).day()) ?? day
+    }
+}
+
 // MARK: - Train
 
 /// One day of the Train week bars. A day with no sessions is a rest day.
@@ -165,6 +185,12 @@ struct TrainDay: Identifiable, Equatable {
     let sessions: Int
     var id: Date { date }
     var isRest: Bool { sessions == 0 }
+}
+
+/// Train's "Compared with normal" row is a daily average; the head's figure
+/// is a 7-day total, so the row says which it is.
+enum TrainLoadCopy {
+    static let dailyAverageNote = "Average strain per day over the last 7 days, against your 28-day daily average. This isn't the 7-day total."
 }
 
 /// Workouts under one day label, newest first.
@@ -224,6 +250,10 @@ struct HRZoneSegment: Identifiable, Equatable {
     var id: Int { index }
 
     static let names = ["Easy", "Light", "Moderate", "Hard", "Max"]
+
+    /// The server buckets each heart-rate sample by its share of a fixed
+    /// 190 bpm maximum; it doesn't know the user's own max or resting rate.
+    static let estimateNote = "Estimated from heart-rate samples as a share of an assumed 190 bpm maximum: under 60% is Z1, 90% and up is Z5. Your own maximum and resting heart rate aren't used."
 
     var name: String { Self.names[min(index, Self.names.count - 1)] }
     var label: String { "Z\(index + 1) \(name)" }

@@ -379,39 +379,61 @@ struct MetricExplain: Identifiable, Hashable {
 
 /// Inline state for a pillar resource: a failed refresh over saved data, a
 /// failed first load, or saved data from an earlier day.
+/// What a resource notice says, if anything.
+enum ResourceNoticeState: Equatable {
+    /// A refresh failed; the saved value is still on screen.
+    case refreshFailed(error: String)
+    /// Nothing is saved and the load failed.
+    case loadFailed(error: String)
+    /// Healthy saved data from another day.
+    case savedFromOtherDay(day: String, refreshing: Bool)
+
+    /// `errorsOnly` drops the healthy saved-day notice for resources whose
+    /// date is already shown elsewhere (the score head's "Score from" note).
+    static func of<Value>(_ resource: Resource<Value>, currentDay: String, errorsOnly: Bool = false) -> ResourceNoticeState? {
+        if let error = resource.error {
+            return resource.value != nil ? .refreshFailed(error: error) : .loadFailed(error: error)
+        }
+        guard !errorsOnly, resource.value != nil, let day = resource.day, day != currentDay else { return nil }
+        return .savedFromOtherDay(day: day, refreshing: resource.isRefreshing)
+    }
+}
+
 struct ResourceNotice<Value>: View {
     let resource: Resource<Value>
     /// e.g. "recovery data".
     let noun: String
     let currentDay: String
+    var errorsOnly = false
     let retry: () -> Void
 
     var body: some View {
-        if let error = resource.error {
-            if resource.value != nil {
-                InlineNotice(
-                    title: "Couldn't refresh",
-                    message: "Showing \(noun) saved \(savedAgo). \(error)",
-                    actionTitle: "Retry",
-                    action: retry
-                )
-            } else {
-                InlineNotice(
-                    title: "Couldn't load \(noun)",
-                    message: error,
-                    systemImage: "wifi.exclamationmark",
-                    color: Palette.danger,
-                    actionTitle: "Retry",
-                    action: retry
-                )
-            }
-        } else if resource.value != nil, let day = resource.day, day != currentDay {
+        switch ResourceNoticeState.of(resource, currentDay: currentDay, errorsOnly: errorsOnly) {
+        case .refreshFailed(let error):
             InlineNotice(
-                title: resource.isRefreshing ? "Updating" : "Showing saved data",
+                title: "Couldn't refresh",
+                message: "Showing \(noun) saved \(savedAgo). \(error)",
+                actionTitle: "Retry",
+                action: retry
+            )
+        case .loadFailed(let error):
+            InlineNotice(
+                title: "Couldn't load \(noun)",
+                message: error,
+                systemImage: "wifi.exclamationmark",
+                color: Palette.danger,
+                actionTitle: "Retry",
+                action: retry
+            )
+        case .savedFromOtherDay(let day, let refreshing):
+            InlineNotice(
+                title: refreshing ? "Updating" : "Showing saved data",
                 message: "This is \(noun) from \(dayText(day)).",
                 systemImage: "clock",
                 color: Palette.textSecondary
             )
+        case nil:
+            EmptyView()
         }
     }
 
