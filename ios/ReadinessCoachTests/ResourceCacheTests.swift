@@ -47,6 +47,8 @@ final class ResourceCacheTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
         XCTAssertEqual(try file.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup, true)
         let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
+        XCTAssertEqual(try directory.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup, true)
+        // The simulator may not report a protection attribute, so only assert it when present.
         if let protection = attributes[.protectionKey] as? FileProtectionType {
             XCTAssertEqual(protection, .complete)
         }
@@ -106,5 +108,33 @@ final class ResourceCacheTests: XCTestCase {
         cache.migrateLegacyToday(from: legacy, userId: "b", day: "2026-10-24")
         XCTAssertNil(cache.load(.today, userId: "b", as: TodayDTO.self))
         XCTAssertEqual(cache.load(.today, userId: "a", as: TodayDTO.self)?.value.readiness, 81)
+    }
+
+    private func legacyURL() -> URL {
+        directory.deletingLastPathComponent().appendingPathComponent("legacy-\(directory.lastPathComponent).json")
+    }
+
+    func testCorruptLegacyFileWritesNothingAndIsDeleted() throws {
+        let legacy = legacyURL()
+        try Data("garbage".utf8).write(to: legacy)
+        cache.migrateLegacyToday(from: legacy, userId: "a", day: "2026-10-23")
+        XCTAssertNil(cache.load(.today, userId: "a", as: TodayDTO.self))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacy.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("today.json").path))
+    }
+
+    func testMissingLegacyFileIsANoOp() {
+        cache.migrateLegacyToday(from: legacyURL(), userId: "a", day: "2026-10-23")
+        XCTAssertNil(cache.load(.today, userId: "a", as: TodayDTO.self))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
+    }
+
+    func testExistingTodayEntrySurvivesMigration() throws {
+        cache.save(.today, envelope(user: "a", value: ["keep"]))
+        let legacy = legacyURL()
+        try Data("{}".utf8).write(to: legacy)
+        cache.migrateLegacyToday(from: legacy, userId: "a", day: "2026-10-23")
+        XCTAssertEqual(cache.load(.today, userId: "a", as: [String].self)?.value, ["keep"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacy.path))
     }
 }

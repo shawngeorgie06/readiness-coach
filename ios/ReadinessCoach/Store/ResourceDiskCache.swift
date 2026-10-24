@@ -60,7 +60,15 @@ final class ResourceDiskCache {
 
     private func write(_ data: Data, to fileURL: URL) {
         do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true,
+                attributes: [.protectionKey: FileProtectionType.complete]
+            )
+            var directoryValues = URLResourceValues()
+            directoryValues.isExcludedFromBackup = true
+            var directoryURL = directory
+            try directoryURL.setResourceValues(directoryValues)
             try data.write(to: fileURL, options: [.atomic, .completeFileProtection])
             var values = URLResourceValues()
             values.isExcludedFromBackup = true
