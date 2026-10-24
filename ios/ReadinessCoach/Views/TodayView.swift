@@ -15,7 +15,7 @@ struct TodayView: View {
     @State private var showHistory = false
     @State private var showScoringDrivers = false
     @State private var healthStatus: HealthKitService.AccessStatus?
-    @State private var healthRequestError: String?
+    @State private var healthRequestError: HealthAccessMessage?
     @State private var refreshCount = 0
     @State private var pillarJumps = 0
 
@@ -131,13 +131,10 @@ struct TodayView: View {
             .sheet(isPresented: $showScoringDrivers) {
                 if let today = sync.today { ScoringDriversSheet(pillars: today.pillars) }
             }
-            .sheet(isPresented: Binding(
-                get: { healthRequestError != nil },
-                set: { if !$0 { healthRequestError = nil } }
-            )) {
+            .sheet(item: $healthRequestError) { error in
                 MessageSheet(
                     title: "Health access",
-                    message: healthRequestError ?? "Health access couldn't be updated. Try again from Today.",
+                    message: error.message,
                     systemImage: "heart.text.square",
                     tone: .danger,
                     context: "Health connection"
@@ -238,13 +235,18 @@ struct TodayView: View {
                     healthStatus = await health.accessStatus()
                     await sync.syncNow(settings)
                 } catch {
-                    healthRequestError = error.localizedDescription
+            healthRequestError = HealthAccessMessage(message: error.localizedDescription)
                 }
             }
         } else if let url = URL(string: "x-apple-health://") {
             openURL(url)
         }
     }
+}
+
+private struct HealthAccessMessage: Identifiable {
+    let id = UUID()
+    let message: String
 }
 
 /// Small back-compat wrapper so the empty state renders on iOS 17.

@@ -25,7 +25,7 @@ struct AskCoachView: View {
     @State private var error: String?
     @State private var isAsking = false
     @State private var askTask: Task<Void, Never>?
-    @FocusState private var questionFocused: Bool
+    @State private var questionFocused = false
 
     init(today: TodayDTO) {
         _context = State(initialValue: AskContext(today))
@@ -84,23 +84,20 @@ struct AskCoachView: View {
                 .font(Typeface.sectionTitle)
                 .foregroundStyle(Palette.textPrimary)
                 .accessibilityHidden(true)
-            TextField("e.g. Can I do a hard lifting session today?", text: $question, axis: .vertical)
-                .lineLimit(2 ... 6)
-                .focused($questionFocused)
-                .submitLabel(.send)
-                .onSubmit(submit)
-                .onChange(of: question) { previous, updated in
-                    if Self.isKeyboardSubmission(previous: previous, updated: updated) {
-                        question = previous
-                        submit()
+            CoachQuestionField(text: $question, isFocused: $questionFocused, onSubmit: submit)
+                .overlay(alignment: .topLeading) {
+                    if question.isEmpty {
+                        Text("e.g. Can I do a hard lifting session today?")
+                            .font(.body)
+                            .foregroundStyle(Palette.textTertiary)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
                     }
                 }
-                .font(.body)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
                 .frame(minHeight: Space.target)
                 .background(Palette.surfaceHi, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .accessibilityLabel("Your question for the coach")
             Button(action: submit) {
                 HStack(spacing: 8) {
                     if isAsking { ProgressView().tint(Palette.canvas) }
@@ -170,10 +167,6 @@ struct AskCoachView: View {
     }
 
     // MARK: Actions
-
-    static func isKeyboardSubmission(previous: String, updated: String) -> Bool {
-        updated == previous + "\n"
-    }
 
     private func submit() {
         let text = trimmedQuestion

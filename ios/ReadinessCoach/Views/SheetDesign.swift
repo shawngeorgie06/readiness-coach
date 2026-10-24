@@ -82,6 +82,7 @@ private struct SheetHeading: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Close \(title)")
+                .keyboardShortcut(.cancelAction)
             }
             VStack(alignment: .leading, spacing: 8) {
                 Text(context)
@@ -193,6 +194,7 @@ struct ConfirmationSheet: View {
             VStack(spacing: 12) {
                 Button("Cancel", role: .cancel, action: cancel)
                     .buttonStyle(SheetActionStyle(kind: .secondary))
+                    .keyboardShortcut(.cancelAction)
                 Button(actionTitle, role: .destructive) {
                     confirmation.confirm {
                         action()

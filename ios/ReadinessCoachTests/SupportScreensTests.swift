@@ -1,4 +1,5 @@
 import XCTest
+import SwiftUI
 @testable import ReadinessCoach
 
 final class SupportScreensTests: XCTestCase {
@@ -54,11 +55,31 @@ final class SupportScreensTests: XCTestCase {
         XCTAssertEqual(displayed.decision, .push)
     }
 
-    func testKeyboardSendSubmitsButPastedParagraphsStayEditable() {
-        XCTAssertTrue(AskCoachView.isKeyboardSubmission(previous: "How should I train?", updated: "How should I train?\n"))
-        XCTAssertFalse(AskCoachView.isKeyboardSubmission(previous: "", updated: "First question\nMore context\n"))
-        XCTAssertFalse(AskCoachView.isKeyboardSubmission(previous: "First", updated: "First\nSecond"))
-        XCTAssertFalse(AskCoachView.isKeyboardSubmission(previous: "How", updated: "How should I train?"))
+    @MainActor
+    func testKeyboardSendSubmitsTheCurrentDraftFromAnyCursorPosition() {
+        var draft = "Old draft"
+        var focused = true
+        var sent: [String] = []
+        let field = CoachQuestionField(text: Binding(get: { draft }, set: { draft = $0 }),
+                                       isFocused: Binding(get: { focused }, set: { focused = $0 }),
+                                       onSubmit: { sent.append(draft) })
+        let coordinator = field.makeCoordinator()
+        let native = UITextView()
+        native.text = "The autocorrected question"
+
+        XCTAssertFalse(coordinator.textView(native, shouldChangeTextIn: NSRange(location: 4, length: 0), replacementText: "\n"))
+        XCTAssertEqual(sent, ["The autocorrected question"])
+        XCTAssertFalse(focused)
+    }
+
+    @MainActor
+    func testPastedParagraphsRemainEditableWithoutSending() {
+        var sent = 0
+        let field = CoachQuestionField(text: .constant("Draft"), isFocused: .constant(true), onSubmit: { sent += 1 })
+        let native = UITextView()
+        native.text = "Draft"
+        XCTAssertTrue(field.makeCoordinator().textView(native, shouldChangeTextIn: NSRange(location: 0, length: 0), replacementText: "First question\nMore context\n"))
+        XCTAssertEqual(sent, 0)
     }
 
     func testPillarSheetKeepsTheTodayCallSiteAPI() {
