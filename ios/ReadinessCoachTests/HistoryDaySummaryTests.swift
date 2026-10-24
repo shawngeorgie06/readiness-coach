@@ -103,6 +103,13 @@ final class HistoryDaySummaryTests: XCTestCase {
         XCTAssertEqual(HistoryModel.weakest(point("2026-10-01", 60, .maintain, sleep: 50, recovery: 70, load: 64)).pillar, .sleep)
     }
 
+    /// Each range option is spoken by its own day count, not one shared name.
+    func testRangeOptionsHaveDistinctSpokenLabels() throws {
+        XCTAssertEqual([7, 30, 90].map(HistoryModel.rangeLabel), ["7 days", "30 days", "90 days"])
+        let source = try String(contentsOf: viewsDirectory.appendingPathComponent("TrendsView.swift"), encoding: .utf8)
+        XCTAssertFalse(source.contains(".accessibilityLabel(\"History range\")"))
+    }
+
     func testChartPositionPicksTheDayItFallsIn() {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "America/New_York")!

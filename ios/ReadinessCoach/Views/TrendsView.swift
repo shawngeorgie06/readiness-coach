@@ -183,8 +183,7 @@ struct TrendsView: View {
     // MARK: Readiness bars
 
     private func readinessSection<Content: View>(@ViewBuilder content: @escaping () -> Content) -> some View {
-        let picker = SegmentedRange(rangeLabels, selection: $rangeIndex)
-            .accessibilityLabel("History range")
+        let picker = HistoryRangePicker(labels: rangeLabels, days: rangeDays, selection: $rangeIndex)
         return Group {
             if typeSize.isAccessibilitySize {
                 OpenSection("Readiness", showsRule: false) {
@@ -543,6 +542,38 @@ struct TrendsView: View {
     }
 }
 
+/// The 7/30/90-day range control. Looks like the shared segmented control,
+/// but each option is its own 44pt button with a spoken day count and the
+/// selected trait, so VoiceOver hears three distinct choices.
+private struct HistoryRangePicker: View {
+    let labels: [String]
+    let days: [Int]
+    @Binding var selection: Int
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(labels.indices, id: \.self) { index in
+                let isSelected = selection == index
+                Button { selection = index } label: {
+                    Text(labels[index])
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(isSelected ? Palette.textPrimary : Palette.textSecondary)
+                        .frame(maxWidth: .infinity, minHeight: Space.target)
+                        .background(isSelected ? Palette.surfaceHi : .clear,
+                                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(HistoryModel.rangeLabel(days: days[index]))
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+            }
+        }
+        .padding(4)
+        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .accessibilityElement(children: .contain)
+    }
+}
+
 /// Values the History screen derives from one range's points.
 struct TrendSeries {
     let points: [ReadinessPoint]
@@ -620,6 +651,9 @@ enum HistoryModel {
         if n > 0 { return "+\(n) pts vs the previous day — overall readiness improved." }
         return "\(n) pts vs the previous day — overall readiness softened."
     }
+
+    /// Spoken name of a range option: "7 days".
+    static func rangeLabel(days: Int) -> String { "\(days) days" }
 
     static func signed(_ delta: Double) -> String {
         let n = Int(delta.rounded())
