@@ -15,3 +15,20 @@ final class Derived<Key: Equatable, Value> {
         return made
     }
 }
+
+/// Identifies one build of a chart series. Chart dates are midnights in a time
+/// zone, so the zone is part of the identity: after travel the series rebuilds
+/// and its dates match the rebased selection.
+struct SeriesStamp: Equatable {
+    let days: Int
+    let fetchedAt: Date?
+    let timeZone: TimeZone
+}
+
+extension Derived where Key == SeriesStamp {
+    /// The series for this response, built with `timeZone` and reused until the
+    /// range, the fetch, or the zone changes.
+    func series(days: Int = 0, fetchedAt: Date?, timeZone: TimeZone = .current, _ make: (TimeZone) -> Value) -> Value {
+        get(SeriesStamp(days: days, fetchedAt: fetchedAt, timeZone: timeZone)) { make(timeZone) }
+    }
+}

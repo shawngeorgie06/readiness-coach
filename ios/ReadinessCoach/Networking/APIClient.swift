@@ -39,12 +39,24 @@ enum Fetch<T> {
     case notModified
 }
 
+/// The device's local calendar day and UTC offset at one instant. A read sends
+/// both, so a request asks about the day it started on even if it lands after
+/// midnight or a time zone change.
+struct LocalDay: Hashable {
+    let date: String
+    let utcOffsetMinutes: Int
+
+    static func current(now: Date = Date()) -> LocalDay {
+        LocalDay(date: APIClient.deviceLocalDate(now: now), utcOffsetMinutes: APIClient.tzOffsetMinutes(now: now))
+    }
+}
+
 protocol ReadAPI {
-    func today(etag: String?) async throws -> Fetch<TodayDTO>
-    func body(days: Int, etag: String?) async throws -> Fetch<BodyResponse>
-    func sleep(days: Int, etag: String?) async throws -> Fetch<SleepDetailResponse>
-    func train(days: Int, etag: String?) async throws -> Fetch<TrainResponse>
-    func history(days: Int, etag: String?) async throws -> Fetch<ReadinessHistoryResponse>
+    func today(on day: LocalDay, etag: String?) async throws -> Fetch<TodayDTO>
+    func body(days: Int, on day: LocalDay, etag: String?) async throws -> Fetch<BodyResponse>
+    func sleep(days: Int, on day: LocalDay, etag: String?) async throws -> Fetch<SleepDetailResponse>
+    func train(days: Int, on day: LocalDay, etag: String?) async throws -> Fetch<TrainResponse>
+    func history(days: Int, on day: LocalDay, etag: String?) async throws -> Fetch<ReadinessHistoryResponse>
 }
 
 /// Thin async client for the Readiness Coach API. All `/v1` routes require a
@@ -76,24 +88,24 @@ struct APIClient {
 
     // MARK: Reads
 
-    func today(etag: String?) async throws -> Fetch<TodayDTO> {
-        try await read("v1/today", query: dateQuery(nil), etag: etag)
+    func today(on day: LocalDay = .current(), etag: String?) async throws -> Fetch<TodayDTO> {
+        try await read("v1/today", query: dateQuery(day), etag: etag)
     }
 
-    func body(days: Int, etag: String?) async throws -> Fetch<BodyResponse> {
-        try await read("v1/body", query: daysQuery(days), etag: etag)
+    func body(days: Int, on day: LocalDay = .current(), etag: String?) async throws -> Fetch<BodyResponse> {
+        try await read("v1/body", query: daysQuery(days, day), etag: etag)
     }
 
-    func sleep(days: Int, etag: String?) async throws -> Fetch<SleepDetailResponse> {
-        try await read("v1/sleep", query: daysQuery(days), etag: etag)
+    func sleep(days: Int, on day: LocalDay = .current(), etag: String?) async throws -> Fetch<SleepDetailResponse> {
+        try await read("v1/sleep", query: daysQuery(days, day), etag: etag)
     }
 
-    func train(days: Int, etag: String?) async throws -> Fetch<TrainResponse> {
-        try await read("v1/train", query: daysQuery(days), etag: etag)
+    func train(days: Int, on day: LocalDay = .current(), etag: String?) async throws -> Fetch<TrainResponse> {
+        try await read("v1/train", query: daysQuery(days, day), etag: etag)
     }
 
-    func history(days: Int, etag: String?) async throws -> Fetch<ReadinessHistoryResponse> {
-        try await read("v1/history", query: daysQuery(days), etag: etag)
+    func history(days: Int, on day: LocalDay = .current(), etag: String?) async throws -> Fetch<ReadinessHistoryResponse> {
+        try await read("v1/history", query: daysQuery(days, day), etag: etag)
     }
 
     // MARK: Writes
@@ -217,10 +229,10 @@ struct APIClient {
 
     // MARK: - Internals
 
-    private func dateQuery(_ date: String?) -> [URLQueryItem] {
+    private func dateQuery(_ day: LocalDay) -> [URLQueryItem] {
         [
-            URLQueryItem(name: "date", value: date ?? Self.deviceLocalDate()),
-            URLQueryItem(name: "tz", value: String(Self.tzOffsetMinutes())),
+            URLQueryItem(name: "date", value: day.date),
+            URLQueryItem(name: "tz", value: String(day.utcOffsetMinutes)),
         ]
     }
 
@@ -249,8 +261,8 @@ struct APIClient {
         return formatter
     }()
 
-    private func daysQuery(_ days: Int, date: String? = nil) -> [URLQueryItem] {
-        [URLQueryItem(name: "days", value: String(days))] + dateQuery(date)
+    private func daysQuery(_ days: Int, _ day: LocalDay) -> [URLQueryItem] {
+        [URLQueryItem(name: "days", value: String(days))] + dateQuery(day)
     }
 
     /// Conditional GET. The ETag goes back verbatim in `If-None-Match`; a 304

@@ -107,6 +107,19 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(items.first { $0.name == "days" }?.value, "30")
     }
 
+    func testReadsSendTheRequestedDayAndOffset() async throws {
+        StubURLProtocol.reset { [self] req in (response(req, 304), Data()) }
+        let day = LocalDay(date: "2026-10-23", utcOffsetMinutes: -240)
+        _ = try await client().today(on: day, etag: "W/\"1\"")
+        _ = try await client().body(days: 30, on: day, etag: "W/\"1\"")
+        XCTAssertEqual(StubURLProtocol.requests.count, 2)
+        for request in StubURLProtocol.requests {
+            let items = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            XCTAssertEqual(items.first { $0.name == "date" }?.value, "2026-10-23")
+            XCTAssertEqual(items.first { $0.name == "tz" }?.value, "-240")
+        }
+    }
+
     func testTransportErrorRetriesOnceImmediately() async throws {
         nonisolated(unsafe) var calls = 0
         StubURLProtocol.reset { [self] req in

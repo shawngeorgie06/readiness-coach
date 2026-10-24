@@ -5,6 +5,7 @@ private final class FakeReadAPI: ReadAPI, @unchecked Sendable {
     private let lock = NSLock()
     private var _calls: [String] = []
     private var _etags: [String: String?] = [:]
+    private var _days: [LocalDay] = []
     private var _hold = false
     var todayResult: () throws -> Fetch<TodayDTO> = { .fresh(makeToday(), etag: "t1") }
     var bodyResult: () throws -> Fetch<BodyResponse> = { .fresh(BodyResponse(days: 30, daily: []), etag: "b1") }
@@ -13,19 +14,25 @@ private final class FakeReadAPI: ReadAPI, @unchecked Sendable {
 
     var calls: [String] { lock.withLock { _calls } }
     func etag(for name: String) -> String?? { lock.withLock { _etags[name] } }
+    /// The local day each call asked for, in call order.
+    var days: [LocalDay] { lock.withLock { _days } }
+    func days(for name: String) -> [LocalDay] { lock.withLock { zip(_calls, _days).filter { $0.0 == name }.map(\.1) } }
     func setHold(_ value: Bool) { lock.withLock { _hold = value } }
 
-    private func record(_ name: String, _ etag: String?) async {
-        lock.withLock { _calls.append(name); _etags[name] = etag }
+    private func record(_ name: String, _ day: LocalDay, _ etag: String?) async {
+        lock.withLock { _calls.append(name); _days.append(day); _etags[name] = etag }
         while lock.withLock({ _hold }) { try? await Task.sleep(nanoseconds: 2_000_000) }
     }
 
-    func today(etag: String?) async throws -> Fetch<TodayDTO> { await record("today", etag); return try todayResult() }
-    func body(days: Int, etag: String?) async throws -> Fetch<BodyResponse> { await record("body", etag); return try bodyResult() }
-    func sleep(days: Int, etag: String?) async throws -> Fetch<SleepDetailResponse> { await record("sleep(\(days))", etag); return try sleepResult() }
-    func train(days: Int, etag: String?) async throws -> Fetch<TrainResponse> { await record("train", etag); return try trainResult() }
-    func history(days: Int, etag: String?) async throws -> Fetch<ReadinessHistoryResponse> {
-        await record("history(\(days))", etag)
+    func today(on day: LocalDay, etag: String?) async throws -> Fetch<TodayDTO> { await record("today", day, etag); return try todayResult() }
+    func body(days: Int, on day: LocalDay, etag: String?) async throws -> Fetch<BodyResponse> { await record("body", day, etag); return try bodyResult() }
+    func sleep(days: Int, on day: LocalDay, etag: String?) async throws -> Fetch<SleepDetailResponse> {
+        await record("sleep(\(days))", day, etag)
+        return try sleepResult()
+    }
+    func train(days: Int, on day: LocalDay, etag: String?) async throws -> Fetch<TrainResponse> { await record("train", day, etag); return try trainResult() }
+    func history(days: Int, on day: LocalDay, etag: String?) async throws -> Fetch<ReadinessHistoryResponse> {
+        await record("history(\(days))", day, etag)
         return .fresh(ReadinessHistoryResponse(days: days, data: []), etag: nil)
     }
 }
@@ -48,6 +55,8 @@ final class AppStoreTests: XCTestCase {
     private var cache: ResourceDiskCache!
     private var clock = Date(timeIntervalSince1970: 1_800_000_000)
     private var day = "2026-10-23"
+    private var offset = -240
+    private var notifications: NotificationCenter!
     private var api: FakeReadAPI!
     private var store: AppStore!
 
@@ -55,7 +64,12 @@ final class AppStoreTests: XCTestCase {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent("rc-store-\(UUID().uuidString)")
         cache = ResourceDiskCache(directory: directory)
         api = FakeReadAPI()
-        store = AppStore(cache: cache, now: { [unowned self] in self.clock }, localDay: { [unowned self] in self.day })
+        notifications = NotificationCenter()
+        store = AppStore(
+            cache: cache, now: { [unowned self] in self.clock },
+            localDay: { [unowned self] in LocalDay(date: self.day, utcOffsetMinutes: self.offset) },
+            notifications: notifications
+        )
     }
 
     override func tearDown() async throws {
@@ -308,6 +322,7 @@ final class AppStoreTests: XCTestCase {
         XCTAssertEqual(cache.load(.body, userId: "u1", as: BodyResponse.self)?.day, "2026-10-23")
         await store.refresh(.body)
         XCTAssertEqual(api.calls, ["body", "body"])
+        XCTAssertEqual(api.days, [LocalDay(date: "2026-10-23", utcOffsetMinutes: -240), LocalDay(date: "2026-10-24", utcOffsetMinutes: -240)])
         XCTAssertEqual(store.body.day, "2026-10-24")
     }
 
@@ -322,9 +337,40 @@ final class AppStoreTests: XCTestCase {
         api.setHold(false)
         _ = await pending.value
         XCTAssertEqual(store.body.day, "2026-10-23")
+        XCTAssertEqual(cache.load(.body, userId: "u1", as: BodyResponse.self)?.day, "2026-10-23")
         await store.refresh(.body)
         XCTAssertEqual(api.calls, ["body", "body"])
+        XCTAssertEqual(api.days, [LocalDay(date: "2026-10-23", utcOffsetMinutes: -240), LocalDay(date: "2026-10-24", utcOffsetMinutes: -240)])
         XCTAssertEqual(store.body.day, "2026-10-24")
+    }
+
+    func testFetchAsksForTheDayAndOffsetItStartedUnder() async {
+        store.activate(userId: "u1", api: api)
+        api.setHold(true)
+        let pending = Task { await store.refresh(.today, force: true) }
+        await waitUntil { self.api.calls == ["today"] }
+        day = "2026-10-24"
+        offset = -300
+        api.setHold(false)
+        _ = await pending.value
+        XCTAssertEqual(api.days(for: "today"), [LocalDay(date: "2026-10-23", utcOffsetMinutes: -240)])
+        XCTAssertEqual(store.today.day, "2026-10-23")
+    }
+
+    func testRefreshAfterOffsetChangeDoesNotJoinFetchFromThePreviousOffset() async {
+        store.activate(userId: "u1", api: api)
+        api.setHold(true)
+        let before = Task { await store.refresh(.today, force: true) }
+        await waitUntil { self.api.calls == ["today"] }
+        offset = -300
+        let after = Task { await store.refresh(.today, force: true) }
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        api.setHold(false)
+        _ = await before.value
+        _ = await after.value
+        XCTAssertEqual(api.days(for: "today"), [
+            LocalDay(date: "2026-10-23", utcOffsetMinutes: -240), LocalDay(date: "2026-10-23", utcOffsetMinutes: -300),
+        ])
     }
 
     func testRefreshAfterMidnightDoesNotJoinFetchFromThePreviousDay() async {
@@ -353,5 +399,90 @@ final class AppStoreTests: XCTestCase {
         _ = await pending.value
         XCTAssertNil(store.body.value)
         XCTAssertNil(cache.load(.body, userId: "u1", as: BodyResponse.self))
+    }
+
+    // MARK: - Day and time zone changes
+
+    private func todayCalls() -> Int { api.calls.filter { $0 == "today" }.count }
+
+    func testDayChangeNotificationRefetchesTodayForTheNewDay() async {
+        seed(.today, makeToday())
+        store.activate(userId: "u1", api: api)
+        let before = store.taskID(.body)
+        day = "2026-10-24"
+        notifications.post(name: .NSCalendarDayChanged, object: nil)
+        await waitUntil { self.todayCalls() == 1 }
+        XCTAssertEqual(api.days(for: "today"), [LocalDay(date: "2026-10-24", utcOffsetMinutes: -240)])
+        XCTAssertEqual(store.currentDay, LocalDay(date: "2026-10-24", utcOffsetMinutes: -240))
+        XCTAssertNotEqual(store.taskID(.body), before)
+        await waitUntil { self.store.today.day == "2026-10-24" }
+    }
+
+    func testTimeZoneChangeNotificationRefetchesTodayForTheNewOffset() async {
+        seed(.today, makeToday())
+        store.activate(userId: "u1", api: api)
+        offset = -420
+        notifications.post(name: .NSSystemTimeZoneDidChange, object: nil)
+        await waitUntil { self.todayCalls() == 1 }
+        XCTAssertEqual(api.days(for: "today"), [LocalDay(date: "2026-10-23", utcOffsetMinutes: -420)])
+        XCTAssertEqual(store.currentDay.utcOffsetMinutes, -420)
+    }
+
+    func testForegroundDayCheckRefetchesTodayOnce() async {
+        seed(.today, makeToday())
+        store.activate(userId: "u1", api: api)
+        day = "2026-10-24"
+        store.noteDayMayHaveChanged()
+        store.noteDayMayHaveChanged()
+        notifications.post(name: .NSCalendarDayChanged, object: nil)
+        await waitUntil { self.todayCalls() == 1 }
+        try? await Task.sleep(nanoseconds: 30_000_000)
+        XCTAssertEqual(todayCalls(), 1)
+    }
+
+    func testDayCheckWithoutAChangeDoesNotFetch() async {
+        seed(.today, makeToday())
+        store.activate(userId: "u1", api: api)
+        let before = store.taskID(.today)
+        store.noteDayMayHaveChanged()
+        notifications.post(name: .NSCalendarDayChanged, object: nil)
+        notifications.post(name: .NSSystemTimeZoneDidChange, object: nil)
+        try? await Task.sleep(nanoseconds: 30_000_000)
+        XCTAssertEqual(api.calls, [])
+        XCTAssertEqual(store.taskID(.today), before)
+    }
+
+    func testDayChangeAfterSignOutDoesNotFetch() async {
+        store.activate(userId: "u1", api: api)
+        store.reset()
+        day = "2026-10-24"
+        notifications.post(name: .NSCalendarDayChanged, object: nil)
+        try? await Task.sleep(nanoseconds: 30_000_000)
+        XCTAssertEqual(api.calls, [])
+        XCTAssertEqual(store.currentDay.date, "2026-10-24")
+        XCTAssertNil(store.today.value)
+    }
+
+    func testDayChangeRefreshInFlightAtSignOutDoesNotWrite() async {
+        store.activate(userId: "u1", api: api)
+        api.setHold(true)
+        day = "2026-10-24"
+        store.noteDayMayHaveChanged()
+        await waitUntil { self.api.calls == ["today"] }
+        store.reset()
+        api.setHold(false)
+        try? await Task.sleep(nanoseconds: 30_000_000)
+        XCTAssertNil(store.today.value)
+        XCTAssertNil(cache.load(.today, userId: "u1", as: TodayDTO.self))
+    }
+
+    func testStoreStopsObservingDayChangesWhenReleased() async {
+        weak var released: AppStore?
+        do {
+            let other = AppStore(cache: cache, localDay: { LocalDay(date: "2026-10-23", utcOffsetMinutes: 0) }, notifications: notifications)
+            released = other
+        }
+        XCTAssertNil(released)
+        notifications.post(name: .NSCalendarDayChanged, object: nil)
     }
 }

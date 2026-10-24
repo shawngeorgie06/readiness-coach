@@ -34,6 +34,7 @@ private struct LiveAppRoot: View {
     @StateObject private var settings = AppSettings()
     @State private var store: AppStore
     @StateObject private var sync: SyncService
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         let store = AppStore(cache: StoreActivation.cache)
@@ -51,6 +52,10 @@ private struct LiveAppRoot: View {
             .onChange(of: settings.isReady) { _, _ in activateStore() }
             .onChange(of: settings.apiToken) { _, _ in activateStore() }
             .onChange(of: settings.apiBaseURL) { _, _ in activateStore() }
+            // The day may have turned while suspended, when no notification arrives.
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { store.noteDayMayHaveChanged() }
+            }
             // Covers every sign-out, including the automatic one on a 401.
             .onChange(of: settings.isSignedIn) { wasSignedIn, isSignedIn in
                 if wasSignedIn && !isSignedIn { StoreActivation.reset(store) }

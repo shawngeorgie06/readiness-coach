@@ -9,7 +9,7 @@ struct TrendsView: View {
     @State private var rangeIndex = 1
     @State private var selectedPointID: String?
     @State private var pillarSelection = ChartDaySelection()
-    @State private var derived = Derived<TrendSeries.Stamp, TrendSeries?>()
+    @State private var derived = Derived<SeriesStamp, TrendSeries?>()
 
     private let rangeLabels = ["7d", "30d", "90d"]
     private let rangeDays = [7, 30, 90]
@@ -50,7 +50,7 @@ struct TrendsView: View {
             selectedPointID = nil
             pillarSelection.date = series?.dates.last
         }
-        .task(id: key) { await store.refresh(key) }
+        .task(id: store.taskID(key)) { await store.refresh(key) }
         .refreshable { await store.refresh(key, force: true) }
     }
 
@@ -59,8 +59,8 @@ struct TrendsView: View {
     private var series: TrendSeries? {
         let response = resource.value
         let requestedDays = days
-        return derived.get(TrendSeries.Stamp(days: requestedDays, fetchedAt: resource.fetchedAt)) {
-            Self.points(in: response, requestedDays: requestedDays).map(TrendSeries.init)
+        return derived.series(days: requestedDays, fetchedAt: resource.fetchedAt) { zone in
+            Self.points(in: response, requestedDays: requestedDays).map { TrendSeries($0, timeZone: zone) }
         }
     }
 
@@ -397,19 +397,14 @@ struct TrendsView: View {
 
 /// Values the History screen derives from one range's points.
 struct TrendSeries {
-    struct Stamp: Equatable {
-        let days: Int
-        let fetchedAt: Date?
-    }
-
     let points: [ReadinessPoint]
     let dates: [Date]
     let average: Double
     let deltaVsStart: Double
 
-    init(_ points: [ReadinessPoint]) {
+    init(_ points: [ReadinessPoint], timeZone: TimeZone = .current) {
         self.points = points
-        dates = points.map { ChartDate.day($0.date) }
+        dates = points.map { ChartDate.day($0.date, timeZone: timeZone) }
         average = points.isEmpty ? 0 : points.map(\.readiness).reduce(0, +) / Double(points.count)
         deltaVsStart = (points.last?.readiness ?? 0) - (points.first?.readiness ?? 0)
     }

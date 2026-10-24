@@ -7,7 +7,7 @@ struct BodyView: View {
     @State private var rhrSelection = ChartDaySelection()
     @State private var hrSelection = ChartDaySelection()
     @State private var explain: MetricExplain?
-    @State private var derived = Derived<Date?, BodySeries>()
+    @State private var derived = Derived<SeriesStamp, BodySeries>()
 
     private var resource: Resource<BodyResponse> { store.body }
 
@@ -16,7 +16,7 @@ struct BodyView: View {
 
     /// Per-metric chart series, rebuilt only when the resource changes.
     private func series(_ response: BodyResponse) -> BodySeries {
-        derived.get(resource.fetchedAt) { BodySeries(response.daily) }
+        derived.series(fetchedAt: resource.fetchedAt) { BodySeries(response.daily, timeZone: $0) }
     }
 
     var body: some View {
@@ -73,7 +73,7 @@ struct BodyView: View {
                 }
                 .presentationDetents([.medium, .large])
             }
-            .task(id: ResourceKey.body) { await store.refresh(.body) }
+            .task(id: store.taskID(.body)) { await store.refresh(.body) }
             .onAppear { if perfContentReady { PerfSignpost.endTabSwitchIfNeeded(tab: "recovery") } }
             .onChange(of: perfContentReady) { _, ready in
                 if ready { PerfSignpost.endTabSwitchIfNeeded(tab: "recovery") }
@@ -321,9 +321,9 @@ struct BodySeries {
         let averages: [Double]
         let points: [Point]
 
-        init(_ daily: [BodyDaily], type: String) {
+        init(_ daily: [BodyDaily], type: String, timeZone: TimeZone = .current) {
             rows = daily.filter { $0.type == type }.sorted { $0.date < $1.date }
-            dates = rows.map { ChartDate.day($0.date) }
+            dates = rows.map { ChartDate.day($0.date, timeZone: timeZone) }
             averages = rows.map(\.avg)
             points = zip(rows, dates).map { Point(id: $0.id, date: $1, min: $0.min, avg: $0.avg, max: $0.max) }
         }
@@ -342,10 +342,10 @@ struct BodySeries {
     let rhr: Metric
     let hr: Metric
 
-    init(_ daily: [BodyDaily]) {
-        hrv = Metric(daily, type: "hrv_sdnn")
-        rhr = Metric(daily, type: "resting_heart_rate")
-        hr = Metric(daily, type: "heart_rate")
+    init(_ daily: [BodyDaily], timeZone: TimeZone = .current) {
+        hrv = Metric(daily, type: "hrv_sdnn", timeZone: timeZone)
+        rhr = Metric(daily, type: "resting_heart_rate", timeZone: timeZone)
+        hr = Metric(daily, type: "heart_rate", timeZone: timeZone)
     }
 }
 

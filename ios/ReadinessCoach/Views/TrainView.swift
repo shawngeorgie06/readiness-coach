@@ -50,7 +50,7 @@ struct TrainView: View {
             .screenBackground()
             .toolbar(.hidden, for: .navigationBar)
             .sheet(item: $selectedWorkout) { WorkoutDetailSheet(workout: $0) }
-            .task(id: ResourceKey.train) { await store.refresh(.train) }
+            .task(id: store.taskID(.train)) { await store.refresh(.train) }
             .onAppear { if perfContentReady { PerfSignpost.endTabSwitchIfNeeded(tab: "train") } }
             .onChange(of: perfContentReady) { _, ready in
                 if ready { PerfSignpost.endTabSwitchIfNeeded(tab: "train") }

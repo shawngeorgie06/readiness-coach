@@ -17,6 +17,13 @@ enum ResourceKey: Hashable {
     }
 }
 
+/// `.task(id:)` identity for a screen's resource: the refresh re-runs when the
+/// key changes and when the local day or UTC offset changes while it is shown.
+struct ResourceTaskID: Hashable {
+    let key: ResourceKey
+    let day: LocalDay
+}
+
 /// A value plus the bookkeeping needed to decide when to refetch it.
 struct Resource<Value> {
     var value: Value?

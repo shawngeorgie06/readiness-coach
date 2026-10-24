@@ -7,7 +7,7 @@ struct SleepView: View {
 
     @State private var rangeIndex = 1
     @State private var selectedNightID: String?
-    @State private var derived = Derived<SleepSeries.Stamp, SleepSeries>()
+    @State private var derived = Derived<SeriesStamp, SleepSeries>()
 
     private let rangeLabels = ["7d", "30d", "90d"]
     private let rangeDays = [7, 30, 90]
@@ -64,7 +64,7 @@ struct SleepView: View {
             .verticalScrollLocked()
             .screenBackground()
             .toolbar(.hidden, for: .navigationBar)
-            .task(id: key) { await store.refresh(key) }
+            .task(id: store.taskID(key)) { await store.refresh(key) }
             .onAppear { if perfContentReady { PerfSignpost.endTabSwitchIfNeeded(tab: "sleep") } }
             .onChange(of: perfContentReady) { _, ready in
                 if ready { PerfSignpost.endTabSwitchIfNeeded(tab: "sleep") }
@@ -96,7 +96,7 @@ struct SleepView: View {
     /// Nights that actually have sleep recorded, rebuilt only when the resource changes.
     private var series: SleepSeries? {
         guard let response = resource.value else { return nil }
-        return derived.get(SleepSeries.Stamp(days: days, fetchedAt: resource.fetchedAt)) { SleepSeries(response) }
+        return derived.series(days: days, fetchedAt: resource.fetchedAt) { SleepSeries(response, timeZone: $0) }
     }
 
     private func selectedNight(in nights: [SleepDay]) -> SleepDay? {
@@ -365,11 +365,6 @@ struct SleepView: View {
 
 /// Recorded nights for one sleep range, derived once per `SleepDetailResponse`.
 struct SleepSeries {
-    struct Stamp: Equatable {
-        let days: Int
-        let fetchedAt: Date?
-    }
-
     struct Point: Identifiable {
         let night: SleepDay
         let date: Date
@@ -380,9 +375,9 @@ struct SleepSeries {
     let points: [Point]
     let maxHours: Double
 
-    init(_ response: SleepDetailResponse) {
+    init(_ response: SleepDetailResponse, timeZone: TimeZone = .current) {
         nights = response.data.filter { $0.durationHours > 0 }
-        points = nights.map { Point(night: $0, date: ChartDate.day($0.date)) }
+        points = nights.map { Point(night: $0, date: ChartDate.day($0.date, timeZone: timeZone)) }
         maxHours = max(nights.map(\.durationHours).max() ?? 8, 1)
     }
 }
