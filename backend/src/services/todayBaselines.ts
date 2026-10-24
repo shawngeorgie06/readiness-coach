@@ -25,6 +25,7 @@ export interface BaselineInput {
   sleepToday: number | null;
   sleepPrior30: number[];
   sleepDaily14: Array<number | null>;
+  sleepNeedHours: number;
   load7dToday: number;
   load28dAvg: number;
   strain28d: number[];
@@ -52,14 +53,14 @@ function metric(
   bandFraction: number,
   series: Array<number | null>,
   goodDirection: MetricBaseline["goodDirection"],
+  bandCenter: number | null = baseline,
 ): MetricBaseline {
-  const base = roundOrNull(baseline);
   return {
     today: roundOrNull(today),
-    baseline30d: base,
-    neutralBand: baseline == null || base == null
+    baseline30d: roundOrNull(baseline),
+    neutralBand: bandCenter == null || !Number.isFinite(bandCenter)
       ? null
-      : { low: round2(baseline * (1 - bandFraction)), high: round2(baseline * (1 + bandFraction)) },
+      : { low: round2(bandCenter * (1 - bandFraction)), high: round2(bandCenter * (1 + bandFraction)) },
     recent14d: fit14(series),
     goodDirection,
   };
@@ -82,7 +83,9 @@ export function buildBaselines(input: BaselineInput): TodayBaselines {
   return {
     hrv: metric(input.hrvToday, input.hrvBaseline, 0.05, input.hrvDaily14, "up"),
     restingHr: metric(input.rhrToday, input.rhrBaseline, 0.03, input.rhrDaily14, "down"),
-    sleepHours: metric(input.sleepToday, sleepBaseline, 0.1, input.sleepDaily14, "up"),
+    // Sleep is scored against the nightly target, not the personal average, so the
+    // band sits on the target's 0.9 cut and can't contradict the duration driver.
+    sleepHours: metric(input.sleepToday, sleepBaseline, 0.1, input.sleepDaily14, "up", input.sleepNeedHours),
     load7d: metric(input.load7dToday, input.load28dAvg, 0.3, rollingSevenDayMeans(input.strain28d), "none"),
   };
 }

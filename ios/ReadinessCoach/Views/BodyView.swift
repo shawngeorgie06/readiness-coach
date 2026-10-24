@@ -24,6 +24,7 @@ struct BodyView: View {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 16) {
                     header
+                    StaleDataBanner(resource: resource) { Task { await store.refresh(.body, force: true) } }
                     if let pillars = store.today.value?.pillars { readoutCard(pillars) }
                     if let response = resource.value, !response.daily.isEmpty {
                         let metrics = series(response)

@@ -7,7 +7,7 @@ function input(overrides: Partial<BaselineInput> = {}): BaselineInput {
   return {
     hrvToday: 62, hrvBaseline: 60, hrvDaily14: empty14,
     rhrToday: 50, rhrBaseline: 50, rhrDaily14: empty14,
-    sleepToday: 7.5, sleepPrior30: [7, 8], sleepDaily14: empty14,
+    sleepToday: 7.5, sleepPrior30: [7, 8], sleepDaily14: empty14, sleepNeedHours: 8,
     load7dToday: 3, load28dAvg: 4, strain28d: Array(28).fill(0),
     ...overrides,
   };
@@ -33,14 +33,26 @@ describe("buildBaselines", () => {
     expect(result.hrv.neutralBand).toBeNull();
     expect(result.hrv.baseline30d).toBeNull();
     expect(result.restingHr.neutralBand).toBeNull();
-    expect(result.sleepHours.neutralBand).toBeNull();
     expect(result.sleepHours.baseline30d).toBeNull();
+  });
+
+  it("sleep band is ±10% of the scoring target, not the 30-day average", () => {
+    // Averaging 5h, a 6h night beats the average but is still short of the 8h target the driver cites.
+    const { sleepHours } = buildBaselines(input({ sleepPrior30: [5, 5], sleepToday: 6, sleepNeedHours: 8 }));
+    expect(sleepHours.baseline30d).toBe(5);
+    expect(sleepHours.neutralBand).toEqual({ low: 7.2, high: 8.8 });
+    expect(sleepHours.today! < sleepHours.neutralBand!.low).toBe(true);
+  });
+
+  it("sleep band comes from the target even without history", () => {
+    const { sleepHours } = buildBaselines(input({ sleepPrior30: [], sleepNeedHours: 7.5 }));
+    expect(sleepHours.baseline30d).toBeNull();
+    expect(sleepHours.neutralBand).toEqual({ low: 6.75, high: 8.25 });
   });
 
   it("sleep baseline ignores zero nights", () => {
     const { sleepHours } = buildBaselines(input({ sleepPrior30: [7, 0, 8] }));
     expect(sleepHours.baseline30d).toBe(7.5);
-    expect(sleepHours.neutralBand).toEqual({ low: 6.75, high: 8.25 });
     expect(sleepHours.goodDirection).toBe("up");
   });
 

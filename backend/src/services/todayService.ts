@@ -433,6 +433,7 @@ export async function computeScore(
     sleepToday: lastNight.durationHours > 0 ? lastNight.durationHours : null,
     sleepPrior30: allSummaries.slice(0, -1).map((summary) => summary.durationHours),
     sleepDaily14: allSummaries.slice(-14).map((summary) => (summary.durationHours > 0 ? summary.durationHours : null)),
+    sleepNeedHours: user.sleepNeedHours,
     load7dToday: sevenDayAverage,
     load28dAvg: chronicAverage,
     strain28d,

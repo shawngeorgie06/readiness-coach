@@ -35,6 +35,7 @@ struct SleepView: View {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 16) {
                     header
+                    StaleDataBanner(resource: resource) { Task { await store.refresh(key, force: true) } }
                     SegmentedRange(rangeLabels, selection: $rangeIndex)
                     if let series, !series.nights.isEmpty {
                         let nights = series.nights

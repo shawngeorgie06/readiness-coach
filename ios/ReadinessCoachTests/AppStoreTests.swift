@@ -212,6 +212,137 @@ final class AppStoreTests: XCTestCase {
         XCTAssertNil(cache.load(.body, userId: "u1", as: BodyResponse.self))
     }
 
+    // MARK: - Generation and request day
+
+    func testRefreshAfterUploadDoesNotJoinPreUploadFetch() async {
+        store.activate(userId: "u1", api: api)
+        api.setHold(true)
+        let preUpload = Task { await store.refresh(.body, force: true) }
+        await waitUntil { self.api.calls == ["body"] }
+        store.noteUploadedSamples()
+        let postUpload = Task { await store.refresh(.body) }
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        api.setHold(false)
+        _ = await preUpload.value
+        let ok = await postUpload.value
+        XCTAssertTrue(ok)
+        XCTAssertEqual(api.calls, ["body", "body"])
+        XCTAssertEqual(store.body.dataVersion, store.dataVersion)
+        XCTAssertFalse(store.body.needsRevalidation(now: clock, today: day, currentDataVersion: store.dataVersion))
+    }
+
+    func testForcedTodayAfterUploadDoesNotReturnPreUploadFetch() async {
+        store.activate(userId: "u1", api: api)
+        api.setHold(true)
+        let preUpload = Task { await store.refresh(.today, force: true) }
+        await waitUntil { self.api.calls == ["today"] }
+        store.noteUploadedSamples()
+        let postUpload = Task { await store.refresh(.today, force: true) }
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        api.todayResult = { .fresh(makeToday(readiness: 80), etag: "t2") }
+        api.setHold(false)
+        _ = await preUpload.value
+        let ok = await postUpload.value
+        XCTAssertTrue(ok)
+        XCTAssertEqual(api.calls.filter { $0 == "today" }.count, 2)
+        XCTAssertEqual(store.today.value?.readiness, 80)
+        XCTAssertEqual(store.today.dataVersion, 1)
+    }
+
+    func testRefreshesOfOneGenerationStillShareARequestAfterUpload() async {
+        store.activate(userId: "u1", api: api)
+        store.noteUploadedSamples()
+        api.setHold(true)
+        async let first = store.refresh(.body, force: true)
+        async let second = store.refresh(.body)
+        await waitUntil { !self.api.calls.isEmpty }
+        api.setHold(false)
+        let results = await [first, second]
+        XCTAssertEqual(results, [true, true])
+        XCTAssertEqual(api.calls, ["body"])
+    }
+
+    func testRefreshWaitingOnStaleFetchStopsWhenSignedOut() async {
+        store.activate(userId: "u1", api: api)
+        api.setHold(true)
+        let preUpload = Task { await store.refresh(.body, force: true) }
+        await waitUntil { self.api.calls == ["body"] }
+        store.noteUploadedSamples()
+        let waiting = Task { await store.refresh(.body) }
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        store.reset()
+        api.setHold(false)
+        _ = await preUpload.value
+        let ok = await waiting.value
+        XCTAssertFalse(ok)
+        XCTAssertEqual(api.calls, ["body"])
+        XCTAssertNil(store.body.value)
+    }
+
+    func testRefreshWaitingOnStaleFetchDoesNotFetchForNextUser() async {
+        store.activate(userId: "u1", api: api)
+        api.setHold(true)
+        let preUpload = Task { await store.refresh(.body, force: true) }
+        await waitUntil { self.api.calls == ["body"] }
+        store.noteUploadedSamples()
+        let waiting = Task { await store.refresh(.body) }
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        store.activate(userId: "u2", api: api)
+        api.setHold(false)
+        _ = await preUpload.value
+        let ok = await waiting.value
+        XCTAssertFalse(ok)
+        XCTAssertEqual(api.calls, ["body"])
+        XCTAssertNil(store.body.value)
+    }
+
+    func testFreshFetchCrossingMidnightKeepsItsRequestDay() async {
+        store.activate(userId: "u1", api: api)
+        api.setHold(true)
+        let pending = Task { await store.refresh(.body, force: true) }
+        await waitUntil { self.api.calls == ["body"] }
+        day = "2026-10-24"
+        api.setHold(false)
+        _ = await pending.value
+        XCTAssertEqual(store.body.day, "2026-10-23")
+        XCTAssertEqual(cache.load(.body, userId: "u1", as: BodyResponse.self)?.day, "2026-10-23")
+        await store.refresh(.body)
+        XCTAssertEqual(api.calls, ["body", "body"])
+        XCTAssertEqual(store.body.day, "2026-10-24")
+    }
+
+    func testNotModifiedCrossingMidnightKeepsItsRequestDay() async {
+        seed(.body, BodyResponse(days: 7, daily: []), ageSeconds: 400, etag: "W/1")
+        store.activate(userId: "u1", api: api)
+        api.bodyResult = { .notModified }
+        api.setHold(true)
+        let pending = Task { await store.refresh(.body) }
+        await waitUntil { self.api.calls == ["body"] }
+        day = "2026-10-24"
+        api.setHold(false)
+        _ = await pending.value
+        XCTAssertEqual(store.body.day, "2026-10-23")
+        await store.refresh(.body)
+        XCTAssertEqual(api.calls, ["body", "body"])
+        XCTAssertEqual(store.body.day, "2026-10-24")
+    }
+
+    func testRefreshAfterMidnightDoesNotJoinFetchFromThePreviousDay() async {
+        store.activate(userId: "u1", api: api)
+        api.setHold(true)
+        let before = Task { await store.refresh(.body, force: true) }
+        await waitUntil { self.api.calls == ["body"] }
+        day = "2026-10-24"
+        let after = Task { await store.refresh(.body) }
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        api.setHold(false)
+        _ = await before.value
+        let ok = await after.value
+        XCTAssertTrue(ok)
+        XCTAssertEqual(api.calls, ["body", "body"])
+        XCTAssertEqual(store.body.day, "2026-10-24")
+    }
+
     func testRefreshCompletingAfterUserSwitchDoesNotWrite() async {
         store.activate(userId: "u1", api: api)
         api.setHold(true)

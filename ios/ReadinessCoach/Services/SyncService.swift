@@ -36,13 +36,17 @@ final class SyncService: ObservableObject {
 
     /// Foreground-triggered sync, debounced so rapid app switches don't re-sync.
     func autoSync(_ settings: AppSettings) async {
+        guard settings.isReady else { return }
         if let last = lastAutoSyncAt, Date().timeIntervalSince(last) < 30 { return }
         lastAutoSyncAt = Date()
         await syncNow(settings)
     }
 
     /// HealthKit background delivery — debounced harder than foreground sync.
+    /// Skipped once signed out: the HealthKit observer outlives the signed-in UI and
+    /// must not repopulate the cache that sign-out just cleared.
     func backgroundSync(_ settings: AppSettings) async {
+        guard settings.isReady else { return }
         if let last = lastBackgroundSyncAt, Date().timeIntervalSince(last) < 300 { return }
         lastBackgroundSyncAt = Date()
         await syncNow(settings)

@@ -58,11 +58,11 @@ function dayStats(day) {
 
 // --- payload builders ------------------------------------------------------
 
-function metric(today, base, band, series, goodDirection) {
+function metric(today, base, band, series, goodDirection, center = base) {
   return {
     today,
     baseline30d: base,
-    neutralBand: base == null ? null : { low: round(base * (1 - band), 2), high: round(base * (1 + band), 2) },
+    neutralBand: center == null ? null : { low: round(center * (1 - band), 2), high: round(center * (1 + band), 2) },
     recent14d: series,
     goodDirection,
   };
@@ -191,7 +191,7 @@ function todayPayload(date) {
     baselines: {
       hrv: metric(round(t.hrv, 2), hrvBase, 0.05, stats.slice(-14).map((s) => round(s.hrv, 2)), "up"),
       restingHr: metric(round(t.rhr, 2), rhrBase, 0.03, stats.slice(-14).map((s) => round(s.rhr, 2)), "down"),
-      sleepHours: metric(pending ? null : t.sleep, sleepBase, 0.1, stats.slice(-14).map((s) => s.sleep), "up"),
+      sleepHours: metric(pending ? null : t.sleep, sleepBase, 0.1, stats.slice(-14).map((s) => s.sleep), "up", 8),
       load7d: metric(load7, load28, 0.3, rolling.slice(-14), "none"),
     },
   };

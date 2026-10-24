@@ -22,6 +22,7 @@ struct TrendsView: View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(spacing: 16) {
                 SegmentedRange(rangeLabels, selection: $rangeIndex)
+                StaleDataBanner(resource: resource) { Task { await store.refresh(key, force: true) } }
                 if let series, !series.points.isEmpty {
                     trendCard(series)
                     insightCards()

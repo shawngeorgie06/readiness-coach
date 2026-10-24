@@ -24,6 +24,7 @@ struct TrainView: View {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 16) {
                     header
+                    StaleDataBanner(resource: resource) { Task { await store.refresh(.train, force: true) } }
                     if let response = resource.value, !response.data.isEmpty {
                         let derivedSeries = series(response)
                         chips

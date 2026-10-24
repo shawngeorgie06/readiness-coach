@@ -18,7 +18,8 @@ final class AppStore {
     @ObservationIgnored private let localDay: () -> String
     @ObservationIgnored private var userId: String?
     @ObservationIgnored private var api: ReadAPI?
-    @ObservationIgnored private var inFlight: [ResourceKey: Task<Bool, Never>] = [:]
+    /// Running fetches per key, with the data version and local day each one started under.
+    @ObservationIgnored private var inFlight: [ResourceKey: (task: Task<Bool, Never>, version: Int, day: String)] = [:]
     /// Bumped whenever memory is cleared; a fetch that started under an older
     /// session never writes its result.
     @ObservationIgnored private var session = 0
@@ -59,7 +60,15 @@ final class AppStore {
     @discardableResult
     func refresh(_ key: ResourceKey, force: Bool = false) async -> Bool {
         guard let api, let userId else { return false }
-        if let running = inFlight[key] { return await running.value }
+        if let running = inFlight[key] {
+            let token = session
+            let ok = await running.task.value
+            // Started before the latest upload or on an earlier day, so its result is
+            // already stale; fetch again, unless the session ended while waiting.
+            let stale = running.version < dataVersion || running.day != localDay()
+            guard stale, token == session else { return ok }
+            return await refresh(key, force: force)
+        }
         if !force && !needsRevalidation(key) { return true }
 
         let token = session
@@ -75,7 +84,7 @@ final class AppStore {
             }
             return ok
         }
-        inFlight[key] = task
+        inFlight[key] = (task, version, localDay())
         return await task.value
     }
 
@@ -86,7 +95,7 @@ final class AppStore {
         }
     }
 
-    /// Called by SyncService after an upload stored new samples. A refresh already in flight returns pre-upload data; the next refresh corrects it.
+    /// Called by SyncService after an upload stored new samples. A refresh that joins a pre-upload request fetches again once it finishes.
     func noteUploadedSamples() {
         dataVersion += 1
     }
@@ -103,7 +112,7 @@ final class AppStore {
 
     private func clearMemory() {
         session += 1
-        inFlight.values.forEach { $0.cancel() }
+        inFlight.values.forEach { $0.task.cancel() }
         inFlight = [:]
         today = Resource()
         body = Resource()
@@ -160,6 +169,8 @@ final class AppStore {
         load: (String?) async throws -> Fetch<V>
     ) async -> Bool {
         let current = slot(self)
+        // Stamp the day the request started, so a response landing after midnight still revalidates.
+        let day = localDay()
         // Only revalidate against an ETag when there is a value to keep.
         let etag = current.value == nil ? nil : current.etag
         do {
@@ -173,7 +184,7 @@ final class AppStore {
             case .notModified:
                 guard next.value != nil else { return false }
             }
-            next.day = localDay()
+            next.day = day
             next.fetchedAt = now()
             next.dataVersion = version
             next.error = nil
