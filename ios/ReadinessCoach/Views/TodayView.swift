@@ -64,7 +64,7 @@ struct TodayView: View {
                         .buttonStyle(.bordered)
                     }
 
-                    if let error = sync.errorMessage {
+                    if let error = sync.todayError {
                         ErrorCard(message: error) { Task { await sync.syncNow(settings) } }
                     }
 

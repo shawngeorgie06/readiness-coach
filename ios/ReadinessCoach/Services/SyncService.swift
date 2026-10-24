@@ -1,5 +1,25 @@
 import Foundation
 
+/// Where Health samples come from: `HealthKitService` in the app.
+@MainActor
+protocol HealthSource {
+    var canRead: Bool { get }
+    func fetchSamples(since: Date?, userId: String) async throws -> SyncPayload
+}
+
+extension HealthKitService: HealthSource {
+    var canRead: Bool { Self.isAvailable }
+}
+
+/// The server a sync talks to: Today reads plus the chunked Health upload.
+/// `APIClient` in the app.
+protocol SyncAPI: ReadAPI {
+    func syncChunks(_ payload: SyncPayload) -> [SyncPayload]
+    func syncChunk(_ payload: SyncPayload) async throws -> SyncResult
+}
+
+extension APIClient: SyncAPI {}
+
 /// Coordinates HealthKit sync and Today refresh, and holds the observable state
 /// the views render. One instance is shared through the environment.
 @MainActor
@@ -12,7 +32,8 @@ final class SyncService: ObservableObject {
     @Published var uploadingCount: Int?
 
     private let store: AppStore
-    private let health = HealthKitService()
+    private let health: HealthSource
+    private let connect: (APIClient) -> SyncAPI
     private var lastAutoSyncAt: Date?
     private var lastBackgroundSyncAt: Date?
 
@@ -22,8 +43,19 @@ final class SyncService: ObservableObject {
     /// immediately on launch while a refresh runs).
     var today: TodayDTO? { store.today.value }
 
-    init(store: AppStore) {
+    /// Why Today couldn't refresh, if it couldn't: a sync failure, or the last
+    /// Today fetch failing however it was started (a sync's final refresh, a day
+    /// or time zone change). The saved score stays on screen beside it.
+    var todayError: String? { errorMessage ?? store.today.error }
+
+    init(
+        store: AppStore,
+        health: HealthSource? = nil,
+        connect: @escaping (APIClient) -> SyncAPI = { $0 }
+    ) {
         self.store = store
+        self.health = health ?? HealthKitService()
+        self.connect = connect
         // Remove the pre-v1.3.4 UserDefaults cache after upgrading.
         UserDefaults.standard.removeObject(forKey: Self.legacyCacheKey)
     }
@@ -53,7 +85,7 @@ final class SyncService: ObservableObject {
     }
 
     func freshness(using settings: AppSettings) -> DataFreshness {
-        SyncFreshness.evaluate(today: today, settings: settings, errorMessage: errorMessage)
+        SyncFreshness.evaluate(today: today, settings: settings, errorMessage: todayError)
     }
 
     /// The sync currently in flight, if any. Owned here rather than by a view.
@@ -108,7 +140,8 @@ final class SyncService: ObservableObject {
             errorMessage = APIError.notConfigured.localizedDescription
             return
         }
-        StoreActivation.activate(store, settings: settings)
+        let api = connect(client)
+        StoreActivation.activate(store, userId: client.userId, api: api)
         isSyncing = true
         errorMessage = nil
         lastUploadError = nil
@@ -132,7 +165,7 @@ final class SyncService: ObservableObject {
                     lastSyncSummary = "No new HealthKit samples since last sync."
                     settings.lastSyncAt = Date()
                 } else {
-                    uploadedNewSamples = await uploadHealth(payload, client: client, settings: settings)
+                    uploadedNewSamples = await uploadHealth(payload, api: api, settings: settings)
                 }
             case .readFailed(let error):
                 applyHealthReadFailure(error)
@@ -161,10 +194,10 @@ final class SyncService: ObservableObject {
     /// Returns whether anything new reached the server.
     private func uploadHealth(
         _ payload: SyncPayload,
-        client: APIClient,
+        api: SyncAPI,
         settings: AppSettings
     ) async -> Bool {
-        let chunks = client.syncChunks(payload)
+        let chunks = api.syncChunks(payload)
         let total = payload.samples.count
         var uploadedSamples = 0
         var uploadedWorkouts = 0
@@ -172,7 +205,7 @@ final class SyncService: ObservableObject {
 
         for chunk in chunks {
             do {
-                let result = try await client.syncChunk(chunk)
+                let result = try await api.syncChunk(chunk)
                 uploadedSamples += result.samples
                 uploadedWorkouts += result.workouts
                 uploadingCount = max(0, total - uploadedSamples)
@@ -223,7 +256,7 @@ final class SyncService: ObservableObject {
     }
 
     private func loadHealthPayload(_ settings: AppSettings) async -> HealthPayloadResult? {
-        guard HealthKitService.isAvailable else { return .unavailable }
+        guard health.canRead else { return .unavailable }
         do {
             let payload = try await health.fetchSamples(
                 since: settings.lastSyncAt,
