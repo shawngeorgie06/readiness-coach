@@ -87,7 +87,7 @@ struct AskCoachView: View {
             CoachQuestionField(text: $question, isFocused: $questionFocused, onSubmit: submit)
                 .overlay(alignment: .topLeading) {
                     if question.isEmpty {
-                        Text("e.g. Can I do a hard lifting session today?")
+                        Text("Ask about your day")
                             .font(.body)
                             .foregroundStyle(Palette.textTertiary)
                             .allowsHitTesting(false)
