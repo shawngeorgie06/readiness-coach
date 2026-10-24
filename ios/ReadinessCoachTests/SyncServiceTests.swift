@@ -25,6 +25,7 @@ private final class Gate {
 private final class FakeHealth: HealthSource {
     var canRead = true
     var samples = 2
+    var readFails = false
     /// The user each read was for, in order.
     private(set) var reads: [String] = []
     private var nextGate: Gate?
@@ -41,6 +42,7 @@ private final class FakeHealth: HealthSource {
         let gate = nextGate
         nextGate = nil
         await gate?.wait()
+        if readFails { throw Boom() }
         let samples = (0..<samples).map { index in
             SyncSample(
                 hkUuid: "\(userId)-\(index)", type: "heartRate",
@@ -58,6 +60,7 @@ private final class FakeServer: @unchecked Sendable {
     private var _uploads: [SyncPayload] = []
     private var _todayUsers: [String] = []
     private var _holdUploads = false
+    private var _uploadsFail = false
     private var _todayFails: (Int) -> Bool = { _ in false }
 
     var uploads: [SyncPayload] { lock.withLock { _uploads } }
@@ -66,6 +69,10 @@ private final class FakeServer: @unchecked Sendable {
     var holdUploads: Bool {
         get { lock.withLock { _holdUploads } }
         set { lock.withLock { _holdUploads = newValue } }
+    }
+    var uploadsFail: Bool {
+        get { lock.withLock { _uploadsFail } }
+        set { lock.withLock { _uploadsFail = newValue } }
     }
     /// Whether the Today fetch at a call index (from 0) fails.
     var todayFails: (Int) -> Bool {
@@ -84,8 +91,9 @@ private final class FakeServer: @unchecked Sendable {
         return .fresh(makeToday(), etag: nil)
     }
 
-    fileprivate func upload(_ payload: SyncPayload) async -> SyncResult {
+    fileprivate func upload(_ payload: SyncPayload) async throws -> SyncResult {
         lock.withLock { _uploads.append(payload) }
+        if uploadsFail { throw Boom() }
         // Bounded, so a regression fails its assertions instead of hanging the suite.
         for _ in 0..<1500 where holdUploads {
             try? await Task.sleep(nanoseconds: 2_000_000)
@@ -114,7 +122,7 @@ private final class FakeServer: @unchecked Sendable {
         func syncChunks(_ payload: SyncPayload) -> [SyncPayload] {
             payload.samples.map { SyncPayload(userId: payload.userId, samples: [$0], workouts: []) }
         }
-        func syncChunk(_ payload: SyncPayload) async throws -> SyncResult { await server.upload(payload) }
+        func syncChunk(_ payload: SyncPayload) async throws -> SyncResult { try await server.upload(payload) }
     }
 }
 
@@ -208,13 +216,123 @@ final class SyncServiceTests: XCTestCase {
     func testFinalTodayFailureAfterUploadWarnsBesideSavedScore() async {
         signIn("a", token: "sA")
         server.todayFails = { $0 >= 1 }
-        await sync.syncNow(settings)
+        let outcome = await sync.syncNow(settings)
 
         XCTAssertEqual(server.uploads.count, 2)
         XCTAssertEqual(server.todayUsers, ["a", "a"])
         XCTAssertNotNil(sync.today, "the saved score stays on screen")
         XCTAssertNotNil(sync.todayError)
         XCTAssertEqual(sync.freshness(using: settings), .offline)
+        XCTAssertEqual(outcome, .failed, "the score on screen predates the upload")
+    }
+
+    // MARK: - Run outcome
+
+    func testCompleteSyncSucceeds() async {
+        signIn("a", token: "sA")
+        let outcome = await sync.syncNow(settings)
+
+        XCTAssertEqual(server.uploads.count, 2)
+        XCTAssertEqual(outcome, .succeeded)
+    }
+
+    func testSyncWithNothingNewSucceeds() async {
+        signIn("a", token: "sA")
+        health.samples = 0
+        let outcome = await sync.syncNow(settings)
+
+        XCTAssertEqual(server.uploads.count, 0)
+        XCTAssertEqual(outcome, .succeeded)
+    }
+
+    func testSyncWithoutHealthKitSucceeds() async {
+        signIn("a", token: "sA")
+        health.canRead = false
+        let outcome = await sync.syncNow(settings)
+
+        XCTAssertEqual(outcome, .succeeded)
+    }
+
+    func testUnconfiguredSyncFails() async {
+        let outcome = await sync.syncNow(settings)
+
+        XCTAssertNotNil(sync.errorMessage)
+        XCTAssertEqual(outcome, .failed)
+    }
+
+    func testTodayFailureFails() async {
+        signIn("a", token: "sA")
+        server.todayFails = { _ in true }
+        let outcome = await sync.syncNow(settings)
+
+        XCTAssertNotNil(sync.todayError)
+        XCTAssertEqual(outcome, .failed)
+    }
+
+    func testUploadFailureBesideAFreshScoreFails() async {
+        signIn("a", token: "sA")
+        server.uploadsFail = true
+        let outcome = await sync.syncNow(settings)
+
+        XCTAssertNil(sync.todayError, "Today itself refreshed")
+        XCTAssertTrue(sync.healthUploadFailed)
+        XCTAssertEqual(outcome, .failed)
+    }
+
+    func testHealthReadFailureBesideAFreshScoreFails() async {
+        signIn("a", token: "sA")
+        health.readFails = true
+        let outcome = await sync.syncNow(settings)
+
+        XCTAssertNil(sync.todayError, "Today itself refreshed")
+        XCTAssertTrue(sync.healthSyncFailed)
+        XCTAssertEqual(outcome, .failed)
+    }
+
+    /// The earlier sync's summary stays on screen, but it isn't this run's success.
+    func testHealthReadFailureAfterAGoodSyncFailsBesideTheOldSummary() async {
+        signIn("a", token: "sA")
+        let first = await sync.syncNow(settings)
+        XCTAssertEqual(first, .succeeded)
+        XCTAssertEqual(sync.lastSyncSummary, "Synced 2 samples, 0 workouts.")
+
+        health.readFails = true
+        let second = await sync.syncNow(settings)
+
+        XCTAssertEqual(sync.lastSyncSummary, "Synced 2 samples, 0 workouts.", "the old summary stays")
+        XCTAssertNil(sync.todayError, "Today itself refreshed")
+        XCTAssertFalse(sync.healthUploadFailed)
+        XCTAssertEqual(second, .failed)
+    }
+
+    func testSyncAfterAFailedOneSucceeds() async {
+        signIn("a", token: "sA")
+        server.uploadsFail = true
+        let first = await sync.syncNow(settings)
+        XCTAssertEqual(first, .failed)
+
+        server.uploadsFail = false
+        let second = await sync.syncNow(settings)
+        XCTAssertEqual(second, .succeeded)
+    }
+
+    func testAJoinedRunSharesTheRunsOwnOutcome() async {
+        signIn("a", token: "sA")
+        let good = await sync.syncNow(settings)
+        XCTAssertEqual(good, .succeeded)
+
+        health.readFails = true
+        let read = health.holdNextRead()
+        let first = Task { await sync.syncNow(settings) }
+        await waitUntil { self.health.reads.count == 2 }
+        let joined = Task { await sync.syncNow(settings) }
+        read.open()
+
+        let firstOutcome = await first.value
+        let joinedOutcome = await joined.value
+        XCTAssertEqual(health.reads.count, 2, "the second caller joined")
+        XCTAssertEqual(firstOutcome, .failed)
+        XCTAssertEqual(joinedOutcome, .failed)
     }
 
     func testDayChangeRefreshFailureWarnsBesideSavedScore() async {
@@ -258,8 +376,9 @@ final class SyncServiceTests: XCTestCase {
         settings.signOut()
         StoreActivation.reset(store, legacyURL: legacyURL)
         read.open()
-        await run.value
+        let outcome = await run.value
 
+        XCTAssertEqual(outcome, .stopped)
         XCTAssertEqual(server.uploads.count, 0)
         XCTAssertNil(settings.lastSyncAt)
         XCTAssertNil(settings.lastRefreshAt)
@@ -278,8 +397,9 @@ final class SyncServiceTests: XCTestCase {
         settings.clearLocalSettings()
         StoreActivation.reset(store, legacyURL: legacyURL)
         server.holdUploads = false
-        await run.value
+        let outcome = await run.value
 
+        XCTAssertEqual(outcome, .stopped)
         XCTAssertEqual(server.uploads.count, 1, "only the chunk already sent")
         XCTAssertEqual(server.todayUsers, ["a"], "no final refresh")
         XCTAssertNil(settings.lastSyncAt)
@@ -298,8 +418,9 @@ final class SyncServiceTests: XCTestCase {
 
         switchUser(to: "b", token: "sB")
         server.holdUploads = false
-        await run.value
+        let outcome = await run.value
 
+        XCTAssertEqual(outcome, .stopped)
         XCTAssertEqual(server.uploads.map(\.userId), ["a"], "only the chunk already sent")
         XCTAssertEqual(server.todayUsers, ["a"], "no final refresh")
         XCTAssertNil(settings.lastSyncAt, "user b gets no watermark from user a's upload")
@@ -325,12 +446,14 @@ final class SyncServiceTests: XCTestCase {
         XCTAssertEqual(health.reads, ["a", "b"], "user b's sync didn't join user a's")
 
         readA.open()
-        await runA.value
+        let outcomeA = await runA.value
+        XCTAssertEqual(outcomeA, .stopped)
         XCTAssertTrue(sync.isSyncing, "user a's run finishing leaves user b's in progress")
         XCTAssertNotNil(sync.uploadingCount)
 
         server.holdUploads = false
-        await runB.value
+        let outcomeB = await runB.value
+        XCTAssertEqual(outcomeB, .succeeded)
         XCTAssertEqual(server.uploads.map(\.userId), ["b", "b"])
         XCTAssertEqual(server.todayUsers.filter { $0 == "a" }.count, 1, "only the preliminary fetch from before sign-out")
         XCTAssertNotNil(settings.lastSyncAt)
@@ -346,17 +469,19 @@ final class SyncServiceTests: XCTestCase {
         await waitUntil { self.health.reads == ["a"] }
         let second = Task { await sync.syncNow(settings) }
         read.open()
-        await first.value
-        await second.value
+        let firstOutcome = await first.value
+        let secondOutcome = await second.value
 
         XCTAssertEqual(health.reads, ["a"])
         XCTAssertEqual(server.uploads.count, 2)
+        XCTAssertEqual(firstOutcome, .succeeded)
+        XCTAssertEqual(secondOutcome, .succeeded)
     }
 
     /// Starts a sync and returns after `syncNow` has scheduled its run but before
     /// the run's first step. Main-actor jobs run in order: the sync's job, then
     /// this continuation, then the run it scheduled.
-    private func startSyncUpToItsScheduledRun(file: StaticString = #filePath, line: UInt = #line) async -> Task<Void, Never> {
+    private func startSyncUpToItsScheduledRun(file: StaticString = #filePath, line: UInt = #line) async -> Task<SyncOutcome, Never> {
         let session = store.session
         let run = Task { await sync.syncNow(settings) }
         await Task.yield()
@@ -372,9 +497,10 @@ final class SyncServiceTests: XCTestCase {
 
         settings.signOut()
         StoreActivation.reset(store, legacyURL: legacyURL)
-        await run.value
+        let outcome = await run.value
         await drainMainQueue()
 
+        XCTAssertEqual(outcome, .stopped)
         XCTAssertEqual(health.reads, [], "no Health read")
         XCTAssertEqual(server.todayUsers, [], "no Today request")
         XCTAssertEqual(server.uploads.count, 0)
@@ -396,12 +522,14 @@ final class SyncServiceTests: XCTestCase {
         signIn("b", token: "sB")
         server.holdUploads = true
         let runB = Task { await sync.syncNow(settings) }
-        await runA.value
+        let outcomeA = await runA.value
+        XCTAssertEqual(outcomeA, .stopped)
         await waitUntil { self.server.uploads.count == 1 }
         XCTAssertTrue(sync.isSyncing, "user a's run ending leaves user b's in progress")
 
         server.holdUploads = false
-        await runB.value
+        let outcomeB = await runB.value
+        XCTAssertEqual(outcomeB, .succeeded)
         XCTAssertEqual(health.reads, ["b"], "only user b's own sync read Health")
         XCTAssertEqual(server.uploads.map(\.userId), ["b", "b"])
         XCTAssertEqual(Set(server.todayUsers), ["b"])

@@ -58,14 +58,29 @@ function dayStats(day) {
 
 // --- payload builders ------------------------------------------------------
 
-function metric(today, base, band, series, goodDirection, center = base) {
+function metric(today, base, band, series, goodDirection, position, center = base) {
   return {
     today,
     baseline30d: base,
     neutralBand: center == null ? null : { low: round(center * (1 - band), 2), high: round(center * (1 + band), 2) },
     recent14d: series,
     goodDirection,
+    position,
   };
+}
+
+// The backend's driver rules (backend/src/services/todayBaselines.ts), applied
+// to unrounded values; the rounded payload numbers can't decide a status.
+const POSITION_RULES = {
+  hrv: (t, b) => { const d = (t - b) / Math.max(b, 1); return d >= 0.05 ? "above" : d <= -0.05 ? "below" : "within"; },
+  restingHr: (t, b) => { const d = (t - b) / Math.max(b, 1); return d > 0.03 ? "above" : d < -0.03 ? "below" : "within"; },
+  sleepHours: (t, need) => { const r = t / Math.max(need, 0.1); return r < 0.9 ? "below" : r > 1.1 ? "above" : "within"; },
+  load7d: (t, avg) => { const r = avg > 0 ? t / avg : 1; return r > 1.3 ? "above" : r < 0.7 ? "below" : "within"; },
+};
+
+/** Null without today's value or a baseline: no status, never a guessed one. */
+function position(rule, today, base, center = base) {
+  return [today, base, center].every(Number.isFinite) ? POSITION_RULES[rule](today, center) : null;
 }
 
 function workoutsFor(end, days) {
@@ -143,12 +158,16 @@ function todayPayload(date) {
   const t = stats[29];
   const prior = stats.slice(0, 29);
   const avg = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
-  const hrvBase = round(avg(prior.map((s) => s.hrv)), 2);
-  const rhrBase = round(avg(prior.map((s) => s.rhr)), 2);
+  const hrvRaw = avg(prior.map((s) => s.hrv));
+  const rhrRaw = avg(prior.map((s) => s.rhr));
+  const hrvBase = round(hrvRaw, 2);
+  const rhrBase = round(rhrRaw, 2);
   const sleepBase = round(avg(prior.map((s) => s.sleep)), 2);
   const strain = dayRange(date, 28).map((d) => workoutsFor(d, 1).reduce((a, w) => a + w.strain, 0));
-  const load7 = round(strain.slice(-7).reduce((a, b) => a + b, 0) / 7, 2);
-  const load28 = round(avg(strain), 2);
+  const load7Raw = strain.slice(-7).reduce((a, b) => a + b, 0) / 7;
+  const load28Raw = avg(strain);
+  const load7 = round(load7Raw, 2);
+  const load28 = round(load28Raw, 2);
   const rolling = strain.map((_, i) => (i < 6 ? null : round(strain.slice(i - 6, i + 1).reduce((a, b) => a + b, 0) / 7, 2)));
 
   const pending = SCENARIO === "pending";
@@ -189,10 +208,13 @@ function todayPayload(date) {
       source: "template",
     },
     baselines: {
-      hrv: metric(round(t.hrv, 2), hrvBase, 0.05, stats.slice(-14).map((s) => round(s.hrv, 2)), "up"),
-      restingHr: metric(round(t.rhr, 2), rhrBase, 0.03, stats.slice(-14).map((s) => round(s.rhr, 2)), "down"),
-      sleepHours: metric(pending ? null : t.sleep, sleepBase, 0.1, stats.slice(-14).map((s) => s.sleep), "up", 8),
-      load7d: metric(load7, load28, 0.3, rolling.slice(-14), "none"),
+      hrv: metric(round(t.hrv, 2), hrvBase, 0.05, stats.slice(-14).map((s) => round(s.hrv, 2)), "up", position("hrv", t.hrv, hrvRaw)),
+      restingHr: metric(round(t.rhr, 2), rhrBase, 0.03, stats.slice(-14).map((s) => round(s.rhr, 2)), "down", position("restingHr", t.rhr, rhrRaw)),
+      sleepHours: metric(
+        pending ? null : t.sleep, sleepBase, 0.1, stats.slice(-14).map((s) => s.sleep), "up",
+        position("sleepHours", pending ? null : t.sleep, sleepBase, 8), 8,
+      ),
+      load7d: metric(load7, load28, 0.3, rolling.slice(-14), "none", position("load7d", load7Raw, load28Raw)),
     },
   };
 }

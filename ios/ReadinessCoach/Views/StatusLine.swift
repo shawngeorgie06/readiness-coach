@@ -221,8 +221,8 @@ struct StatusLine: View {
                             disclosureIcon
                         }
                     }
-                    .padding(.horizontal, 14)
                     .padding(.vertical, 12)
+                    .frame(minHeight: Space.target)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -235,11 +235,12 @@ struct StatusLine: View {
                             detail(item)
                         }
                     }
-                    .padding(.horizontal, 14)
                     .padding(.bottom, 14)
                 }
             }
-            .background(Palette.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            // Open on the canvas between hairlines, like every other section.
+            .overlay(alignment: .top) { Hairline() }
+            .overlay(alignment: .bottom) { Hairline() }
         }
     }
 

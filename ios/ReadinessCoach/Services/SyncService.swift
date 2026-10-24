@@ -20,6 +20,19 @@ protocol SyncAPI: ReadAPI {
 
 extension APIClient: SyncAPI {}
 
+/// How one sync run ended, judged by that run alone: status copy kept from an
+/// earlier run, like an old "Synced" summary, doesn't count.
+enum SyncOutcome: Equatable {
+    /// Today refreshed, and Health had nothing new, wasn't available, or was
+    /// read and fully uploaded.
+    case succeeded
+    /// No server is configured, Today didn't refresh, or Health didn't read
+    /// or upload.
+    case failed
+    /// Cancelled, replaced by another run, or its session or credentials ended.
+    case stopped
+}
+
 /// Coordinates HealthKit sync and Today refresh, and holds the observable state
 /// the views render. One instance is shared through the environment.
 @MainActor
@@ -109,7 +122,7 @@ final class SyncService: ObservableObject {
     }
 
     /// The sync currently in flight, if any. Owned here rather than by a view.
-    private var syncRun: (id: Int, owner: Owner, task: Task<Void, Never>)?
+    private var syncRun: (id: Int, owner: Owner, task: Task<SyncOutcome, Never>)?
     private var syncRunCount = 0
 
     var healthSyncFailed: Bool {
@@ -143,28 +156,31 @@ final class SyncService: ObservableObject {
     /// take the upload down with them. A second caller for the same session
     /// joins the run already in flight instead of starting a competing one; a
     /// caller for another session or credentials starts its own.
-    func syncNow(_ settings: AppSettings) async {
+    ///
+    /// Returns how the run it started or joined ended.
+    @discardableResult
+    func syncNow(_ settings: AppSettings) async -> SyncOutcome {
         guard let client = settings.makeClient() else {
             errorMessage = APIError.notConfigured.localizedDescription
-            return
+            return .failed
         }
         let api = connect(client)
         StoreActivation.activate(store, userId: client.userId, api: api)
         let owner = Owner(session: store.session, identity: client.identity)
         if let run = syncRun, run.owner == owner {
-            await run.task.value
-            return
+            return await run.task.value
         }
         syncRun?.task.cancel()
         syncRunCount += 1
         let id = syncRunCount
-        let task = Task { [weak self] in
-            guard let self else { return }
-            await self.performSync(settings, api: api, run: id)
+        let task = Task { [weak self] () -> SyncOutcome in
+            guard let self else { return .stopped }
+            return await self.performSync(settings, api: api, run: id)
         }
         syncRun = (id, owner, task)
-        await task.value
+        let outcome = await task.value
         if syncRun?.id == id { syncRun = nil }
+        return outcome
     }
 
     /// Whether run `id` still owns the sync: it wasn't cancelled, no other run
@@ -176,9 +192,9 @@ final class SyncService: ObservableObject {
         return run.owner.session == store.session && settings.makeClient()?.identity == run.owner.identity
     }
 
-    private func performSync(_ settings: AppSettings, api: SyncAPI, run: Int) async {
+    private func performSync(_ settings: AppSettings, api: SyncAPI, run: Int) async -> SyncOutcome {
         // The session can end after `syncNow` schedules this run and before it starts.
-        guard owns(run, settings) else { return }
+        guard owns(run, settings) else { return .stopped }
         isSyncing = true
         errorMessage = nil
         lastUploadError = nil
@@ -192,36 +208,44 @@ final class SyncService: ObservableObject {
 
         let healthPayload = await healthPayloadTask
         let preliminaryTodayLoaded = await preliminaryTodayTask
-        guard owns(run, settings) else { return }
+        guard owns(run, settings) else { return .stopped }
 
         if preliminaryTodayLoaded {
             didRefresh(settings)
         }
 
         var uploadedNewSamples = false
-        if let healthPayload {
-            switch healthPayload {
-            case .samples(let payload):
-                if payload.isEmpty {
-                    lastSyncSummary = "No new HealthKit samples since last sync."
-                    settings.lastSyncAt = Date()
-                } else {
-                    uploadedNewSamples = await uploadHealth(payload, api: api, settings: settings, run: run)
-                    guard owns(run, settings) else { return }
-                }
-            case .readFailed(let error):
-                applyHealthReadFailure(error)
-            case .unavailable:
-                lastSyncSummary = "HealthKit unavailable — showing server data only."
+        var healthSynced = false
+        switch healthPayload {
+        case .samples(let payload):
+            if payload.isEmpty {
+                lastSyncSummary = "No new HealthKit samples since last sync."
+                settings.lastSyncAt = Date()
+                healthSynced = true
+            } else {
+                let upload = await uploadHealth(payload, api: api, settings: settings, run: run)
+                guard owns(run, settings) else { return .stopped }
+                uploadedNewSamples = upload.uploadedNew
+                healthSynced = upload.complete
             }
+        case .readFailed(let error):
+            applyHealthReadFailure(error)
+        case .unavailable:
+            lastSyncSummary = "HealthKit unavailable — showing server data only."
+            healthSynced = true
+        case nil:
+            break
         }
 
+        var todayLoaded = preliminaryTodayLoaded
         if uploadedNewSamples {
             store.noteUploadedSamples()
-            await refreshTodayFromServer(settings, keepPreliminaryOnFailure: true, run: run)
+            todayLoaded = await refreshTodayFromServer(settings, keepPreliminaryOnFailure: true, run: run)
         } else if !preliminaryTodayLoaded {
-            await refreshTodayFromServer(settings, keepPreliminaryOnFailure: false, run: run)
+            todayLoaded = await refreshTodayFromServer(settings, keepPreliminaryOnFailure: false, run: run)
         }
+        guard owns(run, settings) else { return .stopped }
+        return healthSynced && todayLoaded ? .succeeded : .failed
     }
 
     /// Uploads Health samples chunk by chunk, banking the resume point after each
@@ -233,14 +257,15 @@ final class SyncService: ObservableObject {
     /// permanently — a 30-day backfill outran the `/v1` rate limit, the whole
     /// batch was discarded, and every retry restarted it and hit 429 again.
     ///
-    /// Returns whether anything new reached the server. Stops, sending and
-    /// recording nothing more, once `run` no longer owns the sync.
+    /// Returns whether anything new reached the server, and whether all of it
+    /// did. Stops, sending and recording nothing more, once `run` no longer
+    /// owns the sync.
     private func uploadHealth(
         _ payload: SyncPayload,
         api: SyncAPI,
         settings: AppSettings,
         run: Int
-    ) async -> Bool {
+    ) async -> (uploadedNew: Bool, complete: Bool) {
         let chunks = api.syncChunks(payload)
         let total = payload.samples.count
         var uploadedSamples = 0
@@ -248,7 +273,7 @@ final class SyncService: ObservableObject {
         uploadingCount = total
 
         for chunk in chunks {
-            guard owns(run, settings) else { return false }
+            guard owns(run, settings) else { return (false, false) }
             let outcome: Result<SyncResult, Error>
             do {
                 outcome = .success(try await api.syncChunk(chunk))
@@ -257,7 +282,7 @@ final class SyncService: ObservableObject {
             }
             // A chunk already sent can't be recalled, but after the session ends
             // its result belongs to nobody: no watermark, no summary.
-            guard owns(run, settings) else { return false }
+            guard owns(run, settings) else { return (false, false) }
             do {
                 let result = try outcome.get()
                 uploadedSamples += result.samples
@@ -274,20 +299,20 @@ final class SyncService: ObservableObject {
                 // were accepted are banked in the watermark, so the next sync
                 // resumes -- reporting a failure here would be misleading.
                 lastSyncSummary = "Upload interrupted — resuming next sync."
-                return uploadedSamples > 0 || uploadedWorkouts > 0
+                return (uploadedSamples > 0 || uploadedWorkouts > 0, false)
             } catch {
                 lastUploadError = readable(error)
                 lastSyncSummary = uploadedSamples > 0
                     ? "Uploaded \(uploadedSamples) of \(total) samples — the rest syncs next time."
                     : "Couldn't upload new Health data."
-                return uploadedSamples > 0 || uploadedWorkouts > 0
+                return (uploadedSamples > 0 || uploadedWorkouts > 0, false)
             }
         }
 
         lastSyncSummary = "Synced \(uploadedSamples) samples, \(uploadedWorkouts) workouts."
         lastUploadError = nil
         settings.lastSyncAt = Date()
-        return uploadedSamples > 0 || uploadedWorkouts > 0
+        return (uploadedSamples > 0 || uploadedWorkouts > 0, true)
     }
 
     private enum HealthPayloadResult {
@@ -317,18 +342,20 @@ final class SyncService: ObservableObject {
     }
 
     /// A 401 signs the user out through `.apiUnauthorized` (see `AppSettings`).
+    /// Returns whether Today loaded for `run`.
     private func refreshTodayFromServer(
         _ settings: AppSettings,
         keepPreliminaryOnFailure: Bool,
         run: Int
-    ) async {
+    ) async -> Bool {
         let loaded = await refreshTodayIfOwned(settings, run: run)
-        guard owns(run, settings) else { return }
+        guard owns(run, settings) else { return false }
         if loaded {
             didRefresh(settings)
         } else if !keepPreliminaryOnFailure || today == nil {
             errorMessage = store.today.error
         }
+        return loaded
     }
 
     private func applyHealthReadFailure(_ error: Error) {

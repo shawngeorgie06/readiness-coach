@@ -1,6 +1,8 @@
 import SwiftUI
 
-/// The decision, why, and what to do about it. Everything else is one tap away.
+/// The decision, why, and what to do about it: the readiness head, three pillar
+/// gauges, the plan and the vitals, open on the canvas. Everything else is one
+/// tap away.
 struct TodayView: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var sync: SyncService
@@ -14,6 +16,8 @@ struct TodayView: View {
     @State private var pillarInfo: PillarInfo?
     @State private var healthStatus: HealthKitService.AccessStatus?
     @State private var healthRequestError: String?
+    @State private var refreshCount = 0
+    @State private var pillarJumps = 0
 
     private let health = HealthKitService()
 
@@ -36,17 +40,13 @@ struct TodayView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    Text(Date().formatted(.dateTime.weekday(.wide).month(.wide).day()))
-                        .font(.subheadline)
-                        .foregroundStyle(Palette.textSecondary)
-
+                VStack(alignment: .leading, spacing: Space.section) {
                     StatusLine(items: statusItems, onHealthAction: healthAction)
 
                     if let today = sync.today {
                         content(today)
                     } else if sync.isSyncing {
-                        loading
+                        TodaySkeleton()
                     } else {
                         ContentUnavailableCompat(
                             title: "No readiness yet",
@@ -59,27 +59,40 @@ struct TodayView: View {
                     if sync.today == nil {
                         Button { showHistory = true } label: {
                             Label("Readiness history", systemImage: "chart.bar")
-                                .frame(maxWidth: .infinity, minHeight: 44)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Palette.accent)
+                                .frame(maxWidth: .infinity, minHeight: Space.target)
                         }
-                        .buttonStyle(.bordered)
                     }
 
                     if let error = sync.todayError {
-                        ErrorCard(message: error) { Task { await sync.syncNow(settings) } }
+                        InlineNotice(
+                            title: "Couldn't refresh",
+                            message: error,
+                            actionTitle: "Retry",
+                            action: { Task { await refresh() } }
+                        )
                     }
 
                     syncDetail
                 }
-                .padding(.horizontal)
-                .padding(.bottom, 8)
+                .padding(.horizontal, Space.margin)
+                .padding(.top, 8)
+                .padding(.bottom, 16)
             }
-            .refreshable { await sync.syncNow(settings) }
+            .refreshable { await refresh() }
             .screenBackground()
             .navigationTitle("Today")
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text(Date().formatted(.dateTime.weekday(.wide).month(.wide).day()))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Palette.textPrimary)
+                        .accessibilityAddTraits(.isHeader)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        Task { await sync.syncNow(settings) }
+                        Task { await refresh() }
                     } label: {
                         if sync.isSyncing {
                             ProgressView()
@@ -99,15 +112,18 @@ struct TodayView: View {
                             .foregroundStyle(Palette.canvas)
                             .frame(width: 30, height: 30)
                             .background(Palette.accent, in: Circle())
+                            .frame(minWidth: Space.target, minHeight: Space.target)
                     }
                     .accessibilityLabel("Profile and settings")
                 }
             }
             .safeAreaInset(edge: .bottom) {
                 if sync.today != nil {
-                    askButton
+                    AskBar { showAsk = true }
                 }
             }
+            .sensoryFeedback(.success, trigger: refreshCount)
+            .sensoryFeedback(.selection, trigger: pillarJumps)
             .navigationDestination(isPresented: $showHistory) { TrendsView() }
             .sheet(isPresented: $showAsk) {
                 if let today = sync.today { AskCoachView(today: today) }
@@ -135,13 +151,22 @@ struct TodayView: View {
         }
     }
 
+    /// A user-started refresh (pull, toolbar, retry) buzzes only when it fully
+    /// succeeded. Background and foreground syncs don't buzz.
+    private func refresh() async {
+        if await sync.syncNow(settings) == .succeeded { refreshCount += 1 }
+    }
+
     @ViewBuilder
     private func content(_ today: TodayDTO) -> some View {
         DecisionBlock(today: today) { showHistory = true }
 
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Eyebrow(text: "What's driving it")
+                Text("Score breakdown")
+                    .font(Typeface.sectionTitle)
+                    .foregroundStyle(Palette.textPrimary)
+                    .accessibilityAddTraits(.isHeader)
                 Spacer()
                 Menu {
                     ForEach(Pillar.allCases) { pillar in
@@ -156,79 +181,27 @@ struct TodayView: View {
                     if typeSize.isAccessibilitySize {
                         Image(systemName: "info.circle")
                             .font(.body)
-                            .frame(minWidth: 44, minHeight: 44)
+                            .frame(minWidth: Space.target, minHeight: Space.target)
                     } else {
-                        Label("Details", systemImage: "info.circle")
+                        Label("Drivers", systemImage: "info.circle")
                             .font(.subheadline)
-                            .frame(minHeight: 44)
+                            .frame(minHeight: Space.target)
                     }
                 }
+                .foregroundStyle(Palette.textSecondary)
                 .accessibilityLabel("All scoring drivers")
             }
-            PillarBreakdown(pillars: today.pillars) { pillar in
+            PillarGaugeRow(pillars: today.pillars) { pillar in
+                pillarJumps += 1
                 tabs.go(to: AppTab(pillar))
             }
         }
 
-        advisor(today.advisor)
-    }
+        TodayPlanSection(note: today.advisor)
 
-    private var loading: some View {
-        HStack(spacing: 10) {
-            ProgressView()
-            Text("Loading today…")
-                .font(.subheadline)
-                .foregroundStyle(Palette.textSecondary)
+        if let vitals = MetricComparison.all(from: today.baselines) {
+            VitalsSection(comparisons: vitals)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 60)
-    }
-
-    private func advisor(_ note: AdvisorNote) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Eyebrow(text: "Coach")
-            VStack(alignment: .leading, spacing: 14) {
-                Text(note.prescription)
-                    .font(.body.weight(.medium))
-                    .foregroundStyle(Palette.textPrimary)
-                    .fixedSize(horizontal: false, vertical: true)
-                if !note.why.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(note.why, id: \.self) { line in
-                            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                Circle()
-                                    .fill(Palette.textTertiary)
-                                    .frame(width: 4, height: 4)
-                                    .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
-                                Text(line)
-                                    .font(.footnote)
-                                    .foregroundStyle(Palette.textSecondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
-                    }
-                }
-                Text("If ignored: \(note.ifIgnored)")
-                    .font(.footnote)
-                    .foregroundStyle(Palette.textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .card()
-        }
-    }
-
-    private var askButton: some View {
-        Button { showAsk = true } label: {
-            Label("Ask the coach", systemImage: "bubble.left.and.text.bubble.right")
-                .font(.body.weight(.semibold))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 6)
-        }
-        .primaryAction()
-        .padding(.horizontal)
-        .padding(.vertical, 10)
-        .background(Palette.canvas.opacity(0.92))
     }
 
     @ViewBuilder
