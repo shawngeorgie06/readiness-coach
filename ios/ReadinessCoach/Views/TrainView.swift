@@ -174,7 +174,7 @@ struct TrainView: View {
             OpenSection("Compared with normal") {
                 if let row = MetricComparison.all(from: today.baselines)?.first(where: { $0.metric == .load7d }), row.today != nil {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(TrainLoadCopy.dailyAverageNote)
+                        Text(TrainLoadCopy.dailyAverageNote(scoreDate: today.date))
                             .font(.footnote)
                             .foregroundStyle(Palette.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)

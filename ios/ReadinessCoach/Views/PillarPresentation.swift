@@ -187,10 +187,24 @@ struct TrainDay: Identifiable, Equatable {
     var isRest: Bool { sessions == 0 }
 }
 
-/// Train's "Compared with normal" row is a daily average; the head's figure
-/// is a 7-day total, so the row says which it is.
+/// Train's "Compared with normal" row is the server's daily average for the
+/// 7 days before the score date against the 28 days before it; the head's
+/// figure is a 7-day total that includes today, so the row names its window.
 enum TrainLoadCopy {
-    static let dailyAverageNote = "Average strain per day over the last 7 days, against your 28-day daily average. This isn't the 7-day total."
+    static func dailyAverageNote(scoreDate: String, calendar: Calendar = .current) -> String {
+        guard let score = ChartDate.parse(scoreDate, timeZone: calendar.timeZone),
+              let first = calendar.date(byAdding: .day, value: -7, to: score),
+              let last = calendar.date(byAdding: .day, value: -1, to: score)
+        else {
+            return "Average strain per day for the 7 days before your score's date, against your daily average for the 28 days before it. This isn't the 7-day total."
+        }
+        var dayStyle = Date.FormatStyle.dateTime.month(.abbreviated).day()
+        dayStyle.timeZone = calendar.timeZone
+        var rangeStyle = Date.IntervalFormatStyle.interval.month(.abbreviated).day()
+        rangeStyle.timeZone = calendar.timeZone
+        let day = score.formatted(dayStyle)
+        return "Average strain per day for \((first..<last).formatted(rangeStyle)), the 7 days before your \(day) score, against your daily average for the 28 days before it. Workouts on \(day) aren't counted, and this isn't the 7-day total."
+    }
 }
 
 /// Workouts under one day label, newest first.

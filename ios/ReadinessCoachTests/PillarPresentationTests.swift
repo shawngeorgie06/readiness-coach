@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 @testable import ReadinessCoach
 
 /// Presentation models behind the Recovery, Sleep and Train tabs. Fixtures are
@@ -290,9 +291,55 @@ final class PillarPresentationTests: XCTestCase {
         XCTAssertFalse(note.localizedCaseInsensitiveContains("reserve"))
     }
 
-    func testTrainLoadRowIsLabelledADailyAverage() {
-        XCTAssertTrue(TrainLoadCopy.dailyAverageNote.contains("per day"))
-        XCTAssertTrue(TrainLoadCopy.dailyAverageNote.contains("28-day daily average"))
+    /// The server averages the 7 days before the score date (todayService
+    /// strain28d.slice(-7)), not a window that includes it.
+    func testTrainLoadRowNamesTheServerWindowBeforeTheScoreDate() {
+        let note = TrainLoadCopy.dailyAverageNote(scoreDate: "2026-10-24", calendar: utcCalendar())
+        XCTAssertTrue(note.hasPrefix("Average strain per day for Oct 17"), note)
+        XCTAssertTrue(note.contains("23, the 7 days before your Oct 24 score"), note)
+        XCTAssertTrue(note.contains("daily average for the 28 days before it"), note)
+        XCTAssertTrue(note.contains("Workouts on Oct 24 aren't counted"), note)
+        XCTAssertTrue(note.hasSuffix("this isn't the 7-day total."), note)
+        XCTAssertFalse(note.contains("last 7 days"), note)
+
+        let crossing = TrainLoadCopy.dailyAverageNote(scoreDate: "2026-11-03", calendar: utcCalendar())
+        XCTAssertTrue(crossing.contains("Oct 27"), crossing)
+        XCTAssertTrue(crossing.contains("Nov 2"), crossing)
+
+        let unparsed = TrainLoadCopy.dailyAverageNote(scoreDate: "bad", calendar: utcCalendar())
+        XCTAssertTrue(unparsed.contains("7 days before your score's date"))
+    }
+
+    // MARK: Chart scrubbing
+
+    /// The page's vertical scroll waits only on the sideways pan; the hold
+    /// never takes the touch away from the page.
+    func testScrubRecognizersLeaveVerticalScrollToThePage() {
+        let coordinator = DayScrubRecognizer.Coordinator { _ in }
+        let chart = UIView()
+        coordinator.install(on: chart)
+        let page = UIScrollView()
+        page.addSubview(chart)
+        let scroll = page.panGestureRecognizer
+
+        XCTAssertEqual(Set(chart.gestureRecognizers?.map(ObjectIdentifier.init) ?? []),
+                       Set([coordinator.tap, coordinator.hold, coordinator.pan].map(ObjectIdentifier.init)))
+        XCTAssertTrue(coordinator.gestureRecognizer(coordinator.pan, shouldBeRequiredToFailBy: scroll))
+        XCTAssertFalse(coordinator.gestureRecognizer(coordinator.tap, shouldBeRequiredToFailBy: scroll))
+        XCTAssertFalse(coordinator.gestureRecognizer(coordinator.hold, shouldBeRequiredToFailBy: scroll))
+        XCTAssertTrue(coordinator.gestureRecognizer(coordinator.hold, shouldRecognizeSimultaneouslyWith: scroll))
+        XCTAssertTrue(coordinator.gestureRecognizer(coordinator.pan, shouldRecognizeSimultaneouslyWith: coordinator.hold))
+        XCTAssertFalse(coordinator.gestureRecognizer(coordinator.pan, shouldRecognizeSimultaneouslyWith: scroll))
+        XCTAssertEqual(coordinator.hold.minimumPressDuration, 0.25)
+    }
+
+    func testOnlyASidewaysMovementScrubs() {
+        XCTAssertTrue(ScrubIntent.isSideways(CGPoint(x: 12, y: 3)))
+        XCTAssertTrue(ScrubIntent.isSideways(CGPoint(x: -12, y: 3)))
+        XCTAssertFalse(ScrubIntent.isSideways(CGPoint(x: 0, y: -280)))
+        XCTAssertFalse(ScrubIntent.isSideways(CGPoint(x: 5, y: -280)))
+        XCTAssertFalse(ScrubIntent.isSideways(CGPoint(x: 10, y: 10)))
+        XCTAssertFalse(ScrubIntent.isSideways(.zero))
     }
 
     // MARK: Source guards
@@ -313,13 +360,14 @@ final class PillarPresentationTests: XCTestCase {
         XCTAssertFalse(source.localizedCaseInsensitiveContains("target"))
     }
 
-    /// A high-priority zero-distance drag swallowed vertical scrolls that began
-    /// on a chart. Scrubbing now starts with a tap or a touch and hold.
+    /// SwiftUI gestures on the chart swallowed vertical scrolls that began on
+    /// it, even sequenced behind a hold. Scrubbing now uses UIKit recognizers.
     func testDayScrubberLeavesVerticalScrollToThePage() throws {
         let source = try viewSource("ChartScrubber.swift")
         XCTAssertFalse(source.contains("highPriorityGesture"))
-        XCTAssertTrue(source.contains("LongPressGesture"))
-        XCTAssertTrue(source.contains("SpatialTapGesture"))
+        XCTAssertFalse(source.contains(".gesture("))
+        XCTAssertFalse(source.contains("DragGesture("))
+        XCTAssertTrue(source.contains("DayScrubRecognizer { select(at: $0) }"))
     }
 
     /// Each pillar tab surfaces today's score failures with a forced retry.
