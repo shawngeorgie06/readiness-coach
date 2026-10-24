@@ -235,7 +235,7 @@ struct TodayView: View {
                     healthStatus = await health.accessStatus()
                     await sync.syncNow(settings)
                 } catch {
-            healthRequestError = HealthAccessMessage(message: error.localizedDescription)
+                    healthRequestError = HealthAccessMessage(message: error.localizedDescription)
                 }
             }
         } else if let url = URL(string: "x-apple-health://") {

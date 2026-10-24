@@ -20,6 +20,7 @@ struct CoachQuestionField: UIViewRepresentable {
         view.textContainerInset = .zero
         view.textContainer.lineFragmentPadding = 0
         view.returnKeyType = .send
+        view.enablesReturnKeyAutomatically = true
         view.isScrollEnabled = false
         view.accessibilityLabel = "Your question for the coach"
         return view
@@ -28,7 +29,8 @@ struct CoachQuestionField: UIViewRepresentable {
     func updateUIView(_ view: UITextView, context: Context) {
         context.coordinator.parent = self
         if view.text != text { view.text = text }
-        view.font = .preferredFont(forTextStyle: .body)
+        let font = UIFont.preferredFont(forTextStyle: .body)
+        if view.font != font { view.font = font }
         if isFocused, !view.isFirstResponder, view.window != nil {
             view.becomeFirstResponder()
         } else if !isFocused, view.isFirstResponder {
@@ -55,8 +57,13 @@ struct CoachQuestionField: UIViewRepresentable {
             textView.invalidateIntrinsicContentSize()
         }
 
-        func textViewDidBeginEditing(_ textView: UITextView) { parent.isFocused = true }
-        func textViewDidEndEditing(_ textView: UITextView) { parent.isFocused = false }
+        func textViewDidBeginEditing(_ textView: UITextView) {
+            if !parent.isFocused { parent.isFocused = true }
+        }
+
+        func textViewDidEndEditing(_ textView: UITextView) {
+            if parent.isFocused { parent.isFocused = false }
+        }
 
         func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
             guard text == "\n", textView.markedTextRange == nil else { return true }
