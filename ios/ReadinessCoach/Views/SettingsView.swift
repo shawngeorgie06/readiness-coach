@@ -17,154 +17,35 @@ struct SettingsView: View {
     private let health = HealthKitService()
 
     var body: some View {
-        Form {
-            Section("Account") {
-                if settings.isSignedIn {
-                    LabeledContent("Signed in", value: settings.appleDisplayName ?? "Apple ID")
-                    Button("Sign out", role: .destructive) {
-                        settings.signOut()
-                        StoreActivation.reset(store)
+        ScrollView {
+            VStack(alignment: .leading, spacing: Space.section) {
+                accountSection
+                syncSection
+                healthSection
+                notificationSection
+                connectionSection
+                OpenSection("About") {
+                    SettingsRow {
+                        Text("Version").foregroundStyle(Palette.textSecondary)
+                        Spacer(minLength: 8)
+                        Text(AppBuild.label).monospacedDigit()
                     }
-                } else if settings.isConfigured {
-                    Label("Connected via API token", systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                    LabeledContent("User ID", value: settings.userId)
-                        .font(.caption)
-                } else {
-                    Text("Not connected")
-                        .foregroundStyle(.secondary)
+                    .accessibilityElement(children: .combine)
                 }
+                privacySection
             }
-
-            Section {
-                DisclosureGroup("Connection") {
-                    LabeledField(label: "API URL", text: $settings.apiBaseURL, keyboard: .default)
-                    LabeledField(label: "API token", text: $settings.apiToken, secure: true)
-                    LabeledField(label: "User ID", text: $settings.userId)
-                }
-            }
-
-            Section("Sync") {
-                Button {
-                    Task { await sync.syncNow(settings) }
-                } label: {
-                    HStack {
-                        Text("Sync now")
-                        Spacer()
-                        if sync.isSyncing { ProgressView() }
-                    }
-                }
-                .disabled(sync.isSyncing)
-
-                if let last = settings.lastSyncAt {
-                    // This is the resume point, not the last attempt: after a
-                    // partial upload it sits at the oldest data still pending.
-                    LabeledContent("Health synced through", value: last.formatted(date: .abbreviated, time: .shortened))
-                }
-                if let summary = sync.lastSyncSummary {
-                    Text(summary).font(.caption).foregroundStyle(.secondary)
-                }
-                if let uploadError = sync.lastUploadError {
-                    Text(SyncFreshness.detailLine(.fresh, settings: settings, summary: nil, uploadError: uploadError) ?? uploadError)
-                        .font(.caption)
-                        .foregroundStyle(Palette.warn)
-                }
-            }
-
-            Section("Health") {
-                switch healthStatus {
-                case .connected:
-                    Label("Health permission request completed", systemImage: "heart.text.square")
-                        .foregroundStyle(Palette.textSecondary)
-                    Text("iOS does not tell apps whether read access was granted or denied. If data is missing, check your Health permissions.")
-                        .font(.caption).foregroundStyle(Palette.textSecondary)
-                case .needsPermission, .none:
-                    Button {
-                        Task { await requestHealth() }
-                    } label: {
-                        HStack {
-                            Image(systemName: "heart.text.square")
-                            Text("Allow Health access")
-                            Spacer()
-                            if isRequestingHealth { ProgressView() }
-                        }
-                    }
-                    .disabled(isRequestingHealth)
-                case .unavailable:
-                    Text("Health data is not available on this device.")
-                        .foregroundStyle(.secondary)
-                }
-                if let summary = sync.lastSyncSummary, summary.hasPrefix("Couldn't read Health") {
-                    Text(summary)
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                }
-                Text("Reads heart rate, resting HR, HRV, sleep, and workouts. Never writes to Health. Manage permissions in iOS Settings → Health → Data Access & Devices.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-
-            Section("Daily readiness") {
-                Toggle("Morning notification", isOn: Binding(
-                    get: { settings.notificationsEnabled },
-                    set: { isOn in
-                        if isOn {
-                            Task {
-                                let granted = await notifications.requestAuthorization()
-                                if granted {
-                                    settings.notificationsEnabled = true
-                                    notificationDenied = false
-                                    notifications.refreshDailySchedule(settings: settings, latest: sync.today)
-                                } else {
-                                    settings.notificationsEnabled = false
-                                    notificationDenied = true
-                                }
-                            }
-                        } else {
-                            settings.notificationsEnabled = false
-                            notificationDenied = false
-                            notifications.cancelDaily()
-                        }
-                    }
-                ))
-
-                if settings.notificationsEnabled {
-                    DatePicker("Time", selection: notificationTime, displayedComponents: .hourAndMinute)
-                }
-
-                if notificationDenied {
-                    Text("Turn on notifications for Readiness Coach in iOS Settings to use this.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-
-                Text("Delivered daily at your chosen time. Shows your latest synced score — open the app for today's fresh number.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-
-            Section("About") {
-                LabeledContent("Version", value: AppBuild.label)
-            }
-
-            Section("Data & privacy") {
-                Button("Delete local settings", role: .destructive) {
-                    showResetConfirm = true
-                }
-                Button("Delete account data", role: .destructive) {
-                    showDeleteAccountConfirm = true
-                }
-                Text("Account deletion permanently erases your user and all synced health samples, workouts, scores, and advisor notes on the server.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            if let actionMessage {
-                Section { Text(actionMessage).font(.footnote) }
-            }
+            .padding(.horizontal, Space.margin)
+            .padding(.top, 8)
+            .padding(.bottom, 24)
         }
         .navigationTitle("Settings")
         .screenBackground()
         .task { await refreshHealthStatus() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await refreshHealthStatus() } }
+        }
+        .onChange(of: actionMessage) { _, message in
+            if let message { AccessibilityNotification.Announcement(message).post() }
         }
         .confirmationDialog(
             "Delete all account data on the server? This cannot be undone.",
@@ -188,6 +69,317 @@ struct SettingsView: View {
                 actionMessage = "Local settings cleared."
             }
             Button("Cancel", role: .cancel) {}
+        }
+    }
+
+    // MARK: Account
+
+    private var accountSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle().fill(Palette.surfaceHi)
+                    if let initials = Self.initials(settings.isSignedIn ? settings.appleDisplayName : nil) {
+                        Text(initials)
+                            .font(.headline.weight(.bold))
+                            .foregroundStyle(Palette.textPrimary)
+                    } else {
+                        Image(systemName: settings.isConfigured ? "person.fill" : "person.slash")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(Palette.textSecondary)
+                    }
+                }
+                .frame(width: 52, height: 52)
+                .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(accountTitle)
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(Palette.textPrimary)
+                    HStack(spacing: 6) {
+                        if settings.isSignedIn || settings.isConfigured {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(Palette.success)
+                                .accessibilityHidden(true)
+                        }
+                        Text(accountStatus)
+                            .foregroundStyle(Palette.textSecondary)
+                    }
+                    .font(.subheadline)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .accessibilityElement(children: .combine)
+
+            if settings.isSignedIn {
+                Hairline()
+                Button(role: .destructive) {
+                    settings.signOut()
+                    StoreActivation.reset(store)
+                } label: {
+                    SettingsRow {
+                        Text("Sign out")
+                            .fontWeight(.semibold)
+                            .foregroundStyle(Palette.danger)
+                    }
+                }
+                .buttonStyle(.plain)
+            } else if settings.isConfigured {
+                Hairline()
+                SettingsRow {
+                    Text("User ID").foregroundStyle(Palette.textSecondary)
+                    Spacer(minLength: 8)
+                    Text(settings.userId)
+                        .font(.footnote.monospaced())
+                        .foregroundStyle(Palette.textPrimary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
+    }
+
+    private var accountTitle: String {
+        if settings.isSignedIn { return settings.appleDisplayName ?? "Apple ID" }
+        return settings.isConfigured ? "Connected" : "Not connected"
+    }
+
+    private var accountStatus: String {
+        if settings.isSignedIn { return "Signed in" }
+        return settings.isConfigured ? "Via API token" : "Add your API URL and token under Connection."
+    }
+
+    /// Up to two initials from a display name; nil when there's no name.
+    static func initials(_ name: String?) -> String? {
+        guard let name else { return nil }
+        let letters = name.split(whereSeparator: \.isWhitespace).prefix(2).compactMap(\.first)
+        return letters.isEmpty ? nil : String(letters).uppercased()
+    }
+
+    // MARK: Sync
+
+    private var syncSection: some View {
+        OpenSection("Sync") {
+            VStack(alignment: .leading, spacing: 0) {
+                Button {
+                    Task { await sync.syncNow(settings) }
+                } label: {
+                    SettingsRow {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .foregroundStyle(Palette.accent)
+                            .accessibilityHidden(true)
+                        Text(sync.isSyncing ? "Syncing…" : "Sync now")
+                            .foregroundStyle(Palette.textPrimary)
+                        Spacer(minLength: 8)
+                        if sync.isSyncing { ProgressView() }
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(sync.isSyncing)
+
+                if let last = settings.lastSyncAt {
+                    // This is the resume point, not the last attempt: after a
+                    // partial upload it sits at the oldest data still pending.
+                    Hairline()
+                    SettingsRow {
+                        Text("Health synced through").foregroundStyle(Palette.textSecondary)
+                        Spacer(minLength: 8)
+                        Text(last.formatted(date: .abbreviated, time: .shortened))
+                            .multilineTextAlignment(.trailing)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+                if let summary = sync.lastSyncSummary {
+                    Text(summary)
+                        .font(.footnote)
+                        .foregroundStyle(Palette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 6)
+                }
+                if let uploadError = sync.lastUploadError {
+                    Label(SyncFreshness.detailLine(.fresh, settings: settings, summary: nil, uploadError: uploadError) ?? uploadError,
+                          systemImage: "exclamationmark.triangle")
+                        .font(.footnote)
+                        .foregroundStyle(Palette.warn)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 6)
+                }
+            }
+        }
+    }
+
+    // MARK: Health
+
+    private var healthSection: some View {
+        OpenSection("Health") {
+            VStack(alignment: .leading, spacing: 8) {
+                switch healthStatus {
+                case .connected:
+                    SettingsRow {
+                        Image(systemName: "heart.text.square")
+                            .foregroundStyle(Palette.recovery)
+                            .accessibilityHidden(true)
+                        Text("Health permission request completed")
+                            .foregroundStyle(Palette.textPrimary)
+                    }
+                    Text("iOS does not tell apps whether read access was granted or denied. If data is missing, check your Health permissions.")
+                        .font(.footnote)
+                        .foregroundStyle(Palette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                case .needsPermission, .none:
+                    Button {
+                        Task { await requestHealth() }
+                    } label: {
+                        SettingsRow {
+                            Image(systemName: "heart.text.square")
+                                .foregroundStyle(Palette.accent)
+                                .accessibilityHidden(true)
+                            Text("Allow Health access")
+                                .foregroundStyle(Palette.textPrimary)
+                            Spacer(minLength: 8)
+                            if isRequestingHealth { ProgressView() }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isRequestingHealth)
+                case .unavailable:
+                    Text("Health data is not available on this device.")
+                        .font(.subheadline)
+                        .foregroundStyle(Palette.textSecondary)
+                        .frame(minHeight: Space.target, alignment: .leading)
+                }
+                if let summary = sync.lastSyncSummary, summary.hasPrefix("Couldn't read Health") {
+                    Label(summary, systemImage: "exclamationmark.triangle")
+                        .font(.footnote)
+                        .foregroundStyle(Palette.warn)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Text("Reads heart rate, resting HR, HRV, sleep, and workouts. Never writes to Health. Manage permissions in iOS Settings → Health → Data Access & Devices.")
+                    .font(.footnote)
+                    .foregroundStyle(Palette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    // MARK: Notifications
+
+    private var notificationSection: some View {
+        OpenSection("Daily readiness") {
+            VStack(alignment: .leading, spacing: 0) {
+                Toggle("Morning notification", isOn: Binding(
+                    get: { settings.notificationsEnabled },
+                    set: { isOn in
+                        if isOn {
+                            Task {
+                                let granted = await notifications.requestAuthorization()
+                                if granted {
+                                    settings.notificationsEnabled = true
+                                    notificationDenied = false
+                                    notifications.refreshDailySchedule(settings: settings, latest: sync.today)
+                                } else {
+                                    settings.notificationsEnabled = false
+                                    notificationDenied = true
+                                }
+                            }
+                        } else {
+                            settings.notificationsEnabled = false
+                            notificationDenied = false
+                            notifications.cancelDaily()
+                        }
+                    }
+                ))
+                .tint(Palette.accent)
+                .frame(minHeight: Space.target)
+
+                if settings.notificationsEnabled {
+                    Hairline()
+                    DatePicker("Time", selection: notificationTime, displayedComponents: .hourAndMinute)
+                        .frame(minHeight: Space.target)
+                }
+
+                if notificationDenied {
+                    Label("Turn on notifications for Readiness Coach in iOS Settings to use this.",
+                          systemImage: "bell.slash")
+                        .font(.footnote)
+                        .foregroundStyle(Palette.warn)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 6)
+                }
+
+                Text("Delivered daily at your chosen time. Shows your latest synced score — open the app for today's fresh number.")
+                    .font(.footnote)
+                    .foregroundStyle(Palette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 6)
+            }
+        }
+    }
+
+    // MARK: Connection
+
+    private var connectionSection: some View {
+        OpenSection("Connection") {
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: 12) {
+                    LabeledField(label: "API URL", text: $settings.apiBaseURL, keyboard: .default)
+                    LabeledField(label: "API token", text: $settings.apiToken, secure: true)
+                    LabeledField(label: "User ID", text: $settings.userId)
+                }
+                .padding(.top, 8)
+            } label: {
+                Text("API URL, token and user ID")
+                    .font(.subheadline)
+                    .foregroundStyle(Palette.textSecondary)
+                    .frame(minHeight: Space.target, alignment: .leading)
+            }
+            .tint(Palette.textSecondary)
+        }
+    }
+
+    // MARK: Data & privacy
+
+    private var privacySection: some View {
+        OpenSection("Data & privacy") {
+            VStack(alignment: .leading, spacing: 0) {
+                Button(role: .destructive) {
+                    showResetConfirm = true
+                } label: {
+                    SettingsRow {
+                        Text("Delete local settings").foregroundStyle(Palette.danger)
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(isDeleting)
+                Hairline()
+                Button(role: .destructive) {
+                    showDeleteAccountConfirm = true
+                } label: {
+                    SettingsRow {
+                        Text(isDeleting ? "Deleting account data…" : "Delete account data")
+                            .foregroundStyle(Palette.danger)
+                        Spacer(minLength: 8)
+                        if isDeleting { ProgressView() }
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(isDeleting)
+                Text("Account deletion permanently erases your user and all synced health samples, workouts, scores, and advisor notes on the server.")
+                    .font(.footnote)
+                    .foregroundStyle(Palette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 6)
+                if let actionMessage {
+                    Label(actionMessage, systemImage: "info.circle")
+                        .font(.footnote)
+                        .foregroundStyle(Palette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 10)
+                }
+            }
         }
     }
 
@@ -244,6 +436,19 @@ struct SettingsView: View {
     }
 }
 
+/// One settings line: at least 44pt tall, content laid out horizontally.
+struct SettingsRow<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        HStack(spacing: 12) { content() }
+            .font(.body)
+            .frame(maxWidth: .infinity, minHeight: Space.target, alignment: .leading)
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+    }
+}
+
 struct LabeledField: View {
     let label: String
     @Binding var text: String
@@ -258,7 +463,10 @@ struct LabeledField: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(label).font(.caption).foregroundStyle(.secondary)
+            Text(label)
+                .font(.footnote)
+                .foregroundStyle(Palette.textSecondary)
+                .accessibilityHidden(true)
             HStack(spacing: 8) {
                 Group {
                     if secure && !revealed {
@@ -272,18 +480,24 @@ struct LabeledField: View {
                 .autocorrectionDisabled()
                 .textContentType(.none)
                 .font(secure || keyboard == .URL ? .body.monospaced() : .body)
+                .foregroundStyle(Palette.textPrimary)
+                .accessibilityLabel(label)
 
                 if secure {
                     Button {
                         revealed.toggle()
                     } label: {
                         Image(systemName: revealed ? "eye.slash" : "eye")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Palette.textSecondary)
+                            .frame(minWidth: Space.target, minHeight: Space.target)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(revealed ? "Hide \(label)" : "Show \(label)")
                 }
             }
+            .frame(minHeight: Space.target)
+            Hairline()
         }
     }
 }
