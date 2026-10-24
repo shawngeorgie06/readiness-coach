@@ -89,6 +89,12 @@ struct AskCoachView: View {
                 .focused($questionFocused)
                 .submitLabel(.send)
                 .onSubmit(submit)
+                .onChange(of: question) { previous, updated in
+                    if Self.isKeyboardSubmission(previous: previous, updated: updated) {
+                        question = previous
+                        submit()
+                    }
+                }
                 .font(.body)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
@@ -165,6 +171,10 @@ struct AskCoachView: View {
 
     // MARK: Actions
 
+    static func isKeyboardSubmission(previous: String, updated: String) -> Bool {
+        updated == previous + "\n"
+    }
+
     private func submit() {
         let text = trimmedQuestion
         guard !text.isEmpty, !isAsking else { return }
@@ -179,19 +189,19 @@ struct AskCoachView: View {
 
     private func start(_ text: String) {
         askedQuestion = text
+        isAsking = true
+        error = nil
+        answer = nil
         askTask = Task { await ask(text) }
     }
 
     private func ask(_ text: String) async {
+        defer { isAsking = false }
         guard let client = settings.makeClient() else {
             answer = nil
             error = APIError.notConfigured.localizedDescription
             return
         }
-        isAsking = true
-        error = nil
-        answer = nil
-        defer { isAsking = false }
         do {
             let response = try await client.ask(question: text, date: context.date)
             guard !Task.isCancelled else { return }

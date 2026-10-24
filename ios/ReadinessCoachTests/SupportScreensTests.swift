@@ -54,6 +54,13 @@ final class SupportScreensTests: XCTestCase {
         XCTAssertEqual(displayed.decision, .push)
     }
 
+    func testKeyboardSendSubmitsButPastedParagraphsStayEditable() {
+        XCTAssertTrue(AskCoachView.isKeyboardSubmission(previous: "How should I train?", updated: "How should I train?\n"))
+        XCTAssertFalse(AskCoachView.isKeyboardSubmission(previous: "", updated: "First question\nMore context\n"))
+        XCTAssertFalse(AskCoachView.isKeyboardSubmission(previous: "First", updated: "First\nSecond"))
+        XCTAssertFalse(AskCoachView.isKeyboardSubmission(previous: "How", updated: "How should I train?"))
+    }
+
     func testPillarSheetKeepsTheTodayCallSiteAPI() {
         let info = PillarInfo(name: "Sleep", weight: "35%", description: Pillar.sleep.summary,
                               pillar: PillarScore(score: 72, drivers: [Driver(text: "7h 40m asleep", detail: nil)]))
