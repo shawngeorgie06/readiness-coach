@@ -17,7 +17,8 @@ historyRouter.get("/", async (req, res) => {
   if (days == null) return res.status(400).json({ error: "invalid_days" });
   try {
     const date = typeof req.query.date === "string" ? req.query.date : defaultRequestedDate();
-    return res.json(await getReadinessHistory(userId, days, date));
+    const tz = typeof req.query.tz === "string" && Number.isFinite(Number(req.query.tz)) ? Number(req.query.tz) : 0;
+    return res.json(await getReadinessHistory(userId, days, date, tz));
   } catch (error) {
     if (error instanceof UserNotFoundError) return res.status(404).json({ error: "user_not_found" });
     if (error instanceof Error && error.message === "date must be YYYY-MM-DD") {

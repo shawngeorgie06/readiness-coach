@@ -544,6 +544,7 @@ export async function getReadinessHistory(
   userId: string,
   days: number,
   requestedDate = defaultRequestedDate(),
+  tzOffsetMinutes = 0,
 ): Promise<{ days: number; data: ReadinessHistoryPoint[] }> {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (user == null) throw new UserNotFoundError(userId);
@@ -576,7 +577,7 @@ export async function getReadinessHistory(
     const iso = day.toISOString().slice(0, 10);
     let row = stored.get(iso);
     if (row == null) {
-      await computeScore(userId, iso);
+      await computeScore(userId, iso, tzOffsetMinutes);
       row = (await prisma.dailyScore.findUnique({ where: { userId_date: { userId, date: day } } })) ?? undefined;
     }
     if (row != null) {
