@@ -299,7 +299,9 @@ struct APIClient {
     private func withTransportRetry<R>(_ work: () async throws -> R) async throws -> R {
         do {
             return try await work()
-        } catch APIError.transport {
+        } catch let APIError.transport(error) {
+            // A cancelled load (tab switch, refresh superseded) must not fire a second request.
+            if Task.isCancelled || (error as? URLError)?.code == .cancelled || error is CancellationError { throw APIError.transport(error) }
             return try await work()
         }
     }

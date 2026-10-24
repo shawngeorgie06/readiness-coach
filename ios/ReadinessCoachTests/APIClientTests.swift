@@ -120,6 +120,18 @@ final class APIClientTests: XCTestCase {
         XCTAssertLessThan(Date().timeIntervalSince(start), 0.5)
     }
 
+    func testCancelledRequestIsNotRetried() async {
+        StubURLProtocol.reset { _ in throw URLError(.cancelled) }
+        do {
+            _ = try await client().today(etag: nil)
+            XCTFail("expected throw")
+        } catch APIError.transport {
+        } catch {
+            XCTFail("unexpected \(error)")
+        }
+        XCTAssertEqual(StubURLProtocol.requests.count, 1)
+    }
+
     func testHttpErrorIsNotRetried() async {
         StubURLProtocol.reset { [self] req in (response(req, 500), Data()) }
         do {
