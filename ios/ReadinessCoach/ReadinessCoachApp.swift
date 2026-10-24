@@ -15,6 +15,10 @@ enum AppLaunch {
 
 @main
 struct ReadinessCoachApp: App {
+    init() {
+        if !AppLaunch.isUnitTestHost { PerfSignpost.beginLaunch() }
+    }
+
     var body: some Scene {
         WindowGroup {
             if AppLaunch.isUnitTestHost {

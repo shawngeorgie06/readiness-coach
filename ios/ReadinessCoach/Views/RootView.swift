@@ -95,6 +95,15 @@ enum AppTab: Int, CaseIterable, Identifiable {
         }
     }
 
+    var perfName: String {
+        switch self {
+        case .today: return "today"
+        case .recovery: return "recovery"
+        case .sleep: return "sleep"
+        case .train: return "train"
+        }
+    }
+
     init(_ pillar: Pillar) {
         switch pillar {
         case .recovery: self = .recovery
@@ -105,7 +114,12 @@ enum AppTab: Int, CaseIterable, Identifiable {
 }
 
 final class TabRouter: ObservableObject {
-    @Published var selection: Int
+    @Published var selection: Int {
+        didSet {
+            guard selection != oldValue, let tab = AppTab(rawValue: selection) else { return }
+            PerfSignpost.beginTabSwitch(to: tab.perfName)
+        }
+    }
     init(initial: Int = 0) { selection = initial }
     func go(to tab: AppTab) { selection = tab.rawValue }
 }

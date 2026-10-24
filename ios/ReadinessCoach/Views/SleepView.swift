@@ -25,6 +25,9 @@ struct SleepView: View {
         ("Deep", Palette.lavender), ("REM", .purple), ("Core", .blue), ("Awake", Palette.warn),
     ]
 
+    /// True once real content (or an empty/error state) replaces the spinner.
+    private var perfContentReady: Bool { response != nil || error != nil }
+
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
@@ -58,6 +61,10 @@ struct SleepView: View {
             .screenBackground()
             .toolbar(.hidden, for: .navigationBar)
             .task { await load() }
+            .onAppear { if perfContentReady { PerfSignpost.endTabSwitchIfNeeded(tab: "sleep") } }
+            .onChange(of: perfContentReady) { _, ready in
+                if ready { PerfSignpost.endTabSwitchIfNeeded(tab: "sleep") }
+            }
             .refreshable { await load() }
             .onChange(of: rangeIndex) { _, _ in
                 selectedNightID = nil

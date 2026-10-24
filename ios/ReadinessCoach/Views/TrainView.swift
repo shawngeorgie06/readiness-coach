@@ -11,6 +11,9 @@ struct TrainView: View {
 
     private let filters = ["All", "Run", "Strength", "Recovery"]
 
+    /// True once real content (or an empty/error state) replaces the spinner.
+    private var perfContentReady: Bool { response != nil || error != nil }
+
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
@@ -41,6 +44,10 @@ struct TrainView: View {
             .toolbar(.hidden, for: .navigationBar)
             .sheet(item: $selectedWorkout) { WorkoutDetailSheet(workout: $0) }
             .task { await load() }
+            .onAppear { if perfContentReady { PerfSignpost.endTabSwitchIfNeeded(tab: "train") } }
+            .onChange(of: perfContentReady) { _, ready in
+                if ready { PerfSignpost.endTabSwitchIfNeeded(tab: "train") }
+            }
             .refreshable { await load() }
         }
     }

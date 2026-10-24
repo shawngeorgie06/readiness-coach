@@ -12,6 +12,9 @@ struct BodyView: View {
     @State private var pillars: Pillars?
     @State private var explain: MetricExplain?
 
+    /// True once real content (or an empty/error state) replaces the spinner.
+    private var perfContentReady: Bool { response != nil || error != nil }
+
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
@@ -65,6 +68,10 @@ struct BodyView: View {
                 .presentationDetents([.medium, .large])
             }
             .task { await load() }
+            .onAppear { if perfContentReady { PerfSignpost.endTabSwitchIfNeeded(tab: "recovery") } }
+            .onChange(of: perfContentReady) { _, ready in
+                if ready { PerfSignpost.endTabSwitchIfNeeded(tab: "recovery") }
+            }
             .refreshable { await load() }
         }
     }

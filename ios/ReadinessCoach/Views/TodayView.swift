@@ -28,6 +28,11 @@ struct TodayView: View {
         ))
     }
 
+    private func perfTodayContentShown() {
+        PerfSignpost.endLaunchIfNeeded()
+        PerfSignpost.endTabSwitchIfNeeded(tab: "today")
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -117,6 +122,10 @@ struct TodayView: View {
                 Text(healthRequestError ?? "")
             }
             .task { healthStatus = await health.accessStatus() }
+            .onAppear { if sync.today != nil { perfTodayContentShown() } }
+            .onChange(of: sync.today != nil) { _, hasToday in
+                if hasToday { perfTodayContentShown() }
+            }
             .onChange(of: scenePhase) { _, phase in
                 if phase == .active { Task { healthStatus = await health.accessStatus() } }
             }
