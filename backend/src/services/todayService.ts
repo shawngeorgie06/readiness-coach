@@ -3,6 +3,7 @@ import { rollingMean, stddev } from "../scoring/baselines.js";
 import { computeReadiness } from "../scoring/readiness.js";
 import type { PillarScore } from "../scoring/types.js";
 import { getAdvisorNote, type AdvisorNote } from "./advisorService.js";
+import { buildBaselines, type TodayBaselines } from "./todayBaselines.js";
 
 export interface TodayResponse {
   date: string;
@@ -22,6 +23,8 @@ export interface TodayResponse {
    *  client shows "Haven't slept yet" for the sleep tile in this state. */
   sleepPending: boolean;
   advisor: AdvisorNote;
+  /** Additive: 30-day normals, neutral bands and 14-day series for the Today comparison rows. */
+  baselines: TodayBaselines;
 }
 
 export interface SleepSample {
@@ -347,7 +350,7 @@ export async function computeScore(
         userId,
         type: "sleep_analysis",
         startAt: { lt: sleepWindow.end },
-        endAt: { gt: addDays(sleepWindow.start, -7) },
+        endAt: { gt: addDays(sleepWindow.start, -31) },
       },
       orderBy: { startAt: "asc" },
     }),
@@ -370,7 +373,10 @@ export async function computeScore(
     daysOfHistory(userId, targetStart),
   ]);
 
-  const summaries = sleepHistory(sleepSamples, targetStart, 8, tzOffsetMinutes);
+  // 31 nights: the scoring reads only the last 8 (unchanged); baselines use the
+  // prior 30 plus the last 14 for the series.
+  const allSummaries = sleepHistory(sleepSamples, targetStart, 31, tzOffsetMinutes);
+  const summaries = allSummaries.slice(-8);
   const lastNight = summaries.at(-1) ?? { durationHours: 0, restorativeHours: 0 };
 
   // "Haven't slept yet": if the requested night is still in progress (its window
@@ -411,6 +417,26 @@ export async function computeScore(
   const sevenDayAverage = average(strain7d, 0);
   const chronicAverage = average(strain28d, 0);
   const acuteChronicRatio = chronicAverage > 0 ? sevenDayAverage / chronicAverage : 1;
+
+  const dailyLatest = (samples: typeof hrvSamples): Array<number | null> =>
+    Array.from({ length: 14 }, (_, index) => {
+      const dayStart = addDays(targetStart, index - 13);
+      return latestInWindow(samples, dayStart, addDays(dayStart, 1)) ?? null;
+    });
+  const baselines = buildBaselines({
+    hrvToday: currentHrv ?? null,
+    hrvBaseline: hrvHistory.length > 0 ? hrvBaseline : null,
+    hrvDaily14: dailyLatest(hrvSamples),
+    rhrToday: currentRhr ?? null,
+    rhrBaseline: rhrHistory.length > 0 ? rhrBaseline : null,
+    rhrDaily14: dailyLatest(rhrSamples),
+    sleepToday: lastNight.durationHours > 0 ? lastNight.durationHours : null,
+    sleepPrior30: allSummaries.slice(0, -1).map((summary) => summary.durationHours),
+    sleepDaily14: allSummaries.slice(-14).map((summary) => (summary.durationHours > 0 ? summary.durationHours : null)),
+    load7dToday: sevenDayAverage,
+    load28dAvg: chronicAverage,
+    strain28d,
+  });
 
   const readiness = computeReadiness({
     sleep: {
@@ -487,6 +513,7 @@ export async function computeScore(
     confidence: missing.length === 0 ? "high" : "low",
     missing,
     sleepPending: false,
+    baselines,
   };
   return response;
 }

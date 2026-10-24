@@ -182,6 +182,21 @@ describe("backend API integration", () => {
     ).toBe(1);
   });
 
+  it("baselines agree with the recovery driver", async () => {
+    await request(app).post("/v1/sync").set("Authorization", authorization).send(syncPayload).expect(200);
+    const today = await request(app)
+      .get(`/v1/today?userId=${syncPayload.userId}&date=${date}`)
+      .set("Authorization", authorization)
+      .expect(200);
+
+    const driver = today.body.pillars.recovery.drivers.find(
+      (d: { detail: string }) => /30-day average of \d+ms/.test(d.detail),
+    );
+    const fromDriver = Number(/30-day average of (\d+)ms/.exec(driver.detail)![1]);
+    expect(Math.round(today.body.baselines.hrv.baseline30d)).toBe(fromDriver);
+    expect(today.body.baselines.hrv.recent14d).toHaveLength(14);
+  });
+
   it("returns private no-store, a weak ETag, and 304 on If-None-Match", async () => {
     await request(app)
       .post("/v1/sync")
