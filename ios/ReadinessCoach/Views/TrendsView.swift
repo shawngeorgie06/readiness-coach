@@ -642,7 +642,13 @@ struct HistoryScrubSurface: UIViewRepresentable {
 
         /// The hold never takes the touch away from the page or the pan.
         func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
-            recognizer === hold || other === hold
+            (recognizer === hold || other === hold) && recognizer !== tap && other !== tap
+        }
+
+        /// A tap waits for the hold to fail, so releasing a hold never opens
+        /// the day it marked. A short press fails the hold as it lifts.
+        func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldRequireFailureOf other: UIGestureRecognizer) -> Bool {
+            recognizer === tap && other === hold
         }
 
         /// The page's scroll waits for the pan to decline, so a vertical drag

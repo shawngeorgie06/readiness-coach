@@ -154,8 +154,7 @@ struct TodayView: View {
     /// A user-started refresh (pull, toolbar, retry) buzzes only when it fully
     /// succeeded. Background and foreground syncs don't buzz.
     private func refresh() async {
-        await sync.syncNow(settings)
-        if sync.lastSyncSucceeded { refreshCount += 1 }
+        if await sync.syncNow(settings) == .succeeded { refreshCount += 1 }
     }
 
     @ViewBuilder
@@ -248,14 +247,6 @@ struct TodayView: View {
         } else if let url = URL(string: "x-apple-health://") {
             openURL(url)
         }
-    }
-}
-
-extension SyncService {
-    /// Whether the last sync left nothing to warn about: Today refreshed, and
-    /// Health was read and uploaded.
-    var lastSyncSucceeded: Bool {
-        todayError == nil && !healthSyncFailed && !healthUploadFailed
     }
 }
 

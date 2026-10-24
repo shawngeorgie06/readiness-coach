@@ -143,4 +143,62 @@ final class HistoryScrubSurfaceTests: XCTestCase {
         XCTAssertFalse(c.gestureRecognizer(c.pan, shouldRecognizeSimultaneouslyWith: pagePan))
         XCTAssertFalse(c.gestureRecognizer(c.tap, shouldRecognizeSimultaneouslyWith: c.pan))
     }
+
+    func testTheHoldNeverSharesTheTouchWithTheTap() {
+        let c = surface(opensOnTap: true)
+
+        XCTAssertFalse(c.gestureRecognizer(c.hold, shouldRecognizeSimultaneouslyWith: c.tap))
+        XCTAssertFalse(c.gestureRecognizer(c.tap, shouldRecognizeSimultaneouslyWith: c.hold))
+    }
+
+    /// A press held past the hold's delay marks its day; lifting it must not
+    /// then land as a tap and open that day.
+    func testTheTapWaitsOnlyForTheHoldToFail() {
+        let c = surface(opensOnTap: true)
+        let pagePan = scroll.panGestureRecognizer
+
+        XCTAssertTrue(c.gestureRecognizer(c.tap, shouldRequireFailureOf: c.hold))
+        XCTAssertFalse(c.gestureRecognizer(c.hold, shouldRequireFailureOf: c.tap))
+        XCTAssertFalse(c.gestureRecognizer(c.tap, shouldRequireFailureOf: c.pan))
+        XCTAssertFalse(c.gestureRecognizer(c.tap, shouldRequireFailureOf: pagePan))
+        XCTAssertFalse(c.gestureRecognizer(c.hold, shouldRequireFailureOf: c.pan))
+        XCTAssertFalse(c.gestureRecognizer(c.hold, shouldRequireFailureOf: pagePan))
+        XCTAssertFalse(c.gestureRecognizer(c.pan, shouldRequireFailureOf: c.hold))
+        XCTAssertFalse(c.gestureRecognizer(c.pan, shouldRequireFailureOf: c.tap))
+    }
+
+    /// Every pairing of the surface's recognizers and the page scroll: which
+    /// may run together, and which waits on which. A hold cooperates with the
+    /// scrub and the page; a tap waits for the hold; the page waits for the
+    /// scrub; nothing else waits.
+    func testRecognizerPairings() {
+        let c = surface(opensOnTap: true)
+        let pagePan = scroll.panGestureRecognizer
+        let all: [(String, UIGestureRecognizer)] = [("tap", c.tap), ("hold", c.hold), ("pan", c.pan), ("page", pagePan)]
+        let together: Set<String> = ["hold+pan", "hold+page", "pan+hold", "page+hold"]
+        let waits: Set<String> = ["tap>hold"]
+        let waitedOnBy: Set<String> = ["pan<page"]
+
+        for (aName, a) in all where a !== pagePan {
+            for (bName, b) in all where a !== b {
+                XCTAssertEqual(
+                    c.gestureRecognizer(a, shouldRecognizeSimultaneouslyWith: b), together.contains("\(aName)+\(bName)"),
+                    "\(aName) with \(bName)"
+                )
+                XCTAssertEqual(
+                    c.gestureRecognizer(a, shouldRequireFailureOf: b), waits.contains("\(aName)>\(bName)"),
+                    "\(aName) waits for \(bName)"
+                )
+                XCTAssertEqual(
+                    c.gestureRecognizer(a, shouldBeRequiredToFailBy: b), waitedOnBy.contains("\(aName)<\(bName)"),
+                    "\(bName) waits for \(aName)"
+                )
+            }
+        }
+    }
+
+    func testTheHoldMarksAfterAQuarterSecond() {
+        let c = surface(opensOnTap: true)
+        XCTAssertEqual(c.hold.minimumPressDuration, 0.25)
+    }
 }
