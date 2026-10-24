@@ -23,7 +23,7 @@ struct SettingsView: View {
                     LabeledContent("Signed in", value: settings.appleDisplayName ?? "Apple ID")
                     Button("Sign out", role: .destructive) {
                         settings.signOut()
-                        store.reset()
+                        StoreActivation.reset(store)
                     }
                 } else if settings.isConfigured {
                     Label("Connected via API token", systemImage: "checkmark.circle.fill")
@@ -183,7 +183,7 @@ struct SettingsView: View {
         ) {
             Button("Clear settings", role: .destructive) {
                 settings.clearLocalSettings()
-                store.reset()
+                StoreActivation.reset(store)
                 notifications.cancelDaily()
                 actionMessage = "Local settings cleared."
             }
@@ -201,7 +201,7 @@ struct SettingsView: View {
         do {
             try await client.deleteAccount()
             settings.clearLocalSettings()
-            store.reset()
+            StoreActivation.reset(store)
             notifications.cancelDaily()
             actionMessage = "Account data deleted."
         } catch {

@@ -49,6 +49,12 @@ private struct LiveAppRoot: View {
             .onAppear(perform: activateStore)
             .onChange(of: settings.userId) { _, _ in activateStore() }
             .onChange(of: settings.isReady) { _, _ in activateStore() }
+            .onChange(of: settings.apiToken) { _, _ in activateStore() }
+            .onChange(of: settings.apiBaseURL) { _, _ in activateStore() }
+            // Covers every sign-out, including the automatic one on a 401.
+            .onChange(of: settings.isSignedIn) { wasSignedIn, isSignedIn in
+                if wasSignedIn && !isSignedIn { StoreActivation.reset(store) }
+            }
     }
 
     private func activateStore() {

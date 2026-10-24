@@ -40,8 +40,11 @@ final class RedesignRegressionTests: XCTestCase {
             .appendingPathComponent("ReadinessCoach/Views")
         for file in ["BodyView.swift", "SleepView.swift", "TrainView.swift", "TrendsView.swift"] {
             let source = try String(contentsOf: views.appendingPathComponent(file), encoding: .utf8)
-            XCTAssertFalse(source.contains("@EnvironmentObject private var settings"), "\(file) observes AppSettings")
-            XCTAssertFalse(source.contains("@EnvironmentObject private var sync"), "\(file) observes SyncService")
+            let observed = try NSRegularExpression(
+                pattern: #"@(EnvironmentObject|ObservedObject|StateObject)\b[^\n]*:\s*(AppSettings|SyncService)\b"#
+            )
+            let range = NSRange(source.startIndex..., in: source)
+            XCTAssertNil(observed.firstMatch(in: source, range: range), "\(file) observes AppSettings or SyncService")
         }
     }
 }

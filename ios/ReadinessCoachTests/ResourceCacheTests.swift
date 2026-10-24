@@ -20,6 +20,25 @@ final class ResourceCacheTests: XCTestCase {
         CachedEnvelope(userId: user, day: "2026-10-23", fetchedAt: Date(timeIntervalSince1970: 1_700_000_000), etag: "W/\"1\"", value: value)
     }
 
+    /// With no user (account deleted or cleared), the legacy Today belongs to
+    /// nobody: it must be deleted, never kept for the next user to inherit.
+    @MainActor
+    func testLegacyTodayWithoutUserIsDeletedNotDeferred() throws {
+        try Data("{}".utf8).write(to: legacyURL())
+        StoreActivation.migrateLegacyToday(cache: cache, legacyURL: legacyURL(), userId: "")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacyURL().path))
+        StoreActivation.migrateLegacyToday(cache: cache, legacyURL: legacyURL(), userId: "new-user")
+        XCTAssertNil(cache.load(.today, userId: "new-user", as: TodayDTO.self))
+    }
+
+    @MainActor
+    func testResetDeletesLegacyToday() throws {
+        try Data("{}".utf8).write(to: legacyURL())
+        let store = AppStore(cache: cache)
+        StoreActivation.reset(store, legacyURL: legacyURL())
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacyURL().path))
+    }
+
     func testRoundTripKeepsValueEtagAndDay() {
         cache.save(.sleep(days: 30), envelope(value: ["a", "b"]))
         let loaded = cache.load(.sleep(days: 30), userId: "a", as: [String].self)
