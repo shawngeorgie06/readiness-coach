@@ -52,12 +52,6 @@ enum VitalMetric: CaseIterable, Identifiable {
     var referenceName: String { self == .sleepHours ? "avg" : "normal" }
     var spokenReferenceName: String { self == .sleepHours ? "30-day average" : "30-day normal" }
 
-    /// The backend's recovery driver calls HRV above or below normal at exactly
-    /// ±5% (`hrvDelta >= 0.05`), so the HRV band's endpoints are outside it.
-    /// Resting HR is flagged only past +3%, and sleep and load have no driver
-    /// cut, so their endpoints stay inside.
-    var bandEndpointsAreOutside: Bool { self == .hrv }
-
     func baseline(in baselines: TodayBaselinesDTO) -> MetricBaselineDTO {
         switch self {
         case .hrv: return baselines.hrv
@@ -115,16 +109,18 @@ enum VitalMetric: CaseIterable, Identifiable {
     }
 }
 
-/// Today's value against the server's 30-day normal and neutral band. Pure, so
-/// arrow direction and colour are unit-tested. Nothing here is computed from a
-/// client-side average: no band means no arrow.
+/// Today's value against the server's 30-day normal. Pure, so arrow direction
+/// and colour are unit-tested. The band status is the server's `position`,
+/// never re-derived here: the payload's numbers are rounded, and a rounded
+/// value can't say which side of a driver's cut the real one fell. No status
+/// means no arrow.
 struct MetricComparison: Equatable, Identifiable {
-    enum Position: Equatable { case below, within, above }
+    typealias Position = MetricPosition
 
     /// What the comparison means for this metric, not which way it moved.
     enum Tone: Equatable {
         case good, bad
-        /// Inside the neutral band, or no band to judge against.
+        /// Inside the neutral band, or no status from the server.
         case neutral
         /// Outside the band on a metric with no good direction (load).
         case notable
@@ -156,13 +152,7 @@ struct MetricComparison: Equatable, Identifiable {
         today = baseline.today
         normal = baseline.baseline30d
         recent = baseline.recent14d
-        if let today = baseline.today, baseline.baseline30d != nil, let band = baseline.neutralBand {
-            let position: Position
-            if metric.bandEndpointsAreOutside {
-                position = today <= band.low ? .below : (today >= band.high ? .above : .within)
-            } else {
-                position = today < band.low ? .below : (today > band.high ? .above : .within)
-            }
+        if baseline.today != nil, let position = baseline.position {
             self.position = position
             tone = Self.tone(position, goodDirection: baseline.goodDirection)
         } else {
@@ -205,8 +195,8 @@ struct MetricComparison: Equatable, Identifiable {
     /// measured against so it can't be read as the band status.
     var changeText: String? { deltaText.map { "\($0) vs \(metric.referenceName)" } }
 
-    /// Arrow follows band position, never colour alone. Nil inside the band or
-    /// when there is no band to judge against.
+    /// Arrow follows the server's status, never colour alone. Nil inside the
+    /// band or when there is no status.
     var arrowSymbol: String? {
         switch position {
         case .above: return "arrowtriangle.up.fill"
@@ -217,7 +207,9 @@ struct MetricComparison: Equatable, Identifiable {
 
     var summary: String {
         guard today != nil else { return "No data today" }
-        guard let position else { return normal == nil ? "Not enough data yet" : "No range yet" }
+        // A normal with no status comes from a server that predates `position`:
+        // show the numbers, make no call.
+        guard let position else { return normal == nil ? "Not enough data yet" : "Compared with average" }
         switch position {
         case .below: return "Below \(metric.bandName)"
         case .within: return metric == .sleepHours ? "On target" : "Normal"
@@ -227,9 +219,11 @@ struct MetricComparison: Equatable, Identifiable {
 
     /// One short line for a narrow column: the signed change when it agrees with
     /// the arrow, otherwise the band word. (Sleep's band sits on the target, so
-    /// a night can beat the average and still fall short of the target.)
+    /// a night can beat the average and still fall short of the target.) With
+    /// no status the change shows on its own, with no arrow to agree with.
     var compactText: String {
-        guard let position, let delta, let deltaText else { return summary }
+        guard let delta, let deltaText else { return summary }
+        guard let position else { return deltaText }
         let agrees: Bool
         switch position {
         case .above: agrees = delta > 0

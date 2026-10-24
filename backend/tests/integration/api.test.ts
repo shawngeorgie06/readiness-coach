@@ -195,6 +195,14 @@ describe("backend API integration", () => {
     const fromDriver = Number(/30-day average of (\d+)ms/.exec(driver.detail)![1]);
     expect(Math.round(today.body.baselines.hrv.baseline30d)).toBe(fromDriver);
     expect(today.body.baselines.hrv.recent14d).toHaveLength(14);
+
+    // The served status is the driver's own call, not something to re-derive from rounded numbers.
+    const qualifier = /· (above your normal|below your normal|normal for you)$/.exec(driver.text)![1];
+    const expected = { "above your normal": "above", "below your normal": "below", "normal for you": "within" }[qualifier];
+    expect(today.body.baselines.hrv.position).toBe(expected);
+    for (const key of ["restingHr", "sleepHours", "load7d"]) {
+      expect(today.body.baselines[key]).toHaveProperty("position");
+    }
   });
 
   it("returns private no-store, a weak ETag, and 304 on If-None-Match", async () => {

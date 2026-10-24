@@ -59,7 +59,7 @@ final class DesignSystemTests: XCTestCase {
     // MARK: Comparisons
 
     func testHigherIsGoodMetricAboveItsBandIsGoodWithAnUpArrow() {
-        let c = MetricComparison(metric: .hrv, baseline: baseline(today: 62, normal: 56, band: (53.2, 58.8), good: "up"))
+        let c = MetricComparison(metric: .hrv, baseline: baseline(today: 62, normal: 56, band: (53.2, 58.8), good: "up", position: .above))
         XCTAssertEqual(c.position, .above)
         XCTAssertEqual(c.tone, .good)
         XCTAssertEqual(c.arrowSymbol, "arrowtriangle.up.fill")
@@ -68,12 +68,12 @@ final class DesignSystemTests: XCTestCase {
     }
 
     func testLowerIsGoodMetricAboveItsBandIsBad() {
-        let up = MetricComparison(metric: .restingHr, baseline: baseline(today: 58, normal: 52, band: (50.44, 53.56), good: "down"))
+        let up = MetricComparison(metric: .restingHr, baseline: baseline(today: 58, normal: 52, band: (50.44, 53.56), good: "down", position: .above))
         XCTAssertEqual(up.position, .above)
         XCTAssertEqual(up.tone, .bad)
         XCTAssertEqual(up.arrowSymbol, "arrowtriangle.up.fill")
 
-        let down = MetricComparison(metric: .restingHr, baseline: baseline(today: 48, normal: 52, band: (50.44, 53.56), good: "down"))
+        let down = MetricComparison(metric: .restingHr, baseline: baseline(today: 48, normal: 52, band: (50.44, 53.56), good: "down", position: .below))
         XCTAssertEqual(down.position, .below)
         XCTAssertEqual(down.tone, .good)
         XCTAssertEqual(down.arrowSymbol, "arrowtriangle.down.fill")
@@ -81,7 +81,7 @@ final class DesignSystemTests: XCTestCase {
     }
 
     func testInsideTheBandIsNeutralWithNoArrow() {
-        let c = MetricComparison(metric: .hrv, baseline: baseline(today: 57, normal: 56, band: (53.2, 58.8), good: "up"))
+        let c = MetricComparison(metric: .hrv, baseline: baseline(today: 57, normal: 56, band: (53.2, 58.8), good: "up", position: .within))
         XCTAssertEqual(c.position, .within)
         XCTAssertEqual(c.tone, .neutral)
         XCTAssertNil(c.arrowSymbol)
@@ -89,14 +89,14 @@ final class DesignSystemTests: XCTestCase {
     }
 
     func testLoadOutsideItsBandIsNotableNotGoodOrBad() {
-        let c = MetricComparison(metric: .load7d, baseline: baseline(today: 14, normal: 9, band: (6.3, 11.7), good: "none"))
+        let c = MetricComparison(metric: .load7d, baseline: baseline(today: 14, normal: 9, band: (6.3, 11.7), good: "none", position: .above))
         XCTAssertEqual(c.position, .above)
         XCTAssertEqual(c.tone, .notable)
         XCTAssertEqual(c.deltaText, "+5.0")
     }
 
     func testNoDataTodayShowsADashAndNoArrow() {
-        let c = MetricComparison(metric: .hrv, baseline: baseline(today: nil, normal: 56, band: (53.2, 58.8), good: "up"))
+        let c = MetricComparison(metric: .hrv, baseline: baseline(today: nil, normal: 56, band: (53.2, 58.8), good: "up", position: nil))
         XCTAssertNil(c.position)
         XCTAssertNil(c.arrowSymbol)
         XCTAssertEqual(c.todayText, "—")
@@ -105,9 +105,18 @@ final class DesignSystemTests: XCTestCase {
         XCTAssertEqual(c.accessibilityText, "Heart rate variability: no data today.")
     }
 
+    func testAStatusWithoutTodaysValueIsIgnored() {
+        let c = MetricComparison(metric: .hrv, baseline: baseline(today: nil, normal: 56, band: (53.2, 58.8), good: "up", position: .above))
+        XCTAssertNil(c.position)
+        XCTAssertNil(c.arrowSymbol)
+        XCTAssertEqual(c.tone, .neutral)
+        XCTAssertEqual(c.summary, "No data today")
+    }
+
     func testNoNormalYetShowsNotEnoughDataAndNoArrowEvenWithABand() {
         // The sleep band follows the target, so it exists before any history.
-        let c = MetricComparison(metric: .sleepHours, baseline: baseline(today: 6, normal: nil, band: (6.75, 8.25), good: "up"))
+        // The server sends no status until there's a 30-day average.
+        let c = MetricComparison(metric: .sleepHours, baseline: baseline(today: 6, normal: nil, band: (6.75, 8.25), good: "up", position: nil))
         XCTAssertNil(c.position)
         XCTAssertNil(c.arrowSymbol)
         XCTAssertEqual(c.tone, .neutral)
@@ -115,16 +124,8 @@ final class DesignSystemTests: XCTestCase {
         XCTAssertEqual(c.compactText, "Not enough data yet")
     }
 
-    func testNoBandMeansNoArrow() {
-        let c = MetricComparison(metric: .hrv, baseline: baseline(today: 62, normal: 56, band: nil, good: "up"))
-        XCTAssertNil(c.position)
-        XCTAssertNil(c.arrowSymbol)
-        XCTAssertEqual(c.tone, .neutral)
-        XCTAssertEqual(c.deltaText, "+6 ms")
-    }
-
     func testSleepBeatingTheAverageButShortOfTargetSaysBelowTarget() {
-        let c = MetricComparison(metric: .sleepHours, baseline: baseline(today: 6, normal: 5, band: (7.2, 8.8), good: "up"))
+        let c = MetricComparison(metric: .sleepHours, baseline: baseline(today: 6, normal: 5, band: (7.2, 8.8), good: "up", position: .below))
         XCTAssertEqual(c.position, .below)
         XCTAssertEqual(c.tone, .bad)
         XCTAssertEqual(c.arrowSymbol, "arrowtriangle.down.fill")
@@ -135,10 +136,10 @@ final class DesignSystemTests: XCTestCase {
     func testOlderServersWithoutBaselinesProduceNoComparisons() {
         XCTAssertNil(MetricComparison.all(from: nil))
         let all = MetricComparison.all(from: TodayBaselinesDTO(
-            hrv: baseline(today: 1, normal: 1, band: nil, good: "up"),
-            restingHr: baseline(today: 1, normal: 1, band: nil, good: "down"),
-            sleepHours: baseline(today: 1, normal: 1, band: nil, good: "up"),
-            load7d: baseline(today: 1, normal: 1, band: nil, good: "none")
+            hrv: baseline(today: 1, normal: 1, band: nil, good: "up", position: nil),
+            restingHr: baseline(today: 1, normal: 1, band: nil, good: "down", position: nil),
+            sleepHours: baseline(today: 1, normal: 1, band: nil, good: "up", position: nil),
+            load7d: baseline(today: 1, normal: 1, band: nil, good: "none", position: nil)
         ))
         XCTAssertEqual(all?.map(\.metric), [.hrv, .restingHr, .sleepHours, .load7d])
     }
@@ -151,47 +152,96 @@ final class DesignSystemTests: XCTestCase {
         XCTAssertEqual(VitalMetric.load7d.formatDelta(-1.26), "\u{2212}1.3")
     }
 
-    // MARK: Band endpoints
+    // MARK: Server status
 
-    func testHRVBandEndpointsCountAsOutsideLikeTheRecoveryDriver() {
-        // recovery.ts: hrvDelta >= 0.05 is "above your normal", <= -0.05 "below".
-        let band = (95.0, 105.0)
-        let atHigh = MetricComparison(metric: .hrv, baseline: baseline(today: 105, normal: 100, band: band, good: "up"))
-        XCTAssertEqual(atHigh.position, .above)
-        XCTAssertEqual(atHigh.tone, .good)
-        XCTAssertEqual(atHigh.summary, "Above normal")
+    func testTheServerStatusDecidesWhenRoundedNumbersCannot() {
+        // Raw HRV 58.8314 and 58.8316 against a 56.03 normal both serialize as
+        // 58.83 with a 53.23–58.83 band, yet the recovery driver calls the
+        // first normal and the second above. Same numbers in, the status wins.
+        let normal = MetricComparison(metric: .hrv, baseline: baseline(today: 58.83, normal: 56.03, band: (53.23, 58.83), good: "up", position: .within))
+        XCTAssertEqual(normal.position, .within)
+        XCTAssertEqual(normal.tone, .neutral)
+        XCTAssertNil(normal.arrowSymbol)
+        XCTAssertEqual(normal.summary, "Normal")
 
-        let atLow = MetricComparison(metric: .hrv, baseline: baseline(today: 95, normal: 100, band: band, good: "up"))
-        XCTAssertEqual(atLow.position, .below)
-        XCTAssertEqual(atLow.tone, .bad)
-        XCTAssertEqual(atLow.summary, "Below normal")
+        let above = MetricComparison(metric: .hrv, baseline: baseline(today: 58.83, normal: 56.03, band: (53.23, 58.83), good: "up", position: .above))
+        XCTAssertEqual(above.position, .above)
+        XCTAssertEqual(above.tone, .good)
+        XCTAssertEqual(above.arrowSymbol, "arrowtriangle.up.fill")
+        XCTAssertEqual(above.summary, "Above normal")
+    }
 
-        for inside in [95.01, 100, 104.99] {
-            let c = MetricComparison(metric: .hrv, baseline: baseline(today: inside, normal: 100, band: band, good: "up"))
-            XCTAssertEqual(c.position, .within, "\(inside)")
+    func testTheServerStatusIsTakenEvenAgainstTheShownBand() {
+        let hrv = MetricComparison(metric: .hrv, baseline: baseline(today: 62, normal: 56, band: (53.2, 58.8), good: "up", position: .within))
+        XCTAssertEqual(hrv.position, .within)
+        XCTAssertNil(hrv.arrowSymbol)
+
+        let rhr = MetricComparison(metric: .restingHr, baseline: baseline(today: 52, normal: 52, band: (50.44, 53.56), good: "down", position: .above))
+        XCTAssertEqual(rhr.position, .above)
+        XCTAssertEqual(rhr.tone, .bad)
+        XCTAssertEqual(rhr.summary, "Above normal")
+    }
+
+    func testLoadFollowsTheStatusWithoutCallingItGoodOrBad() {
+        for (position, tone) in [(MetricPosition.above, MetricComparison.Tone.notable), (.below, .notable), (.within, .neutral)] {
+            let c = MetricComparison(metric: .load7d, baseline: baseline(today: 9, normal: 9, band: (6.3, 11.7), good: "none", position: position))
+            XCTAssertEqual(c.position, position)
+            XCTAssertEqual(c.tone, tone, "\(position)")
         }
     }
 
-    func testOtherMetricsKeepTheirEndpointsInsideTheBand() {
-        // recovery.ts flags resting HR only when rhrDelta > 0.03, strictly.
-        let rhrHigh = MetricComparison(metric: .restingHr, baseline: baseline(today: 103, normal: 100, band: (97, 103), good: "down"))
-        XCTAssertEqual(rhrHigh.position, .within)
-        let rhrLow = MetricComparison(metric: .restingHr, baseline: baseline(today: 97, normal: 100, band: (97, 103), good: "down"))
-        XCTAssertEqual(rhrLow.position, .within)
-        let rhrOver = MetricComparison(metric: .restingHr, baseline: baseline(today: 103.01, normal: 100, band: (97, 103), good: "down"))
-        XCTAssertEqual(rhrOver.position, .above)
+    func testAResponseWithoutAStatusShowsTheNumbersAndMakesNoCall() {
+        // An older server: values, normal and band, but no `position`.
+        let c = MetricComparison(metric: .hrv, baseline: baseline(today: 62, normal: 56, band: (53.2, 58.8), good: "up", position: nil))
+        XCTAssertNil(c.position)
+        XCTAssertNil(c.arrowSymbol)
+        XCTAssertEqual(c.tone, .neutral)
+        XCTAssertEqual(c.summary, "Compared with average")
+        XCTAssertEqual(c.compactText, "+6 ms", "the change shows without an arrow")
+        XCTAssertEqual(c.changeText, "+6 ms vs normal")
+        XCTAssertEqual(
+            c.accessibilityText,
+            "Heart rate variability 62 milliseconds. Compared with average. Up 6 milliseconds versus 30-day normal of 56 milliseconds."
+        )
 
-        let sleep = MetricComparison(metric: .sleepHours, baseline: baseline(today: 7.2, normal: 7, band: (7.2, 8.8), good: "up"))
-        XCTAssertEqual(sleep.position, .within)
-        let load = MetricComparison(metric: .load7d, baseline: baseline(today: 11.7, normal: 9, band: (6.3, 11.7), good: "none"))
-        XCTAssertEqual(load.position, .within)
+        let sleep = MetricComparison(metric: .sleepHours, baseline: baseline(today: 6, normal: 5, band: (7.2, 8.8), good: "up", position: nil))
+        XCTAssertNil(sleep.arrowSymbol)
+        XCTAssertEqual(sleep.tone, .neutral)
+        XCTAssertEqual(sleep.compactText, "+1h")
+        XCTAssertFalse(sleep.summary.contains("target"), "no target claim without the server's call")
+    }
+
+    // MARK: Baseline decoding
+
+    func testBaselineWithoutPositionDecodesAsNoStatus() throws {
+        let old = try decodeBaseline(#"{"today":62,"baseline30d":56,"neutralBand":{"low":53.2,"high":58.8},"recent14d":[null,62],"goodDirection":"up"}"#)
+        XCTAssertNil(old.position)
+        XCTAssertEqual(old.today, 62)
+        XCTAssertEqual(old.neutralBand, NeutralBandDTO(low: 53.2, high: 58.8))
+        XCTAssertEqual(old.recent14d, [nil, 62])
+    }
+
+    func testBaselinePositionDecodes() throws {
+        let new = try decodeBaseline(#"{"today":58.83,"baseline30d":56.03,"neutralBand":{"low":53.23,"high":58.83},"recent14d":[],"goodDirection":"up","position":"above"}"#)
+        XCTAssertEqual(new.position, .above)
+        XCTAssertNil(try decodeBaseline(#"{"today":null,"baseline30d":null,"neutralBand":null,"recent14d":[],"goodDirection":"up","position":null}"#).position)
+        XCTAssertNil(
+            try decodeBaseline(#"{"today":1,"baseline30d":1,"neutralBand":null,"recent14d":[],"goodDirection":"up","position":"sideways"}"#).position,
+            "a status this build doesn't know is no status, not a failed Today"
+        )
+    }
+
+    func testBaselinePositionRoundTrips() throws {
+        let value = baseline(today: 5.2, normal: 4, band: (2.8, 5.2), good: "none", position: .above)
+        let decoded = try JSONDecoder().decode(MetricBaselineDTO.self, from: JSONEncoder().encode(value))
+        XCTAssertEqual(decoded, value)
     }
 
     // MARK: Full comparison row
 
     func testFullRowSeparatesSleepTargetStatusFromChangeVersusAverage() {
         // Beat the 30-day average by an hour, still short of the 8h target.
-        let c = MetricComparison(metric: .sleepHours, baseline: baseline(today: 6, normal: 5, band: (7.2, 8.8), good: "up"))
+        let c = MetricComparison(metric: .sleepHours, baseline: baseline(today: 6, normal: 5, band: (7.2, 8.8), good: "up", position: .below))
         XCTAssertEqual(c.summary, "Below target", "the arrowed status line names the target")
         XCTAssertEqual(c.changeText, "+1h vs avg", "the change is labelled as against the average")
         XCTAssertEqual(c.normalCaption, "avg 5h", "the reference column doesn't call the average the band")
@@ -202,7 +252,7 @@ final class DesignSystemTests: XCTestCase {
     }
 
     func testFullRowStatesStatusAndChangeForBaselineMetrics() {
-        let c = MetricComparison(metric: .hrv, baseline: baseline(today: 62, normal: 56, band: (53.2, 58.8), good: "up"))
+        let c = MetricComparison(metric: .hrv, baseline: baseline(today: 62, normal: 56, band: (53.2, 58.8), good: "up", position: .above))
         XCTAssertEqual(c.summary, "Above normal")
         XCTAssertEqual(c.changeText, "+6 ms vs normal")
         XCTAssertEqual(c.normalCaption, "normal 56")
@@ -213,14 +263,14 @@ final class DesignSystemTests: XCTestCase {
     }
 
     func testFullRowWithoutANormalHasNoChangeLine() {
-        let c = MetricComparison(metric: .sleepHours, baseline: baseline(today: 6, normal: nil, band: (6.75, 8.25), good: "up"))
+        let c = MetricComparison(metric: .sleepHours, baseline: baseline(today: 6, normal: nil, band: (6.75, 8.25), good: "up", position: nil))
         XCTAssertNil(c.changeText)
         XCTAssertNil(c.normalCaption)
         XCTAssertEqual(c.accessibilityText, "Sleep 6 hours. Not enough data yet.")
     }
 
     func testUnchangedValueSaysNoChange() {
-        let c = MetricComparison(metric: .restingHr, baseline: baseline(today: 52, normal: 52, band: (50.44, 53.56), good: "down"))
+        let c = MetricComparison(metric: .restingHr, baseline: baseline(today: 52, normal: 52, band: (50.44, 53.56), good: "down", position: .within))
         XCTAssertEqual(c.changeText, "0 bpm vs normal")
         XCTAssertEqual(
             c.accessibilityText,
@@ -295,13 +345,20 @@ final class DesignSystemTests: XCTestCase {
         )
     }
 
-    private func baseline(today: Double?, normal: Double?, band: (Double, Double)?, good: String) -> MetricBaselineDTO {
+    private func baseline(
+        today: Double?, normal: Double?, band: (Double, Double)?, good: String, position: MetricPosition?
+    ) -> MetricBaselineDTO {
         MetricBaselineDTO(
             today: today,
             baseline30d: normal,
             neutralBand: band.map { NeutralBandDTO(low: $0.0, high: $0.1) },
             recent14d: Array(repeating: nil, count: 13) + [today],
-            goodDirection: good
+            goodDirection: good,
+            position: position
         )
+    }
+
+    private func decodeBaseline(_ json: String) throws -> MetricBaselineDTO {
+        try JSONDecoder().decode(MetricBaselineDTO.self, from: Data(json.utf8))
     }
 }
