@@ -47,6 +47,17 @@ enum VitalMetric: CaseIterable, Identifiable {
     /// The sleep band is centred on the nightly target, not the 30-day average.
     var bandName: String { self == .sleepHours ? "target" : "normal" }
 
+    /// What the change is measured against. For sleep that's the 30-day
+    /// average, which is not the band, so it gets its own name.
+    var referenceName: String { self == .sleepHours ? "avg" : "normal" }
+    var spokenReferenceName: String { self == .sleepHours ? "30-day average" : "30-day normal" }
+
+    /// The backend's recovery driver calls HRV above or below normal at exactly
+    /// ±5% (`hrvDelta >= 0.05`), so the HRV band's endpoints are outside it.
+    /// Resting HR is flagged only past +3%, and sleep and load have no driver
+    /// cut, so their endpoints stay inside.
+    var bandEndpointsAreOutside: Bool { self == .hrv }
+
     func baseline(in baselines: TodayBaselinesDTO) -> MetricBaselineDTO {
         switch self {
         case .hrv: return baselines.hrv
@@ -146,7 +157,12 @@ struct MetricComparison: Equatable, Identifiable {
         normal = baseline.baseline30d
         recent = baseline.recent14d
         if let today = baseline.today, baseline.baseline30d != nil, let band = baseline.neutralBand {
-            let position: Position = today < band.low ? .below : (today > band.high ? .above : .within)
+            let position: Position
+            if metric.bandEndpointsAreOutside {
+                position = today <= band.low ? .below : (today >= band.high ? .above : .within)
+            } else {
+                position = today < band.low ? .below : (today > band.high ? .above : .within)
+            }
             self.position = position
             tone = Self.tone(position, goodDirection: baseline.goodDirection)
         } else {
@@ -181,6 +197,13 @@ struct MetricComparison: Equatable, Identifiable {
     }
 
     var deltaText: String? { delta.map(metric.formatDelta) }
+
+    /// The reference column, e.g. "normal 56" or, for sleep, "avg 5h".
+    var normalCaption: String? { normalText.map { "\(metric.referenceName) \($0)" } }
+
+    /// The change line under the status in a full row, labelled with what it's
+    /// measured against so it can't be read as the band status.
+    var changeText: String? { deltaText.map { "\($0) vs \(metric.referenceName)" } }
 
     /// Arrow follows band position, never colour alone. Nil inside the band or
     /// when there is no band to judge against.
@@ -218,12 +241,16 @@ struct MetricComparison: Equatable, Identifiable {
 
     var accessibilityText: String {
         guard let today else { return "\(metric.spokenTitle): no data today." }
-        var parts = ["\(metric.spokenTitle) \(metric.spoken(today))"]
-        if let normal, let delta {
-            parts.append("30-day normal \(metric.spoken(normal)), \(metric.spokenDelta(delta))")
-        }
-        parts.append(summary)
+        let parts = ["\(metric.spokenTitle) \(metric.spoken(today))", summary] + [spokenChange].compactMap { $0 }
         return parts.joined(separator: ". ") + "."
+    }
+
+    /// "Up 1 hour versus 30-day average of 5 hours"; nil without both values.
+    var spokenChange: String? {
+        guard let normal, let delta else { return nil }
+        let change = metric.spokenDelta(delta)
+        return change.prefix(1).uppercased() + change.dropFirst()
+            + " versus \(metric.spokenReferenceName) of \(metric.spoken(normal))"
     }
 }
 

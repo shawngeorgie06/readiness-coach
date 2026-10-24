@@ -151,6 +151,124 @@ final class DesignSystemTests: XCTestCase {
         XCTAssertEqual(VitalMetric.load7d.formatDelta(-1.26), "\u{2212}1.3")
     }
 
+    // MARK: Band endpoints
+
+    func testHRVBandEndpointsCountAsOutsideLikeTheRecoveryDriver() {
+        // recovery.ts: hrvDelta >= 0.05 is "above your normal", <= -0.05 "below".
+        let band = (95.0, 105.0)
+        let atHigh = MetricComparison(metric: .hrv, baseline: baseline(today: 105, normal: 100, band: band, good: "up"))
+        XCTAssertEqual(atHigh.position, .above)
+        XCTAssertEqual(atHigh.tone, .good)
+        XCTAssertEqual(atHigh.summary, "Above normal")
+
+        let atLow = MetricComparison(metric: .hrv, baseline: baseline(today: 95, normal: 100, band: band, good: "up"))
+        XCTAssertEqual(atLow.position, .below)
+        XCTAssertEqual(atLow.tone, .bad)
+        XCTAssertEqual(atLow.summary, "Below normal")
+
+        for inside in [95.01, 100, 104.99] {
+            let c = MetricComparison(metric: .hrv, baseline: baseline(today: inside, normal: 100, band: band, good: "up"))
+            XCTAssertEqual(c.position, .within, "\(inside)")
+        }
+    }
+
+    func testOtherMetricsKeepTheirEndpointsInsideTheBand() {
+        // recovery.ts flags resting HR only when rhrDelta > 0.03, strictly.
+        let rhrHigh = MetricComparison(metric: .restingHr, baseline: baseline(today: 103, normal: 100, band: (97, 103), good: "down"))
+        XCTAssertEqual(rhrHigh.position, .within)
+        let rhrLow = MetricComparison(metric: .restingHr, baseline: baseline(today: 97, normal: 100, band: (97, 103), good: "down"))
+        XCTAssertEqual(rhrLow.position, .within)
+        let rhrOver = MetricComparison(metric: .restingHr, baseline: baseline(today: 103.01, normal: 100, band: (97, 103), good: "down"))
+        XCTAssertEqual(rhrOver.position, .above)
+
+        let sleep = MetricComparison(metric: .sleepHours, baseline: baseline(today: 7.2, normal: 7, band: (7.2, 8.8), good: "up"))
+        XCTAssertEqual(sleep.position, .within)
+        let load = MetricComparison(metric: .load7d, baseline: baseline(today: 11.7, normal: 9, band: (6.3, 11.7), good: "none"))
+        XCTAssertEqual(load.position, .within)
+    }
+
+    // MARK: Full comparison row
+
+    func testFullRowSeparatesSleepTargetStatusFromChangeVersusAverage() {
+        // Beat the 30-day average by an hour, still short of the 8h target.
+        let c = MetricComparison(metric: .sleepHours, baseline: baseline(today: 6, normal: 5, band: (7.2, 8.8), good: "up"))
+        XCTAssertEqual(c.summary, "Below target", "the arrowed status line names the target")
+        XCTAssertEqual(c.changeText, "+1h vs avg", "the change is labelled as against the average")
+        XCTAssertEqual(c.normalCaption, "avg 5h", "the reference column doesn't call the average the band")
+        XCTAssertEqual(
+            c.accessibilityText,
+            "Sleep 6 hours. Below target. Up 1 hour versus 30-day average of 5 hours."
+        )
+    }
+
+    func testFullRowStatesStatusAndChangeForBaselineMetrics() {
+        let c = MetricComparison(metric: .hrv, baseline: baseline(today: 62, normal: 56, band: (53.2, 58.8), good: "up"))
+        XCTAssertEqual(c.summary, "Above normal")
+        XCTAssertEqual(c.changeText, "+6 ms vs normal")
+        XCTAssertEqual(c.normalCaption, "normal 56")
+        XCTAssertEqual(
+            c.accessibilityText,
+            "Heart rate variability 62 milliseconds. Above normal. Up 6 milliseconds versus 30-day normal of 56 milliseconds."
+        )
+    }
+
+    func testFullRowWithoutANormalHasNoChangeLine() {
+        let c = MetricComparison(metric: .sleepHours, baseline: baseline(today: 6, normal: nil, band: (6.75, 8.25), good: "up"))
+        XCTAssertNil(c.changeText)
+        XCTAssertNil(c.normalCaption)
+        XCTAssertEqual(c.accessibilityText, "Sleep 6 hours. Not enough data yet.")
+    }
+
+    func testUnchangedValueSaysNoChange() {
+        let c = MetricComparison(metric: .restingHr, baseline: baseline(today: 52, normal: 52, band: (50.44, 53.56), good: "down"))
+        XCTAssertEqual(c.changeText, "0 bpm vs normal")
+        XCTAssertEqual(
+            c.accessibilityText,
+            "Resting heart rate 52 beats per minute. Normal. No change versus 30-day normal of 52 beats per minute."
+        )
+    }
+
+    // MARK: Notice copy
+
+    func testNotFoundServerErrorBecomesAPlainNextStepWithTheRawTextKept() {
+        let raw = APIError.http(status: 404, code: "user_not_found").localizedDescription
+        let copy = NoticeCopy(message: raw)
+        XCTAssertEqual(copy.text, "No readiness data was found for this account. Sync Health data or check your connection in Settings.")
+        XCTAssertEqual(copy.detail, raw)
+    }
+
+    func testServerFailuresBecomeTryAgainWithTheRawTextKept() {
+        for raw in [
+            APIError.http(status: 500, code: "internal").localizedDescription,
+            APIError.http(status: 503, code: nil).localizedDescription,
+        ] {
+            let copy = NoticeCopy(message: raw)
+            XCTAssertEqual(copy.text, "The server couldn't load this data. Try again shortly.", raw)
+            XCTAssertEqual(copy.detail, raw)
+        }
+    }
+
+    func testOtherClientErrorsHideTheCodeWithoutBlamingTheNetwork() {
+        let raw = APIError.http(status: 400, code: "bad_request").localizedDescription
+        let copy = NoticeCopy(message: raw)
+        XCTAssertFalse(copy.text.contains("400"))
+        XCTAssertFalse(copy.text.localizedCaseInsensitiveContains("connection"))
+        XCTAssertEqual(copy.detail, raw)
+    }
+
+    func testPlainMessagesPassThroughUnchanged() {
+        for message in [
+            "Sync Health data to compute today's readiness.",
+            APIError.decoding(URLError(.cannotDecodeContentData)).localizedDescription,
+            APIError.rateLimited(retryAfter: 120).localizedDescription,
+            "Server error budget is fine (not an HTTP status)",
+        ] {
+            let copy = NoticeCopy(message: message)
+            XCTAssertEqual(copy.text, message)
+            XCTAssertNil(copy.detail)
+        }
+    }
+
     // MARK: Sparklines
 
     func testSparklineGapsStayGaps() {

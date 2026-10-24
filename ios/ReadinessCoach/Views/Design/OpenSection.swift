@@ -45,7 +45,9 @@ extension OpenSection where Trailing == EmptyView {
 }
 
 /// An inline notice on the canvas (a failed refresh, say): coloured icon and
-/// title, grey message, an optional action. Ruled, not boxed.
+/// title, grey message, an optional action. Ruled, not boxed. A raw HTTP error
+/// is shown as a plain next step; its original text stays behind "Connection
+/// details".
 struct InlineNotice: View {
     let title: String
     let message: String
@@ -53,8 +55,10 @@ struct InlineNotice: View {
     var color: Color = Palette.warn
     var actionTitle: String?
     var action: (() -> Void)?
+    @State private var showsDetail = false
 
     var body: some View {
+        let copy = NoticeCopy(message: message)
         VStack(alignment: .leading, spacing: 10) {
             Hairline()
             HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -66,7 +70,7 @@ struct InlineNotice: View {
                     Text(title)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Palette.textPrimary)
-                    Text(message)
+                    Text(copy.text)
                         .font(.footnote)
                         .foregroundStyle(Palette.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -76,10 +80,69 @@ struct InlineNotice: View {
                             .foregroundStyle(Palette.accent)
                             .frame(minHeight: Space.target)
                     }
+                    if let detail = copy.detail {
+                        Button {
+                            showsDetail.toggle()
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text("Connection details")
+                                Image(systemName: showsDetail ? "chevron.up" : "chevron.down")
+                                    .accessibilityHidden(true)
+                            }
+                            .font(.footnote)
+                            .foregroundStyle(Palette.textTertiary)
+                            .frame(minHeight: Space.target)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityValue(showsDetail ? "Expanded" : "Collapsed")
+                        if showsDetail {
+                            Text(detail)
+                                .font(.footnote.monospaced())
+                                .foregroundStyle(Palette.textTertiary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .textSelection(.enabled)
+                        }
+                    }
                 }
                 Spacer(minLength: 0)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// What a notice says for a message. `APIError.http` renders as "Server error
+/// (404): user_not_found" or "Server returned status 500."; those become a
+/// plain next step and keep the original as `detail`. Anything else is already
+/// user-facing and passes through.
+struct NoticeCopy: Equatable {
+    let text: String
+    let detail: String?
+
+    init(message: String) {
+        guard let status = Self.httpStatus(in: message) else {
+            text = message
+            detail = nil
+            return
+        }
+        switch status {
+        case 404:
+            text = "No readiness data was found for this account. Sync Health data or check your connection in Settings."
+        case 500...599:
+            text = "The server couldn't load this data. Try again shortly."
+        default:
+            text = "The server couldn't complete this request. Check your account in Settings."
+        }
+        detail = message
+    }
+
+    private static func httpStatus(in message: String) -> Int? {
+        for prefix in ["Server error (", "Server returned status "] where message.hasPrefix(prefix) {
+            let digits = message.dropFirst(prefix.count).prefix(3)
+            guard digits.count == 3, digits.allSatisfy(\.isNumber), let status = Int(digits) else { return nil }
+            return (100...599).contains(status) ? status : nil
+        }
+        return nil
     }
 }

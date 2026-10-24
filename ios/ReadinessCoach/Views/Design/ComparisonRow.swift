@@ -33,28 +33,42 @@ struct Sparkline: View {
     }
 }
 
-/// Arrow plus signed text, in the comparison's tone. Never colour alone.
+/// The comparison in the metric's tone, never colour alone. Compact: one line
+/// for a narrow column. Full: the arrowed status ("Below target") over the
+/// change and what it's measured against ("+1h vs avg"), so a night that beat
+/// the average but missed the target can't read as a contradiction.
 struct ComparisonBadge: View {
     let comparison: MetricComparison
     var compact = false
+    var alignment: HorizontalAlignment = .leading
 
     var body: some View {
-        HStack(spacing: 4) {
-            if let arrow = comparison.arrowSymbol {
-                Image(systemName: arrow)
-                    .font(.caption2.weight(.bold))
-                    .accessibilityHidden(true)
+        VStack(alignment: alignment, spacing: 2) {
+            HStack(spacing: 4) {
+                if let arrow = comparison.arrowSymbol {
+                    Image(systemName: arrow)
+                        .font(.caption2.weight(.bold))
+                }
+                Text(compact ? comparison.compactText : comparison.summary)
+                    .font(.footnote.weight(.semibold))
+                    .monospacedDigit()
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            Text(compact ? comparison.compactText : (comparison.deltaText ?? comparison.summary))
-                .font(.footnote.weight(.semibold))
-                .monospacedDigit()
-                .fixedSize(horizontal: false, vertical: true)
+            .foregroundStyle(comparison.position == nil ? Palette.textTertiary : comparison.tone.color)
+            if !compact, let change = comparison.changeText {
+                Text(change)
+                    .font(.footnote)
+                    .monospacedDigit()
+                    .foregroundStyle(Palette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
-        .foregroundStyle(comparison.position == nil ? Palette.textTertiary : comparison.tone.color)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel([comparison.summary, comparison.spokenChange].compactMap { $0 }.joined(separator: ". "))
     }
 }
 
-/// "Compared with normal" row: metric · today · normal · arrow and change.
+/// "Compared with normal" row: metric · today · reference · status and change.
 /// A hairline sits above. Stacks at accessibility sizes. Callers that follow
 /// the spec's hide rule skip rows whose `today` is nil.
 struct ComparisonRow: View {
@@ -79,7 +93,7 @@ struct ComparisonRow: View {
                         title.frame(maxWidth: .infinity, alignment: .leading)
                         value
                         normal.frame(minWidth: 64, alignment: .trailing)
-                        ComparisonBadge(comparison: comparison)
+                        ComparisonBadge(comparison: comparison, alignment: .trailing)
                             .frame(minWidth: 72, alignment: .trailing)
                     }
                 }
@@ -111,7 +125,7 @@ struct ComparisonRow: View {
     }
 
     private var normal: some View {
-        Text(comparison.normalText.map { "normal \($0)" } ?? "")
+        Text(comparison.normalCaption ?? "")
             .font(.footnote)
             .foregroundStyle(Palette.textTertiary)
             .monospacedDigit()
