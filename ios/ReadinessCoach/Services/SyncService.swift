@@ -4,7 +4,6 @@ import Foundation
 /// the views render. One instance is shared through the environment.
 @MainActor
 final class SyncService: ObservableObject {
-    @Published var today: TodayDTO?
     @Published var isSyncing = false
     @Published var isLoadingToday = false
     @Published var errorMessage: String?
@@ -12,51 +11,27 @@ final class SyncService: ObservableObject {
     @Published var lastUploadError: String?
     @Published var uploadingCount: Int?
 
+    private let store: AppStore
     private let health = HealthKitService()
     private var lastAutoSyncAt: Date?
     private var lastBackgroundSyncAt: Date?
 
-    /// Today includes health-derived information. Keep it in a file with iOS
-    /// complete file protection rather than in UserDefaults, and do not include
-    /// it in device backups.
     private static let legacyCacheKey = "cachedTodayJSON"
-    private static let cacheURL = FileManager.default
-        .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("cached-today.json")
 
-    /// Show the last-known Today immediately on launch (stale-while-revalidate),
-    /// so a slow network doesn't leave the UI blank. The
-    /// network refresh then replaces it in the background.
-    init() {
+    /// The last-known Today, served from the store (cached on disk, so it shows
+    /// immediately on launch while a refresh runs).
+    var today: TodayDTO? { store.today.value }
+
+    init(store: AppStore) {
+        self.store = store
         // Remove the pre-v1.3.4 UserDefaults cache after upgrading.
         UserDefaults.standard.removeObject(forKey: Self.legacyCacheKey)
-        if let data = try? Data(contentsOf: Self.cacheURL),
-           let cached = try? JSONDecoder().decode(TodayDTO.self, from: data) {
-            today = cached
-        }
     }
 
-    /// Records a successful server refresh: cache it and stamp the display time.
-    private func didRefresh(_ dto: TodayDTO, _ settings: AppSettings) {
-        today = dto
+    /// Records a successful server refresh: stamp the display time.
+    private func didRefresh(_ settings: AppSettings) {
         settings.lastRefreshAt = Date()
         errorMessage = nil
-        if let data = try? JSONEncoder().encode(dto) {
-            do {
-                let directory = Self.cacheURL.deletingLastPathComponent()
-                try FileManager.default.createDirectory(
-                    at: directory,
-                    withIntermediateDirectories: true
-                )
-                try data.write(to: Self.cacheURL, options: [.atomic, .completeFileProtection])
-                var values = URLResourceValues()
-                values.isExcludedFromBackup = true
-                var cacheURL = Self.cacheURL
-                try cacheURL.setResourceValues(values)
-            } catch {
-                // Caching is an optimization; a fresh response remains usable.
-            }
-        }
     }
 
     /// Foreground-triggered sync, debounced so rapid app switches don't re-sync.
@@ -129,19 +104,20 @@ final class SyncService: ObservableObject {
             errorMessage = APIError.notConfigured.localizedDescription
             return
         }
+        StoreActivation.activate(store, settings: settings)
         isSyncing = true
         errorMessage = nil
         lastUploadError = nil
         defer { isSyncing = false; uploadingCount = nil }
 
         async let healthPayloadTask = loadHealthPayload(settings)
-        async let preliminaryTodayTask = loadToday(client)
+        async let preliminaryTodayTask = store.refresh(.today, force: true)
 
         let healthPayload = await healthPayloadTask
-        let preliminaryToday = await preliminaryTodayTask
+        let preliminaryTodayLoaded = await preliminaryTodayTask
 
-        if let preliminaryToday {
-            didRefresh(preliminaryToday, settings)
+        if preliminaryTodayLoaded {
+            didRefresh(settings)
         }
 
         var uploadedNewSamples = false
@@ -162,9 +138,10 @@ final class SyncService: ObservableObject {
         }
 
         if uploadedNewSamples {
-            await refreshTodayFromServer(client, settings: settings, keepPreliminaryOnFailure: true)
-        } else if preliminaryToday == nil {
-            await refreshTodayFromServer(client, settings: settings, keepPreliminaryOnFailure: false)
+            store.noteUploadedSamples()
+            await refreshTodayFromServer(settings, keepPreliminaryOnFailure: true)
+        } else if !preliminaryTodayLoaded {
+            await refreshTodayFromServer(settings, keepPreliminaryOnFailure: false)
         }
     }
 
@@ -224,14 +201,15 @@ final class SyncService: ObservableObject {
 
     /// Fetches Today without pushing new samples (e.g. on tab appear).
     func refreshToday(_ settings: AppSettings) async {
-        guard let client = settings.makeClient() else {
+        guard settings.makeClient() != nil else {
             errorMessage = APIError.notConfigured.localizedDescription
             return
         }
+        StoreActivation.activate(store, settings: settings)
         isLoadingToday = true
         errorMessage = nil
         defer { isLoadingToday = false }
-        await refreshTodayFromServer(client, settings: settings, keepPreliminaryOnFailure: false)
+        await refreshTodayFromServer(settings, keepPreliminaryOnFailure: false)
     }
 
     private enum HealthPayloadResult {
@@ -253,34 +231,21 @@ final class SyncService: ObservableObject {
         }
     }
 
-    private func loadToday(_ client: APIClient) async -> TodayDTO? {
-        try? await client.getToday()
-    }
-
+    /// A 401 signs the user out through `.apiUnauthorized` (see `AppSettings`).
     private func refreshTodayFromServer(
-        _ client: APIClient,
-        settings: AppSettings,
+        _ settings: AppSettings,
         keepPreliminaryOnFailure: Bool
     ) async {
-        do {
-            didRefresh(try await client.getToday(), settings)
-        } catch {
-            signOutIfUnauthorized(error, settings: settings)
-            if !keepPreliminaryOnFailure || today == nil {
-                errorMessage = readable(error)
-            }
+        if await store.refresh(.today, force: true) {
+            didRefresh(settings)
+        } else if !keepPreliminaryOnFailure || today == nil {
+            errorMessage = store.today.error
         }
     }
 
     private func applyHealthReadFailure(_ error: Error) {
         if !healthSyncSucceeded {
             lastSyncSummary = "Couldn't read Health data: \(readable(error))"
-        }
-    }
-
-    private func signOutIfUnauthorized(_ error: Error, settings: AppSettings) {
-        if case APIError.http(status: 401, _) = error, settings.isSignedIn {
-            settings.signOut()
         }
     }
 

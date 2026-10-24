@@ -96,28 +96,6 @@ struct APIClient {
         try await read("v1/history", query: daysQuery(days), etag: etag)
     }
 
-    // Transitional wrappers for views that still call the old names; removed
-    // when the views move to the store. They send no ETag, so a 304 cannot occur.
-    func getToday(date: String? = nil) async throws -> TodayDTO {
-        try await unwrap(read("v1/today", query: dateQuery(date), etag: nil))
-    }
-
-    func getSleep(days: Int = 30, date: String? = nil) async throws -> SleepDetailResponse {
-        try await unwrap(read("v1/sleep", query: daysQuery(days, date: date), etag: nil))
-    }
-
-    func getTrain(days: Int = 28, date: String? = nil) async throws -> TrainResponse {
-        try await unwrap(read("v1/train", query: daysQuery(days, date: date), etag: nil))
-    }
-
-    func getBody(days: Int = 30, date: String? = nil) async throws -> BodyResponse {
-        try await unwrap(read("v1/body", query: daysQuery(days, date: date), etag: nil))
-    }
-
-    func getHistory(days: Int = 30, date: String? = nil) async throws -> ReadinessHistoryResponse {
-        try await unwrap(read("v1/history", query: daysQuery(days, date: date), etag: nil))
-    }
-
     // MARK: Writes
 
     /// 5,000 samples is roughly 600KB of JSON -- comfortably inside the 50MB
@@ -222,11 +200,11 @@ struct APIClient {
         var health = URLRequest(url: baseURL.appendingPathComponent("health"))
         health.timeoutInterval = 8
         _ = try await session.data(for: health)
-        // getToday confirms the token is accepted. A brand-new user that hasn't
+        // Today confirms the token is accepted. A brand-new user that hasn't
         // synced yet legitimately has no Today (404 user_not_found) — that still
         // proves the URL + token are correct, so count it as a successful test.
         do {
-            _ = try await getToday()
+            _ = try await today(etag: nil)
         } catch APIError.http(status: 404, code: "user_not_found") {
             return
         }
@@ -273,13 +251,6 @@ struct APIClient {
 
     private func daysQuery(_ days: Int, date: String? = nil) -> [URLQueryItem] {
         [URLQueryItem(name: "days", value: String(days))] + dateQuery(date)
-    }
-
-    private func unwrap<T>(_ fetch: Fetch<T>) throws -> T {
-        switch fetch {
-        case let .fresh(value, _): return value
-        case .notModified: throw APIError.http(status: 304, code: nil)
-        }
     }
 
     /// Conditional GET. The ETag goes back verbatim in `If-None-Match`; a 304

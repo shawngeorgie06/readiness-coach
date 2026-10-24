@@ -30,4 +30,18 @@ final class RedesignRegressionTests: XCTestCase {
         XCTAssertEqual(TrendsView.points(in: response, requestedDays: 90)?.count, 1)
         XCTAssertNil(TrendsView.points(in: nil, requestedDays: 7))
     }
+
+    /// Upload ticks write `settings.lastSyncAt` and `sync.uploadingCount`; a pillar
+    /// view observing either would re-render its charts during every upload.
+    func testPillarViewsDoNotObserveSettingsOrSync() throws {
+        let views = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("ReadinessCoach/Views")
+        for file in ["BodyView.swift", "SleepView.swift", "TrainView.swift", "TrendsView.swift"] {
+            let source = try String(contentsOf: views.appendingPathComponent(file), encoding: .utf8)
+            XCTAssertFalse(source.contains("@EnvironmentObject private var settings"), "\(file) observes AppSettings")
+            XCTAssertFalse(source.contains("@EnvironmentObject private var sync"), "\(file) observes SyncService")
+        }
+    }
 }

@@ -2,28 +2,34 @@ import SwiftUI
 
 /// Activity tab — Aether: filter chips, workout list, weekly load. Real HealthKit sports.
 struct TrainView: View {
-    @EnvironmentObject private var settings: AppSettings
-    @State private var response: TrainResponse?
-    @State private var error: String?
-    @State private var isLoading = false
+    @Environment(AppStore.self) private var store
     @State private var filter = "All"
     @State private var selectedWorkout: WorkoutDTO?
+    @State private var derived = Derived<Date?, TrainSeries>()
 
     private let filters = ["All", "Run", "Strength", "Recovery"]
 
+    private var resource: Resource<TrainResponse> { store.train }
+
     /// True once real content (or an empty/error state) replaces the spinner.
-    private var perfContentReady: Bool { response != nil || error != nil }
+    private var perfContentReady: Bool { resource.value != nil || resource.error != nil }
+
+    /// Newest-first workouts and this week's totals, rebuilt only when the resource changes.
+    private func series(_ response: TrainResponse) -> TrainSeries {
+        derived.get(resource.fetchedAt) { TrainSeries(response.data) }
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 16) {
                     header
-                    if let response, !response.data.isEmpty {
+                    if let response = resource.value, !response.data.isEmpty {
+                        let derivedSeries = series(response)
                         chips
-                        weeklyCard(response.data)
-                        workoutList(filtered(response.data))
-                    } else if isLoading {
+                        weeklyCard(derivedSeries)
+                        workoutList(filtered(derivedSeries.sorted))
+                    } else if resource.value == nil && resource.isRefreshing {
                         ProgressView().padding(.top, 60)
                     } else {
                         ContentUnavailableCompat(
@@ -32,8 +38,8 @@ struct TrainView: View {
                             systemImage: "bolt.fill"
                         )
                     }
-                    if let error {
-                        ErrorCard(message: error) { Task { await load() } }
+                    if resource.value == nil, let error = resource.error {
+                        ErrorCard(message: error) { Task { await store.refresh(.train, force: true) } }
                     }
                 }
                 .pageWidthLocked()
@@ -43,12 +49,12 @@ struct TrainView: View {
             .screenBackground()
             .toolbar(.hidden, for: .navigationBar)
             .sheet(item: $selectedWorkout) { WorkoutDetailSheet(workout: $0) }
-            .task { await load() }
+            .task(id: ResourceKey.train) { await store.refresh(.train) }
             .onAppear { if perfContentReady { PerfSignpost.endTabSwitchIfNeeded(tab: "train") } }
             .onChange(of: perfContentReady) { _, ready in
                 if ready { PerfSignpost.endTabSwitchIfNeeded(tab: "train") }
             }
-            .refreshable { await load() }
+            .refreshable { await store.refresh(.train, force: true) }
         }
     }
 
@@ -83,7 +89,7 @@ struct TrainView: View {
     }
 
     private func workoutList(_ workouts: [WorkoutDTO]) -> some View {
-        VStack(spacing: 0) {
+        LazyVStack(spacing: 0) {
             Text("Tap a workout for full details")
                 .font(.caption)
                 .foregroundStyle(Palette.textSecondary)
@@ -119,12 +125,12 @@ struct TrainView: View {
     }
 
     @ViewBuilder
-    private func weeklyCard(_ workouts: [WorkoutDTO]) -> some View {
-        let week = weeklyWorkouts(workouts)
+    private func weeklyCard(_ series: TrainSeries) -> some View {
+        let week = series.week
         if !week.isEmpty {
-            let totalStrain = week.reduce(0) { $0 + $1.strain }
-            let totalMin = week.reduce(0) { $0 + $1.durationMin }
-            let hardest = week.max { $0.strain < $1.strain }
+            let totalStrain = series.weekStrain
+            let totalMin = series.weekMinutes
+            let hardest = series.weekHardest
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     Eyebrow(text: "This week")
@@ -144,21 +150,8 @@ struct TrainView: View {
         }
     }
 
-    private func load() async {
-        guard let client = settings.makeClient() else { return }
-        isLoading = true
-        error = nil
-        defer { isLoading = false }
-        do {
-            response = try await client.getTrain(days: 28)
-        } catch {
-            self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-        }
-    }
-
-    private func filtered(_ workouts: [WorkoutDTO]) -> [WorkoutDTO] {
-        let sorted = workouts.sorted { $0.startAt > $1.startAt }
-        return filter == "All" ? sorted : sorted.filter { WorkoutSport.filterCategory(forKey: $0.sport) == filter }
+    private func filtered(_ sorted: [WorkoutDTO]) -> [WorkoutDTO] {
+        filter == "All" ? sorted : sorted.filter { WorkoutSport.filterCategory(forKey: $0.sport) == filter }
     }
 
     private func rowSubtitle(_ w: WorkoutDTO) -> String {
@@ -172,16 +165,11 @@ struct TrainView: View {
         WorkoutSport.filterCategory(forKey: sport) == "Recovery" ? .mint : .accent
     }
 
-    private static let isoParser: ISO8601DateFormatter = {
+    fileprivate static let isoParser: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return f
     }()
-
-    private func weeklyWorkouts(_ workouts: [WorkoutDTO]) -> [WorkoutDTO] {
-        let cutoff = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
-        return workouts.filter { (Self.isoParser.date(from: $0.startAt) ?? .distantPast) >= cutoff }
-    }
 
     private func weekday(_ iso: String) -> String {
         guard let date = Self.isoParser.date(from: iso) else { return "—" }
@@ -195,6 +183,24 @@ struct TrainView: View {
 
     private func fmt(_ value: Double) -> String {
         value == value.rounded() ? String(Int(value)) : String(format: "%.1f", value)
+    }
+}
+
+/// Values the Train tab derives from one `TrainResponse`.
+struct TrainSeries {
+    let sorted: [WorkoutDTO]
+    let week: [WorkoutDTO]
+    let weekStrain: Double
+    let weekMinutes: Double
+    let weekHardest: WorkoutDTO?
+
+    init(_ workouts: [WorkoutDTO], now: Date = Date()) {
+        sorted = workouts.sorted { $0.startAt > $1.startAt }
+        let cutoff = Calendar.current.date(byAdding: .day, value: -7, to: now) ?? now
+        week = workouts.filter { (TrainView.isoParser.date(from: $0.startAt) ?? .distantPast) >= cutoff }
+        weekStrain = week.reduce(0) { $0 + $1.strain }
+        weekMinutes = week.reduce(0) { $0 + $1.durationMin }
+        weekHardest = week.max { $0.strain < $1.strain }
     }
 }
 

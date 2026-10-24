@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var sync: SyncService
+    @Environment(AppStore.self) private var store
     @Environment(\.scenePhase) private var scenePhase
 
     @State private var showDeleteAccountConfirm = false
@@ -22,6 +23,7 @@ struct SettingsView: View {
                     LabeledContent("Signed in", value: settings.appleDisplayName ?? "Apple ID")
                     Button("Sign out", role: .destructive) {
                         settings.signOut()
+                        store.reset()
                     }
                 } else if settings.isConfigured {
                     Label("Connected via API token", systemImage: "checkmark.circle.fill")
@@ -181,7 +183,7 @@ struct SettingsView: View {
         ) {
             Button("Clear settings", role: .destructive) {
                 settings.clearLocalSettings()
-                sync.today = nil
+                store.reset()
                 notifications.cancelDaily()
                 actionMessage = "Local settings cleared."
             }
@@ -199,7 +201,7 @@ struct SettingsView: View {
         do {
             try await client.deleteAccount()
             settings.clearLocalSettings()
-            sync.today = nil
+            store.reset()
             notifications.cancelDaily()
             actionMessage = "Account data deleted."
         } catch {

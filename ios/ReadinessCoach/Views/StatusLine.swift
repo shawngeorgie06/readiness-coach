@@ -169,13 +169,19 @@ enum StatusLineModel {
 
     static func formattedDay(_ isoDay: String, locale: Locale = .current) -> String {
         guard let date = ChartDate.parse(isoDay) else { return isoDay }
-        let display = DateFormatter()
+        let display = dayFormatter
         display.locale = locale
         display.timeZone = .current
-        display.dateStyle = .medium
-        display.timeStyle = .none
         return display.string(from: date)
     }
+
+    /// Reused across calls; locale and zone are reapplied each time.
+    private static let dayFormatter: DateFormatter = {
+        let display = DateFormatter()
+        display.dateStyle = .medium
+        display.timeStyle = .none
+        return display
+    }()
 }
 
 /// Collapsed: the priority item plus score uncertainty and a remaining count.
