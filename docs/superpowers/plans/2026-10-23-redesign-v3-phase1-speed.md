@@ -196,7 +196,7 @@ export interface TodayBaselines { hrv: MetricBaseline; restingHr: MetricBaseline
 export function buildBaselines(input: {
   hrvToday: number | null; hrvBaseline: number | null; hrvDaily14: Array<number | null>;
   rhrToday: number | null; rhrBaseline: number | null; rhrDaily14: Array<number | null>;
-  sleepToday: number | null; sleepPrior30: number[]; sleepDaily14: Array<number | null>;
+  sleepToday: number | null; sleepPrior30: number[]; sleepDaily14: Array<number | null>; sleepNeedHours: number;
   load7dToday: number; load28dAvg: number; strain28d: number[];
 }): TodayBaselines
 ```
@@ -204,9 +204,9 @@ export function buildBaselines(input: {
 - **Band and series rules.** These are my calls, taken from the existing driver thresholds:
   - **HRV:** band is baseline ±5% (the "above/below your normal" cut). Good direction is up.
   - **Resting HR:** band is baseline ±3% (the "elevated" cut). Good direction is down.
-  - **Sleep:** baseline is the mean of the prior 30 nights with more than 0 h; band is ±10% (the 0.9 duration cut). Good direction is up.
+  - **Sleep:** baseline is the mean of the prior 30 nights with more than 0 h. The band is ±10% of the user's nightly target (`sleepNeedHours`), not of that average, because the sleep score's duration driver fires below 0.9 × target; centring the band on the average could show a night as normal while the driver calls it short. Good direction is up.
   - **Load:** `today` is the 7-day average strain and `baseline30d` is the 28-day average (the scoring's chronic window). The band is 0.7×–1.3× of the baseline, the ACR cuts in `load.ts`, and good direction is `"none"`. `recent14d[i]` is the 7-day rolling average ending on each of the last 14 days of `strain28d`.
-  - **Null bands:** the band is `null` whenever the baseline is `null`.
+  - **Null bands:** the HRV, resting HR and load bands are `null` whenever their baseline is `null`. The sleep band follows the target, so it stays set when the sleep baseline is `null`.
   - **Rounding:** all numbers are rounded to 2 dp.
   - **HRV and RHR daily series:** use `latestInWindow` per UTC day, matching how `computeScore` picks today's value. The sleep series uses `sleepHistory(…, 14, tz)` durations, with `0` becoming `null`.
 
@@ -214,7 +214,9 @@ export function buildBaselines(input: {
   - `hrv band is ±5% of baseline and direction up`: with `hrvBaseline: 60`, expect `neutralBand` `{ low: 57, high: 63 }` and `goodDirection` `"up"`.
   - `rhr band is ±3% and direction down`: with `rhrBaseline: 50`, expect the band `{ low: 48.5, high: 51.5 }`.
   - `null baseline gives null band`.
-  - `sleep baseline ignores zero nights`: with `sleepPrior30: [7, 0, 8]`, expect `baseline30d` 7.5 and band `{ low: 6.75, high: 8.25 }`.
+  - `sleep baseline ignores zero nights`: with `sleepPrior30: [7, 0, 8]`, expect `baseline30d` 7.5.
+  - `sleep band is ±10% of the scoring target, not the 30-day average`: with `sleepPrior30: [5, 5]`, `sleepToday: 6` and `sleepNeedHours: 8`, expect `baseline30d` 5 and band `{ low: 7.2, high: 8.8 }`, so tonight's 6 h falls below the band.
+  - `sleep band comes from the target even without history`: with `sleepPrior30: []` and `sleepNeedHours: 7.5`, expect `baseline30d` `null` and band `{ low: 6.75, high: 8.25 }`.
   - `load7d series is a 7-day rolling mean`: `strain28d` is 21 zeros followed by 7 sevens. The last `recent14d` entry is 7. `recent14d[7]`, the window ending on the first 7 (six days before the final day), is 1. `recent14d[6]`, seven days before the final day, is 0.
   - `recent14d always has 14 entries`.
 - [ ] **Step 2: Run them and confirm they fail.** Run `npx vitest run tests/services/todayBaselines.test.ts`.
