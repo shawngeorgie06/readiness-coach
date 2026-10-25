@@ -47,28 +47,28 @@ struct SettingsView: View {
         .onChange(of: actionMessage) { _, message in
             if let message { AccessibilityNotification.Announcement(message).post() }
         }
-        .confirmationDialog(
-            "Delete all account data on the server? This cannot be undone.",
-            isPresented: $showDeleteAccountConfirm,
-            titleVisibility: .visible
-        ) {
-            Button("Delete account data", role: .destructive) {
+        .sheet(isPresented: $showDeleteAccountConfirm) {
+            ConfirmationSheet(
+                title: "Delete account data?",
+                message: "Delete all account data on the server? This cannot be undone.\n\nThis permanently erases your user and all synced health samples, workouts, scores, and advisor notes.",
+                systemImage: "person.crop.circle.badge.minus",
+                actionTitle: "Delete account data"
+            ) {
                 Task { await deleteAccount() }
             }
-            Button("Cancel", role: .cancel) {}
         }
-        .confirmationDialog(
-            "Clear local settings on this device?",
-            isPresented: $showResetConfirm,
-            titleVisibility: .visible
-        ) {
-            Button("Clear settings", role: .destructive) {
+        .sheet(isPresented: $showResetConfirm) {
+            ConfirmationSheet(
+                title: "Clear local settings?",
+                message: "Clears the saved account and connection settings on this device and returns you to setup. Daily readiness notifications will be cancelled.\n\nAccount data on the server is kept.",
+                systemImage: "iphone.slash",
+                actionTitle: "Clear settings"
+            ) {
                 settings.clearLocalSettings()
                 StoreActivation.reset(store)
                 notifications.cancelDaily()
                 actionMessage = "Local settings cleared."
             }
-            Button("Cancel", role: .cancel) {}
         }
     }
 
@@ -384,6 +384,7 @@ struct SettingsView: View {
     }
 
     private func deleteAccount() async {
+        guard !isDeleting else { return }
         guard let client = settings.makeClient() else {
             actionMessage = APIError.notConfigured.localizedDescription
             return

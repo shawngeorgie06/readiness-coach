@@ -17,7 +17,6 @@ struct AskContext {
 struct AskCoachView: View {
     @EnvironmentObject private var settings: AppSettings
     @State private var context: AskContext
-    @Environment(\.dismiss) private var dismiss
 
     @State private var question = ""
     @State private var askedQuestion: String?
@@ -26,7 +25,7 @@ struct AskCoachView: View {
     @State private var error: String?
     @State private var isAsking = false
     @State private var askTask: Task<Void, Never>?
-    @FocusState private var questionFocused: Bool
+    @State private var questionFocused = false
 
     init(today: TodayDTO) {
         _context = State(initialValue: AskContext(today))
@@ -35,27 +34,14 @@ struct AskCoachView: View {
     private var trimmedQuestion: String { question.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: Space.section) {
-                    lockedCall
-                    questionField
-                    if let askedQuestion, isAsking || answer != nil || error != nil {
-                        conversation(askedQuestion)
-                    }
-                }
-                .padding(.horizontal, Space.margin)
-                .padding(.top, 8)
-                .padding(.bottom, 24)
+        SheetScaffold(title: "Ask Coach", context: "Your locked readiness call", systemImage: "text.bubble") {
+            lockedCall
+            questionField
+            if let askedQuestion, isAsking || answer != nil || error != nil {
+                conversation(askedQuestion)
             }
-            .scrollDismissesKeyboard(.interactively)
-            .sheetSurface()
-            .navigationTitle("Ask Coach")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
-            }
-            .onDisappear { askTask?.cancel() }
         }
+        .onDisappear { askTask?.cancel() }
     }
 
     // MARK: Locked call
@@ -98,23 +84,28 @@ struct AskCoachView: View {
                 .font(Typeface.sectionTitle)
                 .foregroundStyle(Palette.textPrimary)
                 .accessibilityHidden(true)
-            TextField("e.g. Can I do a hard lifting session today?", text: $question, axis: .vertical)
-                .lineLimit(2 ... 6)
-                .focused($questionFocused)
-                .font(.body)
+            CoachQuestionField(text: $question, isFocused: $questionFocused, onSubmit: submit)
+                .overlay(alignment: .topLeading) {
+                    if question.isEmpty {
+                        Text("Ask about your day")
+                            .font(.body)
+                            .foregroundStyle(Palette.textTertiary)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    }
+                }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 12)
                 .frame(minHeight: Space.target)
                 .background(Palette.surfaceHi, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .accessibilityLabel("Your question for the coach")
             Button(action: submit) {
                 HStack(spacing: 8) {
                     if isAsking { ProgressView().tint(Palette.canvas) }
                     Text(isAsking ? "Asking…" : "Ask")
                 }
-                .frame(maxWidth: .infinity, minHeight: 30)
+                .frame(maxWidth: .infinity)
             }
-            .primaryAction()
+            .buttonStyle(SheetActionStyle())
             .disabled(isAsking || trimmedQuestion.isEmpty)
         }
     }
@@ -191,19 +182,19 @@ struct AskCoachView: View {
 
     private func start(_ text: String) {
         askedQuestion = text
+        isAsking = true
+        error = nil
+        answer = nil
         askTask = Task { await ask(text) }
     }
 
     private func ask(_ text: String) async {
+        defer { isAsking = false }
         guard let client = settings.makeClient() else {
             answer = nil
             error = APIError.notConfigured.localizedDescription
             return
         }
-        isAsking = true
-        error = nil
-        answer = nil
-        defer { isAsking = false }
         do {
             let response = try await client.ask(question: text, date: context.date)
             guard !Task.isCancelled else { return }
