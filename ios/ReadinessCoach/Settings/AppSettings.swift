@@ -8,7 +8,17 @@ final class AppSettings: ObservableObject {
     private let sessionKey = "sessionToken"
     private let apiTokenKey = "apiToken"
 
-    @Published var apiBaseURL: String { didSet { defaults.set(apiBaseURL, forKey: Keys.baseURL) } }
+    @Published var apiBaseURL: String {
+        didSet {
+            defaults.set(apiBaseURL, forKey: Keys.baseURL)
+            // A different server has its own database, so it needs a full
+            // HealthKit backfill rather than only samples newer than the last sync.
+            if Self.normalized(oldValue) != Self.normalized(apiBaseURL) {
+                lastSyncAt = nil
+                lastRefreshAt = nil
+            }
+        }
+    }
     @Published var apiToken: String {
         didSet {
             let trimmed = apiToken.trimmingCharacters(in: .whitespaces)
@@ -40,7 +50,18 @@ final class AppSettings: ObservableObject {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        self.apiBaseURL = defaults.string(forKey: Keys.baseURL) ?? Self.defaultBaseURL
+        let storedBaseURL = defaults.string(forKey: Keys.baseURL)
+        // No saved URL means an older build's implicit default, which was a
+        // retired server. Its data did not move, so persist the new default and
+        // clear the watermark to re-upload HealthKit history.
+        if let storedBaseURL, !Self.retiredBaseURLs.contains(Self.normalized(storedBaseURL)) {
+            self.apiBaseURL = storedBaseURL
+        } else {
+            self.apiBaseURL = Self.defaultBaseURL
+            defaults.set(Self.defaultBaseURL, forKey: Keys.baseURL)
+            defaults.set(0, forKey: Keys.lastSync)
+            defaults.set(0, forKey: Keys.lastRefresh)
+        }
         // Prefer Keychain; migrate any legacy UserDefaults token once, then wipe it.
         let legacyToken = defaults.string(forKey: Keys.token)
         if let legacyToken, !legacyToken.isEmpty {
@@ -195,7 +216,23 @@ final class AppSettings: ObservableObject {
 
     /// This is a single-user personal deployment, so the backend URL is stable.
     /// Pre-filling it removes the need to type/paste the URL during onboarding.
-    static let defaultBaseURL = "https://readiness-coach-api-shawngeorgie06.georgenijo.com"
+    static let defaultBaseURL = "https://readiness-coach-api.vercel.app"
+
+    /// Former backends whose saved URLs move to `defaultBaseURL` on launch.
+    static let retiredBaseURLs: Set<String> = [
+        "https://readiness-coach-api-shawngeorgie06.georgenijo.com",
+    ]
+
+    /// Compares servers ignoring case in the scheme and host only; the path is
+    /// case-sensitive, so `/API` and `/api` stay distinct.
+    static func normalized(_ url: String) -> String {
+        var value = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        while value.hasSuffix("/") { value.removeLast() }
+        guard var components = URLComponents(string: value) else { return value }
+        components.scheme = components.scheme?.lowercased()
+        components.host = components.host?.lowercased()
+        return components.string ?? value
+    }
 
     private enum Keys {
         static let baseURL = "apiBaseURL"
