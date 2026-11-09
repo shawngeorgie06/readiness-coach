@@ -1,5 +1,8 @@
 # Family Host deployment and Neon migration
 
+> **Superseded.** The API now runs on Vercel with a fresh Neon database; see
+> [`vercel-deploy.md`](vercel-deploy.md). This page is kept for history.
+
 The Readiness Coach API is already live and healthy at:
 
 - App: <https://readiness-coach-api-shawngeorgie06.georgenijo.com>

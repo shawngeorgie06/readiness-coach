@@ -29,11 +29,9 @@ Simulator, `** BUILD SUCCEEDED **`). It still needs to be code-signed and run on
 a physical iPhone in Xcode to exercise HealthKit (device-only). See
 [`ios/README.md`](ios/README.md) and [`docs/ios-handoff.md`](docs/ios-handoff.md).
 
-The API is live on Family Host at
-[`readiness-coach-api-shawngeorgie06.georgenijo.com`](https://readiness-coach-api-shawngeorgie06.georgenijo.com)
-and its health check is passing. Family Host is ready to own the application
-and managed PostgreSQL lifecycle; moving the existing Neon data is the one
-remaining, explicitly approved cutover step.
+The API runs on Vercel (free Hobby plan) at
+[`readiness-coach-api.vercel.app`](https://readiness-coach-api.vercel.app/health)
+with a Neon PostgreSQL database. See [`docs/vercel-deploy.md`](docs/vercel-deploy.md).
 
 ## Local setup (after implementation begins)
 

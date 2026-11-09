@@ -195,7 +195,7 @@ final class AppSettings: ObservableObject {
 
     /// This is a single-user personal deployment, so the backend URL is stable.
     /// Pre-filling it removes the need to type/paste the URL during onboarding.
-    static let defaultBaseURL = "https://readiness-coach-api-shawngeorgie06.georgenijo.com"
+    static let defaultBaseURL = "https://readiness-coach-api.vercel.app"
 
     private enum Keys {
         static let baseURL = "apiBaseURL"
