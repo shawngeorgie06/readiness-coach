@@ -136,7 +136,7 @@ when it closes. Nothing is persisted on device or server.
     - The server re-applies `enforceAnswerDecisionLock` to each
       client-supplied assistant turn before sending it to the model, so a
       forged "you can PR today" turn arrives already corrected.
-    - Tests use a stub LLM to assert three things: the message order, the
+    - Tests use a stub LLM to assert the message order, the
       prompt wording, that history assistant turns are lock-corrected, and
       that the final answer is still lock-checked. Push days stay
       unguarded, as they are today. No live-model tests in CI.
