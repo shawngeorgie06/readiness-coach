@@ -50,13 +50,15 @@ final class AppSettings: ObservableObject {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         let storedBaseURL = defaults.string(forKey: Keys.baseURL)
-        if let storedBaseURL, Self.retiredBaseURLs.contains(Self.normalized(storedBaseURL)) {
-            // The retired server's data did not move, so re-upload everything.
+        // No saved URL means an older build's implicit default, which was a
+        // retired server. Its data did not move, so persist the new default and
+        // clear the watermark to re-upload HealthKit history.
+        if let storedBaseURL, !Self.retiredBaseURLs.contains(Self.normalized(storedBaseURL)) {
+            self.apiBaseURL = storedBaseURL
+        } else {
             self.apiBaseURL = Self.defaultBaseURL
             defaults.set(Self.defaultBaseURL, forKey: Keys.baseURL)
             defaults.set(0, forKey: Keys.lastSync)
-        } else {
-            self.apiBaseURL = storedBaseURL ?? Self.defaultBaseURL
         }
         // Prefer Keychain; migrate any legacy UserDefaults token once, then wipe it.
         let legacyToken = defaults.string(forKey: Keys.token)

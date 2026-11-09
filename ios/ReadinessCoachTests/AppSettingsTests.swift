@@ -27,6 +27,18 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertNil(settings.lastSyncAt)
     }
 
+    func testUnsavedLegacyDefaultResetsWatermarkOnce() {
+        defaults.set(Date().timeIntervalSince1970, forKey: "lastSyncAt")
+
+        let settings = AppSettings(defaults: defaults)
+        XCTAssertEqual(defaults.string(forKey: "apiBaseURL"), AppSettings.defaultBaseURL)
+        XCTAssertNil(settings.lastSyncAt)
+
+        settings.lastSyncAt = Date()
+        let relaunched = AppSettings(defaults: defaults)
+        XCTAssertNotNil(relaunched.lastSyncAt, "the migration runs only once")
+    }
+
     func testCustomServerURLIsKept() {
         defaults.set("https://example.test", forKey: "apiBaseURL")
         defaults.set(1_700_000_000, forKey: "lastSyncAt")
