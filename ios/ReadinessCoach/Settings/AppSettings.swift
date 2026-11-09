@@ -15,6 +15,7 @@ final class AppSettings: ObservableObject {
             // HealthKit backfill rather than only samples newer than the last sync.
             if Self.normalized(oldValue) != Self.normalized(apiBaseURL) {
                 lastSyncAt = nil
+                lastRefreshAt = nil
             }
         }
     }
@@ -59,6 +60,7 @@ final class AppSettings: ObservableObject {
             self.apiBaseURL = Self.defaultBaseURL
             defaults.set(Self.defaultBaseURL, forKey: Keys.baseURL)
             defaults.set(0, forKey: Keys.lastSync)
+            defaults.set(0, forKey: Keys.lastRefresh)
         }
         // Prefer Keychain; migrate any legacy UserDefaults token once, then wipe it.
         let legacyToken = defaults.string(forKey: Keys.token)
@@ -221,10 +223,15 @@ final class AppSettings: ObservableObject {
         "https://readiness-coach-api-shawngeorgie06.georgenijo.com",
     ]
 
+    /// Compares servers ignoring case in the scheme and host only; the path is
+    /// case-sensitive, so `/API` and `/api` stay distinct.
     static func normalized(_ url: String) -> String {
-        var value = url.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        var value = url.trimmingCharacters(in: .whitespacesAndNewlines)
         while value.hasSuffix("/") { value.removeLast() }
-        return value
+        guard var components = URLComponents(string: value) else { return value }
+        components.scheme = components.scheme?.lowercased()
+        components.host = components.host?.lowercased()
+        return components.string ?? value
     }
 
     private enum Keys {

@@ -46,7 +46,8 @@ before deploying code that needs them:
 
 ```bash
 cd backend
-DATABASE_URL="$(neonctl connection-string --project-id <id>)" npm run migrate:deploy
+NEON_PROJECT_ID=summer-dew-82899440  # Readiness Coach Fresh
+DATABASE_URL="$(neonctl connection-string --project-id "$NEON_PROJECT_ID")" npm run migrate:deploy
 ```
 
 ## Deploying

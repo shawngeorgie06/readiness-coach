@@ -19,12 +19,14 @@ final class AppSettingsTests: XCTestCase {
     func testRetiredServerURLMovesToDefaultAndResetsWatermark() {
         defaults.set("https://readiness-coach-api-shawngeorgie06.georgenijo.com/", forKey: "apiBaseURL")
         defaults.set(Date().timeIntervalSince1970, forKey: "lastSyncAt")
+        defaults.set(Date().timeIntervalSince1970, forKey: "lastRefreshAt")
 
         let settings = AppSettings(defaults: defaults)
 
         XCTAssertEqual(settings.apiBaseURL, AppSettings.defaultBaseURL)
         XCTAssertEqual(defaults.string(forKey: "apiBaseURL"), AppSettings.defaultBaseURL)
         XCTAssertNil(settings.lastSyncAt)
+        XCTAssertNil(settings.lastRefreshAt)
     }
 
     func testUnsavedLegacyDefaultResetsWatermarkOnce() {
@@ -56,7 +58,14 @@ final class AppSettingsTests: XCTestCase {
         settings.apiBaseURL = AppSettings.defaultBaseURL + "/"
         XCTAssertNotNil(settings.lastSyncAt, "same server, different spelling")
 
+        settings.lastRefreshAt = Date()
         settings.apiBaseURL = "https://example.test"
         XCTAssertNil(settings.lastSyncAt)
+        XCTAssertNil(settings.lastRefreshAt)
+    }
+
+    func testNormalizationIgnoresHostCaseButNotPathCase() {
+        XCTAssertEqual(AppSettings.normalized(" HTTPS://Example.TEST/api/ "), "https://example.test/api")
+        XCTAssertNotEqual(AppSettings.normalized("https://example.test/API"), AppSettings.normalized("https://example.test/api"))
     }
 }
