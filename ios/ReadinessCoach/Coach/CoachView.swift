@@ -76,6 +76,7 @@ struct CoachScreen: View {
     /// screen was opened to "Ask something…". Questions already asked are skipped.
     private var chipQuestions: [String] {
         guard !conversation.isPending, !conversation.isAtCap else { return [] }
+        if messages.isEmpty, autoAsk != nil { return [] }
         if let last = messages.last {
             guard last.role == .coach, last.state == .done else { return [] }
         }
@@ -120,7 +121,12 @@ struct CoachScreen: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .safeAreaInset(edge: .bottom, spacing: 0) { composer }
-            .onChange(of: messages) { scrollToLatest(proxy) }
+            .onChange(of: messages) { old, new in followMessages(old, new, proxy) }
+            .onChange(of: chipQuestions) {
+                // Chips under a fresh answer stay below its top; only the empty
+                // state has nothing to protect.
+                if messages.isEmpty { scrollToLatest(proxy) }
+            }
             .onChange(of: inputFocused) { _, focused in
                 if focused { scrollToLatest(proxy) }
             }
@@ -157,7 +163,7 @@ struct CoachScreen: View {
     private var inputRow: some View {
         VStack(alignment: .trailing, spacing: 4) {
             HStack(alignment: .bottom, spacing: 8) {
-                CoachQuestionField(text: $draft, isFocused: $inputFocused, onSubmit: send)
+                CoachQuestionField(text: $draft, isFocused: $inputFocused, onSubmit: send, minLines: 1)
                     .overlay(alignment: .topLeading) {
                         if draft.isEmpty {
                             Text("Ask a follow-up…")
@@ -171,7 +177,6 @@ struct CoachScreen: View {
                     .padding(.vertical, 12)
                     .frame(maxWidth: .infinity, minHeight: Space.target)
                 sendButton
-                    .padding(4)
             }
             .background(Palette.surfaceHi, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
             if showsCount {
@@ -200,7 +205,6 @@ struct CoachScreen: View {
         }
         .buttonStyle(CoachSendStyle())
         .disabled(!canSend)
-        .frame(minWidth: Space.target - 8, minHeight: Space.target - 8)
         .accessibilityLabel("Send")
     }
 
@@ -242,6 +246,22 @@ struct CoachScreen: View {
         Task { await conversation.ask(question) }
     }
 
+    /// New user/pending messages follow to the bottom; a finished coach answer
+    /// is anchored at its top so the start of a long answer stays in view.
+    private func followMessages(_ old: [CoachMessage], _ new: [CoachMessage], _ proxy: ScrollViewProxy) {
+        if new.count > old.count { scrollToLatest(proxy); return }
+        let before = Dictionary(uniqueKeysWithValues: old.map { ($0.id, $0.state) })
+        if let finished = new.last(where: { $0.role == .coach && $0.state == .done && before[$0.id] != .done }) {
+            if reduceMotion {
+                proxy.scrollTo(finished.id, anchor: .top)
+            } else {
+                withAnimation(.easeOut(duration: 0.35)) { proxy.scrollTo(finished.id, anchor: .top) }
+            }
+        } else if new != old {
+            scrollToLatest(proxy)
+        }
+    }
+
     private func scrollToLatest(_ proxy: ScrollViewProxy) {
         if reduceMotion {
             proxy.scrollTo(Self.bottomID, anchor: .bottom)
@@ -274,7 +294,9 @@ private struct CoachSendStyle: ButtonStyle {
             .background(isEnabled ? Palette.accent : Palette.track, in: Circle())
             .scaleEffect(configuration.isPressed ? 0.94 : 1)
             .animation(.easeOut(duration: 0.15), value: isEnabled)
-            .contentShape(Circle())
+            // The circle stays 36pt; the tappable area is the full target.
+            .frame(width: Space.target, height: Space.target)
+            .contentShape(Rectangle())
     }
 }
 

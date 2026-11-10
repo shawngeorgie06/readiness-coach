@@ -234,7 +234,7 @@ struct CoachFactorBar: View {
                 Capsule().fill(Palette.track)
                 Capsule()
                     .fill(fillColor)
-                    .frame(width: max(width * fill * (revealed ? 1 : 0), 0))
+                    .frame(width: max(width * fill * ((revealed || reduceMotion) ? 1 : 0), 0))
                 if let normal = comparison.normal {
                     Capsule()
                         .fill(Palette.textPrimary.opacity(0.85))
