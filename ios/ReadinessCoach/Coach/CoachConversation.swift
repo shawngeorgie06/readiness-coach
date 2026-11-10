@@ -59,7 +59,7 @@ final class CoachConversation {
 
     func ask(_ question: String) async {
         let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, trimmed.count <= Self.maxQuestionLength, !isAtCap, !isPending else { return }
+        guard !trimmed.isEmpty, trimmed.utf16.count <= Self.maxQuestionLength, !isAtCap, !isPending else { return }
         failedRequest = nil
         let history = historyTurns()
         messages.append(CoachMessage(role: .user, text: trimmed, state: .done))
@@ -86,12 +86,27 @@ final class CoachConversation {
 
     private func historyTurns() -> [CoachTurnDTO] {
         messages.filter { $0.state == .done }.compactMap { message in
-            let content = String(
-                message.wireText.trimmingCharacters(in: .whitespacesAndNewlines).prefix(Self.maxHistoryEntryLength)
+            let content = Self.capped(
+                message.wireText.trimmingCharacters(in: .whitespacesAndNewlines),
+                utf16Limit: Self.maxHistoryEntryLength
             )
             guard !content.isEmpty else { return nil }
             return CoachTurnDTO(role: message.role == .user ? "user" : "assistant", content: content)
         }
+    }
+
+    /// The server measures length in UTF-16 units (JavaScript `length`), so cap on that,
+    /// cutting only at character boundaries.
+    private static func capped(_ text: String, utf16Limit: Int) -> String {
+        var used = 0
+        var end = text.startIndex
+        for index in text.indices {
+            let units = text[index].utf16.count
+            if used + units > utf16Limit { break }
+            used += units
+            end = text.index(after: index)
+        }
+        return String(text[..<end])
     }
 
     private func deliver(question: String, history: [CoachTurnDTO]) async {

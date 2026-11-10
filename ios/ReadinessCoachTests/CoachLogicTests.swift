@@ -175,6 +175,17 @@ final class CoachLogicTests: XCTestCase {
         XCTAssertLessThanOrEqual(entries[1].content.count, 4000)
     }
 
+    func testEmojiAnswerIsCappedInUTF16Units() async {
+        let rec = Recorder()
+        rec.results = [.success(String(repeating: "💪", count: 3000))]
+        let convo = conversation(rec)
+        await convo.ask("one")
+        await convo.ask("two")
+        let content = rec.calls[1].history[1].content
+        XCTAssertEqual(content.utf16.count, 4000)
+        XCTAssertEqual(content, String(repeating: "💪", count: 2000))
+    }
+
     func testEmptyAnswerIsDroppedFromHistory() async {
         let rec = Recorder()
         rec.results = [.success("   ")]

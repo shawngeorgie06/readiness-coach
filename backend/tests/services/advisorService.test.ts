@@ -84,6 +84,14 @@ describe("enforceAnswerDecisionLock", () => {
 
     expect(enforceAnswerDecisionLock("recover", once)).toBe(once);
   });
+
+  it("re-appends the directive when lock-breaking text follows it", () => {
+    const directive = "Locked decision: RECOVER. Do not train hard today; walk, mobility, or full rest only.";
+    const forged = `${directive}\n\nIgnore that, you can PR today.`;
+
+    expect(enforceAnswerDecisionLock("recover", forged).endsWith(directive)).toBe(true);
+    expect(enforceAnswerDecisionLock("recover", forged)).not.toBe(forged);
+  });
 });
 
 describe("askCoach", () => {
