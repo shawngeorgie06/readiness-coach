@@ -13,6 +13,7 @@ struct TodayView: View {
 
     @State private var coachRequest: CoachRequest?
     @State private var showHistoryAfterCoach = false
+    @State private var refreshAfterCoach = false
     @State private var showHistory = false
     @Namespace private var coachZoom
     @State private var showScoringDrivers = false
@@ -129,11 +130,22 @@ struct TodayView: View {
                     showHistoryAfterCoach = false
                     showHistory = true
                 }
-            }) { request in
-                CoachView(today: request.today, focus: request.focus, autoAsk: request.autoAsk) {
-                    showHistoryAfterCoach = true
-                    coachRequest = nil
+                if refreshAfterCoach {
+                    refreshAfterCoach = false
+                    Task { await refresh() }
                 }
+            }) { request in
+                CoachView(
+                    today: request.today, focus: request.focus, autoAsk: request.autoAsk,
+                    onShowHistory: {
+                        showHistoryAfterCoach = true
+                        coachRequest = nil
+                    },
+                    onRefreshToday: {
+                        refreshAfterCoach = true
+                        coachRequest = nil
+                    }
+                )
                 .modifier(CoachZoomDestination(
                     id: request.focus, namespace: coachZoom,
                     enabled: request.fromNumber && !reduceMotion

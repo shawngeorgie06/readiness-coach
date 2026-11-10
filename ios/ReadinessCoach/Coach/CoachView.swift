@@ -10,14 +10,19 @@ struct CoachView: View {
     let focus: CoachFocus
     let autoAsk: String?
     let onShowHistory: () -> Void
+    let onRefreshToday: () -> Void
 
     @State private var conversation: CoachConversation?
 
-    init(today: TodayDTO, focus: CoachFocus, autoAsk: String?, onShowHistory: @escaping () -> Void) {
+    init(
+        today: TodayDTO, focus: CoachFocus, autoAsk: String?,
+        onShowHistory: @escaping () -> Void, onRefreshToday: @escaping () -> Void
+    ) {
         self.today = today
         self.focus = focus
         self.autoAsk = autoAsk
         self.onShowHistory = onShowHistory
+        self.onRefreshToday = onRefreshToday
     }
 
     var body: some View {
@@ -25,7 +30,7 @@ struct CoachView: View {
             if let conversation {
                 CoachScreen(
                     today: today, focus: focus, conversation: conversation,
-                    autoAsk: autoAsk, onShowHistory: onShowHistory
+                    autoAsk: autoAsk, onShowHistory: onShowHistory, onRefreshToday: onRefreshToday
                 )
             } else {
                 Palette.surface.ignoresSafeArea()
@@ -48,6 +53,7 @@ struct CoachScreen: View {
     let conversation: CoachConversation
     let autoAsk: String?
     let onShowHistory: () -> Void
+    var onRefreshToday: () -> Void = {}
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -220,13 +226,15 @@ struct CoachScreen: View {
     }
 
     /// Quiet, not an alert: the answers still read fine, the screen's numbers just aged.
+    /// The header is a frozen snapshot, so seeing new numbers means going back to Today
+    /// and refreshing it; a reset here would only show the old snapshot again.
     private var staleNotice: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("Today's numbers changed since you opened this. Start a new conversation to see them.")
+            Text("Today's numbers changed since you opened this.")
                 .font(.footnote)
                 .foregroundStyle(Palette.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Button("Start a new conversation", action: startOver)
+            Button("Close and refresh Today", action: onRefreshToday)
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(Palette.accent)
                 .frame(minHeight: Space.target, alignment: .leading)

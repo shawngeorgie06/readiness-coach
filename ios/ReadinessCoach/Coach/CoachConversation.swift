@@ -90,7 +90,8 @@ final class CoachConversation {
         self.send = send
     }
 
-    var isAtCap: Bool { messages.count >= Self.messageCap }
+    /// Failed pairs are pruned by the next ask, so they must not block that ask.
+    var isAtCap: Bool { messages.filter { $0.state != .failed }.count >= Self.messageCap }
     var isPending: Bool { messages.contains { $0.state == .pending } }
 
     func ask(_ question: String) async {

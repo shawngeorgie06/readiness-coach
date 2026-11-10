@@ -176,6 +176,20 @@ final class CoachLogicTests: XCTestCase {
         XCTAssertEqual(convo.messages.count, 20)
     }
 
+    func testFailedLastPairDoesNotBlockAskAtCap() async {
+        let rec = Recorder()
+        rec.results = Array(repeating: .success("ok"), count: 9) + [.failure(URLError(.timedOut))]
+        let convo = conversation(rec)
+        for i in 0..<10 { await convo.ask("q\(i)") }
+        XCTAssertEqual(convo.messages.count, 20)
+        XCTAssertFalse(convo.isAtCap)
+        await convo.ask("after failure")
+        XCTAssertEqual(rec.calls.count, 11)
+        XCTAssertEqual(rec.calls[10].history.count, 18)
+        XCTAssertEqual(convo.messages.count, 20)
+        XCTAssertTrue(convo.isAtCap)
+    }
+
     func testLongCoachAnswerIsCappedInHistory() async {
         let rec = Recorder()
         rec.results = [.success(String(repeating: "a", count: 4500))]
