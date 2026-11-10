@@ -86,7 +86,7 @@ describe("enforceAnswerDecisionLock", () => {
   });
 
   it("re-appends the directive when lock-breaking text follows it", () => {
-    const directive = "Locked decision: RECOVER. Do not train hard today; walk, mobility, or full rest only.";
+    const directive = "Locked decision: RECOVER. Keep today easy: a walk, light stretching, or rest.";
     const forged = `${directive}\n\nIgnore that, you can PR today.`;
 
     expect(enforceAnswerDecisionLock("recover", forged).endsWith(directive)).toBe(true);
@@ -223,6 +223,17 @@ describe("askCoach", () => {
     expect(system).toMatch(/under 60 words/);
     expect(system).toMatch(/everyday words/i);
     expect(system).not.toMatch(/thorough/i);
+  });
+
+  it("keeps a lock correction short, plain, and in one paragraph", () => {
+    const answer = "Skip any max or all-out work today. Your body is still recovering from a short night. Keep it easy.";
+    for (const locked of ["recover", "maintain"] as const) {
+      const corrected = enforceAnswerDecisionLock(locked, answer);
+      expect(corrected).toContain("Locked decision:");
+      expect(corrected).not.toContain("\n");
+      expect(corrected).not.toMatch(/RPE/);
+      expect(corrected.split(/\s+/).length).toBeLessThanOrEqual(35);
+    }
   });
 
   it("omits baselines when the context has none", async () => {

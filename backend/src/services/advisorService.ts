@@ -225,10 +225,11 @@ function answerViolatesLock(locked: Decision, answer: string): boolean {
 export function enforceAnswerDecisionLock(locked: Decision, answer: string): string {
   if (!answerViolatesLock(locked, answer)) return answer;
   const directive = locked === "recover"
-    ? "Locked decision: RECOVER. Do not train hard today; walk, mobility, or full rest only."
-    : "Locked decision: MAINTAIN. No PRs or maximal work; cap intensity at RPE 7.";
+    ? "Locked decision: RECOVER. Keep today easy: a walk, light stretching, or rest."
+    : "Locked decision: MAINTAIN. Moderate effort only, no max lifts or all-out work.";
   if (answer.trimEnd().endsWith(directive)) return answer;
-  return `${answer.trim()}\n\n${directive}`;
+  // Same paragraph, short and plain, so a correction keeps the answer brief.
+  return `${answer.trim()} ${directive}`;
 }
 
 export async function askCoach(
