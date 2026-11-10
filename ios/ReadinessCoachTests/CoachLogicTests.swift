@@ -198,9 +198,12 @@ final class CoachLogicTests: XCTestCase {
     }
 
     func testCoachMarkdownDropsLinks() {
-        let rendered = CoachMarkdown.render("Read [this](https://evil.example) and <https://evil.example>.")
+        let rendered = CoachMarkdown.render("Read [this](https://evil.example), <https://evil.example>, https://evil.example/x and me@evil.example.")
         XCTAssertFalse(rendered.runs.contains { $0.link != nil })
-        XCTAssertTrue(String(rendered.characters).contains("this"))
+        let text = String(rendered.characters)
+        XCTAssertTrue(text.contains("this"))
+        XCTAssertTrue(text.contains("https://evil.example/x"))
+        XCTAssertTrue(text.contains("me@evil.example"))
     }
 
     func testLongCoachAnswerIsCappedInHistory() async {

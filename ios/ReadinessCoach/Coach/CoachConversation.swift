@@ -211,9 +211,7 @@ enum CoachMarkdown {
             return AttributedString(text)
         }
         // Model output is untrusted: never turn it into tappable links.
-        for run in parsed.runs where run.link != nil {
-            parsed[run.range].link = nil
-        }
+        parsed.link = nil
         return parsed
     }
 

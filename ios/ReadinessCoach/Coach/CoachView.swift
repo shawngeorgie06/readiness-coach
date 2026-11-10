@@ -129,13 +129,9 @@ struct CoachScreen: View {
             .scrollDismissesKeyboard(.interactively)
             .safeAreaInset(edge: .bottom, spacing: 0) { composer }
             .onChange(of: messages) { old, new in followMessages(old, new, proxy) }
-            .onChange(of: chipQuestions) {
-                // Chips under a fresh answer stay below its top; only the empty
-                // state has nothing to protect.
-                if messages.isEmpty { scrollToLatest(proxy) }
-            }
             .onChange(of: inputFocused) { _, focused in
-                if focused { scrollToLatest(proxy) }
+                // The empty state is only the header; scrolling would push it under the grabber.
+                if focused, !messages.isEmpty { scrollToLatest(proxy) }
             }
         }
         .sheetSurface()
@@ -147,7 +143,7 @@ struct CoachScreen: View {
 
     private var composer: some View {
         VStack(spacing: 10) {
-            if conversation.numbersChanged, !conversation.isAtCap {
+            if conversation.numbersChanged {
                 staleNotice
             }
             if conversation.isAtCap {
@@ -176,7 +172,7 @@ struct CoachScreen: View {
                 CoachQuestionField(text: $draft, isFocused: $inputFocused, onSubmit: send, minLines: 1)
                     .overlay(alignment: .topLeading) {
                         if draft.isEmpty {
-                            Text("Ask a follow-up…")
+                            Text(messages.isEmpty ? "Ask something…" : "Ask a follow-up…")
                                 .font(.body)
                                 .foregroundStyle(Palette.textTertiary)
                                 .allowsHitTesting(false)
