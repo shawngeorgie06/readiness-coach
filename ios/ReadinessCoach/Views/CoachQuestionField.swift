@@ -7,6 +7,7 @@ struct CoachQuestionField: UIViewRepresentable {
     @Binding var text: String
     @Binding var isFocused: Bool
     let onSubmit: () -> Void
+    var minLines: Int = 2
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -42,7 +43,7 @@ struct CoachQuestionField: UIViewRepresentable {
         guard let width = proposal.width else { return nil }
         let line = uiView.font?.lineHeight ?? 22
         let fitted = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
-        let height = min(max(fitted.height, line * 2), line * 6)
+        let height = min(max(fitted.height, line * CGFloat(minLines)), line * 6)
         uiView.isScrollEnabled = fitted.height > height + 1
         return CGSize(width: width, height: height)
     }

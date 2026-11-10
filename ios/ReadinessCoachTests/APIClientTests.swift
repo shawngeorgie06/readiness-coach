@@ -66,6 +66,42 @@ final class APIClientTests: XCTestCase {
         HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: headers)!
     }
 
+    private func requestBody(_ request: URLRequest) -> Data? {
+        if let body = request.httpBody { return body }
+        guard let stream = request.httpBodyStream else { return nil }
+        stream.open(); defer { stream.close() }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while stream.hasBytesAvailable {
+            let n = stream.read(&buffer, maxLength: buffer.count)
+            if n <= 0 { break }
+            data.append(buffer, count: n)
+        }
+        return data
+    }
+
+    func testAskEncodesHistory() async throws {
+        StubURLProtocol.reset { [self] req in
+            (response(req, 200), Data(#"{"decision":"maintain","answer":"ok"}"#.utf8))
+        }
+        let history = [CoachTurnDTO(role: "user", content: "hi"), CoachTurnDTO(role: "assistant", content: "hello")]
+        _ = try await client().ask(question: "next", date: "2026-11-09", history: history)
+        let body = try XCTUnwrap(requestBody(StubURLProtocol.requests[0]))
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let sent = try XCTUnwrap(json["history"] as? [[String: String]])
+        XCTAssertEqual(sent, [["role": "user", "content": "hi"], ["role": "assistant", "content": "hello"]])
+    }
+
+    func testAskOmitsEmptyHistory() async throws {
+        StubURLProtocol.reset { [self] req in
+            (response(req, 200), Data(#"{"decision":"maintain","answer":"ok"}"#.utf8))
+        }
+        _ = try await client().ask(question: "next", date: "2026-11-09")
+        let body = try XCTUnwrap(requestBody(StubURLProtocol.requests[0]))
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertNil(json["history"])
+    }
+
     func testSendsIfNoneMatchAndMaps304ToNotModified() async throws {
         StubURLProtocol.reset { [self] req in (response(req, 304), Data()) }
         let result = try await client().today(etag: "W/\"abc\"")

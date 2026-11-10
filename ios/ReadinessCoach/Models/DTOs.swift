@@ -228,6 +228,14 @@ struct AskRequest: Codable {
     let userId: String
     let question: String
     let date: String?
+    /// Earlier turns of this conversation; omitted when empty.
+    var history: [CoachTurnDTO]? = nil
+}
+
+struct CoachTurnDTO: Codable, Equatable {
+    /// "user" or "assistant".
+    let role: String
+    let content: String
 }
 
 struct AskResponse: Codable {

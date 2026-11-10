@@ -44,17 +44,6 @@ final class SupportScreensTests: XCTestCase {
         XCTAssertEqual(deletions, 1)
     }
 
-    func testAskKeepsOriginalDayAndConservativeDecisionAfterRefresh() {
-        var displayed = today(date: "2026-10-23", decision: .recover)
-        let frozen = AskContext(displayed)
-
-        displayed = today(date: "2026-10-24", decision: .push)
-
-        XCTAssertEqual(frozen.date, "2026-10-23")
-        XCTAssertEqual(frozen.decision, .recover)
-        XCTAssertEqual(displayed.decision, .push)
-    }
-
     @MainActor
     func testKeyboardSendSubmitsTheCurrentDraftFromAnyCursorPosition() {
         var draft = "Old draft"

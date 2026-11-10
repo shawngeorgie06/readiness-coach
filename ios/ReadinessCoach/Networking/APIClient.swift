@@ -189,8 +189,11 @@ struct APIClient {
         return try decode(data)
     }
 
-    func ask(question: String, date: String? = nil) async throws -> AskResponse {
-        let body = AskRequest(userId: userId, question: question, date: date ?? Self.deviceLocalDate())
+    func ask(question: String, date: String? = nil, history: [CoachTurnDTO] = []) async throws -> AskResponse {
+        let body = AskRequest(
+            userId: userId, question: question, date: date ?? Self.deviceLocalDate(),
+            history: history.isEmpty ? nil : history
+        )
         return try await send("v1/coach/ask", method: "POST", body: body)
     }
 
