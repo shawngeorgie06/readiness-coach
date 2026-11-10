@@ -197,6 +197,12 @@ final class CoachLogicTests: XCTestCase {
         XCTAssertTrue(rendered.runs.contains { $0.inlinePresentationIntent?.contains(.stronglyEmphasized) == true })
     }
 
+    func testCoachMarkdownDropsLinks() {
+        let rendered = CoachMarkdown.render("Read [this](https://evil.example) and <https://evil.example>.")
+        XCTAssertFalse(rendered.runs.contains { $0.link != nil })
+        XCTAssertTrue(String(rendered.characters).contains("this"))
+    }
+
     func testLongCoachAnswerIsCappedInHistory() async {
         let rec = Recorder()
         rec.results = [.success(String(repeating: "a", count: 4500))]
