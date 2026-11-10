@@ -201,3 +201,16 @@ final class CoachConversation {
         return (trimmed, nil)
     }
 }
+
+/// The model sometimes answers with inline markdown (`**recover**`). Render the
+/// inline styles and keep paragraph breaks; fall back to the raw text if parsing fails.
+enum CoachMarkdown {
+    static func render(_ text: String) -> AttributedString {
+        let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+    }
+
+    static func plain(_ text: String) -> String {
+        String(render(text).characters)
+    }
+}

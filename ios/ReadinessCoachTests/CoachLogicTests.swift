@@ -190,6 +190,13 @@ final class CoachLogicTests: XCTestCase {
         XCTAssertTrue(convo.isAtCap)
     }
 
+    func testCoachMarkdownRendersInlineStylesWithoutAsterisks() {
+        let text = "Today is **recover**.\n\nKeep it *easy*."
+        XCTAssertEqual(CoachMarkdown.plain(text), "Today is recover.\n\nKeep it easy.")
+        let rendered = CoachMarkdown.render(text)
+        XCTAssertTrue(rendered.runs.contains { $0.inlinePresentationIntent?.contains(.stronglyEmphasized) == true })
+    }
+
     func testLongCoachAnswerIsCappedInHistory() async {
         let rec = Recorder()
         rec.results = [.success(String(repeating: "a", count: 4500))]

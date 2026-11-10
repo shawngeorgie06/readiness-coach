@@ -106,7 +106,7 @@ private struct CoachAnswer: View {
         case .done:
             VStack(alignment: .leading, spacing: 10) {
                 if !message.text.isEmpty {
-                    Text(message.text)
+                    Text(CoachMarkdown.render(message.text))
                         .font(.body)
                         .foregroundStyle(Palette.textPrimary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -125,7 +125,7 @@ private struct CoachAnswer: View {
                 }
             }
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("Coach: \(message.wireText)")
+            .accessibilityLabel("Coach: \(CoachMarkdown.plain(message.wireText))")
             .transition(swap)
         }
     }
