@@ -3,6 +3,9 @@ import { z } from "zod";
 import { CoachUnavailableError, askCoach } from "../services/advisorService.js";
 import { defaultRequestedDate, getToday, UserNotFoundError } from "../services/todayService.js";
 
+/** Total history content the model is sent; the iOS client trims to this too. */
+export const MAX_HISTORY_CHARS = 16_000;
+
 const turnSchema = z.object({
   role: z.enum(["user", "assistant"]),
   content: z.string().trim().min(1).max(4_000),
@@ -12,7 +15,13 @@ export const askRequestSchema = z.object({
   userId: z.string().trim().min(1),
   question: z.string().trim().min(1).max(1_500),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  history: z.array(turnSchema).max(20).optional(),
+  history: z
+    .array(turnSchema)
+    .max(20)
+    .refine((turns) => turns.reduce((total, turn) => total + turn.content.length, 0) <= MAX_HISTORY_CHARS, {
+      message: `history may total at most ${MAX_HISTORY_CHARS} characters`,
+    })
+    .optional(),
 });
 
 export const coachRouter = Router();

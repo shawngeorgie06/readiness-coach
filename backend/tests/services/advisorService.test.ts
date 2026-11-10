@@ -186,10 +186,32 @@ describe("askCoach", () => {
     await askCoach("q", context({ baselines: baselines() }), [], llm);
 
     const sent = JSON.parse(requests[0].messages[1].content);
-    expect(sent.today.baselines.hrv).toEqual({ today: 65, normal30d: 85, percentFromNormal: -24 });
+    expect(sent.today.baselines.hrv).toEqual({
+      today: 65, normal30d: 85, percentFromNormal: -24, position: null, goodDirection: "up",
+    });
     expect(sent.today.baselines.restingHr.percentFromNormal).toBeNull();
     expect(sent.today.baselines.sleepHours.percentFromNormal).toBeNull();
-    expect(sent.today.baselines.load7d).toEqual({ today: 10, normal30d: 8, percentFromNormal: 25 });
+    expect(sent.today.baselines.load7d).toMatchObject({ today: 10, normal30d: 8, percentFromNormal: 25 });
+  });
+
+  it("sends position and rounds baselines to the precision the app shows", async () => {
+    const { llm, requests } = stub();
+    const raw = (today: number, baseline30d: number, position: "below" | "within" | "above", goodDirection: "up" | "down" | "none") =>
+      ({ ...metric(today, baseline30d), position, goodDirection });
+    await askCoach("q", context({
+      baselines: {
+        hrv: raw(31.4916, 55.5, "below", "up"),
+        restingHr: raw(65.6, 58.2, "above", "down"),
+        sleepHours: raw(6.1234, 7.2467, "within", "up"),
+        load7d: raw(11.249, 9.451, "above", "none"),
+      },
+    }), [], llm);
+
+    const b = JSON.parse(requests[0].messages[1].content).today.baselines;
+    expect(b.hrv).toMatchObject({ today: 31, normal30d: 56, position: "below", goodDirection: "up" });
+    expect(b.restingHr).toMatchObject({ today: 66, normal30d: 58, position: "above", goodDirection: "down" });
+    expect(b.sleepHours).toMatchObject({ today: 6.12, normal30d: 7.25, position: "within" });
+    expect(b.load7d).toMatchObject({ today: 11.2, normal30d: 9.5, position: "above", goodDirection: "none" });
   });
 
   it("omits baselines when the context has none", async () => {

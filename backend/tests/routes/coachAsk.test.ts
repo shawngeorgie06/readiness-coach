@@ -31,4 +31,12 @@ describe("askRequestSchema", () => {
     expect(askRequestSchema.safeParse({ ...base, history: [{ role: "user", content: "a".repeat(4_001) }] }).success).toBe(false);
     expect(askRequestSchema.safeParse({ ...base, history: [{ role: "user", content: "a".repeat(4_000) }] }).success).toBe(true);
   });
+
+  it("accepts history totalling exactly 16,000 characters and rejects 16,001", () => {
+    const four = (n: number) => Array.from({ length: 4 }, (_, i) => ({ role: i % 2 === 0 ? "user" : "assistant", content: "a".repeat(n) }));
+    expect(askRequestSchema.safeParse({ ...base, history: four(4_000) }).success).toBe(true);
+    const over = four(4_000);
+    over.push({ role: "user", content: "a" });
+    expect(askRequestSchema.safeParse({ ...base, history: over }).success).toBe(false);
+  });
 });

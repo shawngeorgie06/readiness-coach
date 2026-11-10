@@ -16,10 +16,15 @@ enum CoachPrompts {
         if let low = notablyLowPillar(today) {
             return "Your \(low.pillar.title.lowercased()) is at \(low.score), well below your other pillars. Ask me what is behind it."
         }
+        let readiness = Int(today.readiness.rounded())
+        let lowest = Pillar.allCases
+            .map { ($0, Int($0.score(in: today.pillars).score.rounded())) }
+            .min { $0.1 < $1.1 }
+        let tail = lowest.map { " \($0.0.title) is your lowest at \($0.1)." } ?? ""
         switch today.decision {
-        case .push: return "You are primed to push today. Ask me how to spend it."
-        case .maintain: return "A steady day. Ask me what to do with it."
-        case .recover: return "Your body is asking for a lighter day. Ask me why."
+        case .push: return "Readiness \(readiness), primed to push.\(tail)"
+        case .maintain: return "Readiness \(readiness), a steady day.\(tail)"
+        case .recover: return "Readiness \(readiness), a lighter day is the call.\(tail)"
         }
     }
 

@@ -98,7 +98,7 @@ private struct CoachAnswer: View {
         case .failed:
             InlineNotice(
                 title: "Couldn't get an answer",
-                message: "The coach didn't respond. Check your connection and try again.",
+                message: (message.failure ?? .other).message,
                 actionTitle: "Try again",
                 action: onRetry
             )

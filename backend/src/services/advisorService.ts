@@ -82,12 +82,27 @@ function allDrivers(today: AdvisorContext): string[] {
   ];
 }
 
-function baselineEntry(metric: MetricBaseline) {
+/** Round to what the app shows: whole numbers, nearest minute for sleep, tenths for load. */
+const PRECISION: Record<string, (value: number) => number> = {
+  hrv: (value) => Math.round(value),
+  restingHr: (value) => Math.round(value),
+  sleepHours: (value) => Math.round((Math.round(value * 60) / 60) * 100) / 100,
+  load7d: (value) => Math.round(value * 10) / 10,
+};
+
+function baselineEntry(name: keyof typeof PRECISION, metric: MetricBaseline) {
   const { today, baseline30d: normal } = metric;
   const percentFromNormal = today == null || normal == null || normal === 0
     ? null
     : Math.round(((today - normal) / normal) * 100);
-  return { today, normal30d: normal, percentFromNormal };
+  const round = PRECISION[name];
+  return {
+    today: today == null ? null : round(today),
+    normal30d: normal == null ? null : round(normal),
+    percentFromNormal,
+    position: metric.position,
+    goodDirection: metric.goodDirection,
+  };
 }
 
 function metricSummary(today: AdvisorContext) {
@@ -103,10 +118,10 @@ function metricSummary(today: AdvisorContext) {
       ? {}
       : {
           baselines: {
-            hrv: baselineEntry(baselines.hrv),
-            restingHr: baselineEntry(baselines.restingHr),
-            sleepHours: baselineEntry(baselines.sleepHours),
-            load7d: baselineEntry(baselines.load7d),
+            hrv: baselineEntry("hrv", baselines.hrv),
+            restingHr: baselineEntry("restingHr", baselines.restingHr),
+            sleepHours: baselineEntry("sleepHours", baselines.sleepHours),
+            load7d: baselineEntry("load7d", baselines.load7d),
           },
         }),
   };

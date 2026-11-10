@@ -26,9 +26,10 @@ struct CoachCard: View {
                 .fixedSize(horizontal: false, vertical: true)
             ChipFlow(spacing: 8) {
                 ForEach(CoachPrompts.suggestions(today), id: \.self) { question in
-                    chip(question, systemImage: nil, label: "Ask: \(question)") { onAsk(question) }
+                    chip(question, systemImage: nil, label: "Ask: \(question)", inputLabels: [question]) { onAsk(question) }
                 }
-                chip("Ask something…", systemImage: "square.and.pencil", label: "Ask the coach a question") {
+                chip("Ask something…", systemImage: "square.and.pencil", label: "Ask the coach a question",
+                         inputLabels: ["Ask something", "Ask the coach"]) {
                     onAsk(nil)
                 }
             }
@@ -46,7 +47,7 @@ struct CoachCard: View {
     }
 
     private func chip(
-        _ text: String, systemImage: String?, label: String, action: @escaping () -> Void
+        _ text: String, systemImage: String?, label: String, inputLabels: [String], action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             HStack(spacing: 6) {
@@ -70,6 +71,7 @@ struct CoachCard: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
+        .accessibilityInputLabels(inputLabels)
     }
 }
 

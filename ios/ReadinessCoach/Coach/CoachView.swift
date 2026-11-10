@@ -36,7 +36,7 @@ struct CoachView: View {
             let client = settings.makeClient()
             conversation = CoachConversation(today: today, focus: focus) { question, date, history in
                 guard let client else { throw APIError.notConfigured }
-                return try await client.ask(question: question, date: date, history: history).answer
+                return try await client.ask(question: question, date: date, history: history)
             }
         }
     }
@@ -76,7 +76,8 @@ struct CoachScreen: View {
     /// screen was opened to "Ask something…". Questions already asked are skipped.
     private var chipQuestions: [String] {
         guard !conversation.isPending, !conversation.isAtCap else { return [] }
-        if messages.isEmpty, autoAsk != nil { return [] }
+        // Only the opening auto-ask replaces the chips; after a reset they return.
+        if messages.isEmpty, autoAsk != nil, !didAutoAsk { return [] }
         if let last = messages.last {
             guard last.role == .coach, last.state == .done else { return [] }
         }
@@ -140,6 +141,9 @@ struct CoachScreen: View {
 
     private var composer: some View {
         VStack(spacing: 10) {
+            if conversation.numbersChanged, !conversation.isAtCap {
+                staleNotice
+            }
             if conversation.isAtCap {
                 capped
             } else {
@@ -208,12 +212,31 @@ struct CoachScreen: View {
         .accessibilityLabel("Send")
     }
 
+    private func startOver() {
+        withAnimation(reduceMotion ? .easeInOut(duration: 0.25) : .easeInOut(duration: 0.35)) {
+            conversation.reset()
+            draft = ""
+        }
+    }
+
+    /// Quiet, not an alert: the answers still read fine, the screen's numbers just aged.
+    private var staleNotice: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Today's numbers changed since you opened this. Start a new conversation to see them.")
+                .font(.footnote)
+                .foregroundStyle(Palette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Start a new conversation", action: startOver)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(Palette.accent)
+                .frame(minHeight: Space.target, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     private var capped: some View {
         Button {
-            withAnimation(reduceMotion ? .easeInOut(duration: 0.25) : .easeInOut(duration: 0.35)) {
-                conversation.reset()
-                draft = ""
-            }
+            startOver()
         } label: {
             Label("Start a new conversation", systemImage: "arrow.counterclockwise")
                 .font(.body.weight(.semibold))
@@ -330,7 +353,7 @@ private enum CoachPreviewData {
         )
     }
 
-    static let answer = "Your HRV is 31 ms against a normal of 56, and your resting heart rate is up 8 bpm. Together that is a body still catching up from the last few days, so recovery is the priority today.\n\nLocked decision: Recover. The coach explains this call; it can't change it."
+    static let answer = "Your HRV is 31 ms against a normal of 56, and your resting heart rate is up 8 bpm. Together that is a body still catching up from the last few days, so recovery is the priority today.\n\nLocked decision: RECOVER. Do not train hard today; walk, mobility, or full rest only."
 
     @MainActor static func conversation(
         _ today: TodayDTO, _ focus: CoachFocus, failing: Bool = false
@@ -338,7 +361,7 @@ private enum CoachPreviewData {
         CoachConversation(today: today, focus: focus) { _, _, _ in
             try await Task.sleep(for: .milliseconds(900))
             if failing { throw APIError.notConfigured }
-            return answer
+            return AskResponse(decision: today.decision, answer: answer)
         }
     }
 }
