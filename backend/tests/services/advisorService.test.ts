@@ -214,6 +214,17 @@ describe("askCoach", () => {
     expect(b.load7d).toMatchObject({ today: 11.2, normal30d: 9.5, position: "above", goodDirection: "none" });
   });
 
+  it("asks for a short, plain-language answer", async () => {
+    const { llm, requests } = stub();
+    await askCoach("q", context(), [], llm);
+
+    const system = requests[0].messages[0].content;
+    expect(system).toMatch(/2-3 short sentences/);
+    expect(system).toMatch(/under 60 words/);
+    expect(system).toMatch(/everyday words/i);
+    expect(system).not.toMatch(/thorough/i);
+  });
+
   it("omits baselines when the context has none", async () => {
     const { llm, requests } = stub();
     await askCoach("q", context(), [], llm);
