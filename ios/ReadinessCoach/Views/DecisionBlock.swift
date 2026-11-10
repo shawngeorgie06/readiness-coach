@@ -16,8 +16,8 @@ struct DecisionBlock: View {
             meaning: "Readiness · \(today.decision.shortMeaning)",
             note: today.isSleepPending ? "Showing last night — you haven't slept yet tonight" : nil,
             noteSystemImage: "moon.zzz",
-            accessibilityLabel: TodayHeadModel.accessibilityLabel(today),
-            accessibilityHint: "Opens readiness history",
+            accessibilityLabel: "Explain \(TodayHeadModel.accessibilityLabel(today))",
+            accessibilityHint: "Asks the coach to explain your readiness",
             action: onScoreTap
         )
     }

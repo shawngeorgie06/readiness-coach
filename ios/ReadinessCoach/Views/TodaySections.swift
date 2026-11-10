@@ -10,12 +10,15 @@ extension Pillar {
     }
 }
 
-/// The three pillars as equal 270° gauges. Tapping one opens its tab. At
+/// The three pillars as equal 270° gauges. Tapping one asks the coach to explain it. At
 /// accessibility sizes the gauges stack, each beside its name and driver.
 struct PillarGaugeRow: View {
     let pillars: Pillars
     let open: (Pillar) -> Void
+    /// Marks each ring as the source of the coach sheet's zoom.
+    var zoom: (namespace: Namespace.ID, enabled: Bool)?
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Namespace private var fallbackNamespace
 
     var body: some View {
         if typeSize.isAccessibilitySize {
@@ -82,9 +85,14 @@ struct PillarGaugeRow: View {
     private func button(_ pillar: Pillar, @ViewBuilder label: () -> some View) -> some View {
         Button { open(pillar) } label: { label() }
             .buttonStyle(.plain)
+            .modifier(CoachZoomSource(
+                id: .pillar(pillar), namespace: zoom?.namespace ?? fallbackNamespace,
+                enabled: zoom?.enabled ?? false
+            ))
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(pillar.gaugeAccessibilityLabel(pillar.score(in: pillars)))
-            .accessibilityHint("Opens the \(AppTab(pillar).title) tab")
+            .accessibilityLabel("Explain \(pillar.title) \(Int(pillar.score(in: pillars).score.rounded()))")
+            .accessibilityValue(pillar.gaugeAccessibilityLabel(pillar.score(in: pillars)))
+            .accessibilityHint("Asks the coach to explain it")
             .accessibilityAddTraits(.isButton)
     }
 }

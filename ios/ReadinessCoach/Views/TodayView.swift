@@ -6,13 +6,15 @@ import SwiftUI
 struct TodayView: View {
     @EnvironmentObject private var settings: AppSettings
     @EnvironmentObject private var sync: SyncService
-    @EnvironmentObject private var tabs: TabRouter
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    @State private var showAsk = false
+    @State private var coachRequest: CoachRequest?
+    @State private var showHistoryAfterCoach = false
     @State private var showHistory = false
+    @Namespace private var coachZoom
     @State private var showScoringDrivers = false
     @State private var healthStatus: HealthKitService.AccessStatus?
     @State private var healthRequestError: HealthAccessMessage?
@@ -117,16 +119,25 @@ struct TodayView: View {
                     .accessibilityLabel("Profile and settings")
                 }
             }
-            .safeAreaInset(edge: .bottom) {
-                if sync.today != nil {
-                    AskBar { showAsk = true }
-                }
-            }
             .sensoryFeedback(.success, trigger: refreshCount)
             .sensoryFeedback(.selection, trigger: pillarJumps)
             .navigationDestination(isPresented: $showHistory) { TrendsView() }
-            .sheet(isPresented: $showAsk) {
-                if let today = sync.today { AskCoachView(today: today) }
+            .sheet(item: $coachRequest, onDismiss: {
+                // Presenting while a sheet is still dismissing silently fails,
+                // so history waits for the dismissal to finish.
+                if showHistoryAfterCoach {
+                    showHistoryAfterCoach = false
+                    showHistory = true
+                }
+            }) { request in
+                CoachView(today: request.today, focus: request.focus, autoAsk: request.autoAsk) {
+                    showHistoryAfterCoach = true
+                    coachRequest = nil
+                }
+                .modifier(CoachZoomDestination(
+                    id: request.focus, namespace: coachZoom,
+                    enabled: request.fromNumber && !reduceMotion
+                ))
             }
             .sheet(isPresented: $showScoringDrivers) {
                 if let today = sync.today { ScoringDriversSheet(pillars: today.pillars) }
@@ -162,7 +173,19 @@ struct TodayView: View {
 
     @ViewBuilder
     private func content(_ today: TodayDTO) -> some View {
-        DecisionBlock(today: today) { showHistory = true }
+        DecisionBlock(today: today) {
+            pillarJumps += 1
+            coachRequest = CoachRequest(
+                today: today, focus: .readiness,
+                autoAsk: CoachPrompts.autoQuestion(for: .readiness, today: today),
+                fromNumber: true
+            )
+        }
+        .modifier(CoachZoomSource(id: .readiness, namespace: coachZoom, enabled: !reduceMotion))
+
+        CoachCard(today: today) { question in
+            coachRequest = CoachRequest(today: today, focus: .readiness, autoAsk: question, fromNumber: false)
+        }
 
         VStack(alignment: .leading, spacing: 14) {
             HStack {
@@ -185,10 +208,18 @@ struct TodayView: View {
                 .foregroundStyle(Palette.textSecondary)
                 .accessibilityLabel("All scoring drivers")
             }
-            PillarGaugeRow(pillars: today.pillars) { pillar in
-                pillarJumps += 1
-                tabs.go(to: AppTab(pillar))
-            }
+            PillarGaugeRow(
+                pillars: today.pillars,
+                open: { pillar in
+                    pillarJumps += 1
+                    coachRequest = CoachRequest(
+                        today: today, focus: .pillar(pillar),
+                        autoAsk: CoachPrompts.autoQuestion(for: .pillar(pillar), today: today),
+                        fromNumber: true
+                    )
+                },
+                zoom: (coachZoom, !reduceMotion)
+            )
         }
 
         TodayPlanSection(note: today.advisor)
@@ -242,6 +273,17 @@ struct TodayView: View {
             openURL(url)
         }
     }
+}
+
+/// One opening of the coach sheet. `fromNumber` is true when a score or ring
+/// was tapped, which is when the number zooms into the coach header.
+private struct CoachRequest: Identifiable {
+    let id = UUID()
+    /// Frozen at the tap so a refresh cannot change the day mid-conversation.
+    let today: TodayDTO
+    let focus: CoachFocus
+    let autoAsk: String?
+    let fromNumber: Bool
 }
 
 private struct HealthAccessMessage: Identifiable {

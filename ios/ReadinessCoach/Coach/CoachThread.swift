@@ -200,7 +200,7 @@ struct CoachChips: View {
 }
 
 /// Left-aligned wrapping layout. A child wider than the row takes the full row.
-private struct ChipFlow: Layout {
+struct ChipFlow: Layout {
     var spacing: CGFloat
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
