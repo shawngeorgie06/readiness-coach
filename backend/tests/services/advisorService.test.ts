@@ -78,6 +78,12 @@ describe("enforceAnswerDecisionLock", () => {
 
     expect(answer).toContain("Locked decision: RECOVER");
   });
+
+  it("does not append the directive twice", () => {
+    const once = enforceAnswerDecisionLock("recover", "Go for a hard PR session today.");
+
+    expect(enforceAnswerDecisionLock("recover", once)).toBe(once);
+  });
 });
 
 describe("askCoach", () => {

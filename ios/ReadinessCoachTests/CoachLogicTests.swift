@@ -37,7 +37,7 @@ final class CoachLogicTests: XCTestCase {
 
     private struct Boom: Error {}
 
-    private final class Recorder {
+    private final class Recorder: @unchecked Sendable {
         var calls: [(question: String, date: String, history: [CoachTurnDTO])] = []
         var results: [Result<String, Error>] = []
         func next(_ q: String, _ d: String, _ h: [CoachTurnDTO]) async throws -> String {
@@ -94,6 +94,31 @@ final class CoachLogicTests: XCTestCase {
         XCTAssertEqual(model.trend.last ?? nil, 14)
     }
 
+    func testRestingHRIsIncludedWhenItHasATodayValue() {
+        var t = today()
+        t.baselines = TodayBaselinesDTO(
+            hrv: baseline(today: 40, normal: 55),
+            restingHr: baseline(today: 60, normal: 55, good: "down"),
+            sleepHours: baseline(today: 6, normal: 7.5),
+            load7d: baseline(today: 12, normal: 10, good: "none")
+        )
+        XCTAssertEqual(CoachFocusModel(focus: .pillar(.recovery), today: t).factors.map(\.metric), [.hrv, .restingHr])
+    }
+
+    func testSleepAndLoadFocusFactors() {
+        XCTAssertEqual(CoachFocusModel(focus: .pillar(.sleep), today: today()).factors.map(\.metric), [.sleepHours])
+        XCTAssertEqual(CoachFocusModel(focus: .pillar(.load), today: today()).factors.map(\.metric), [.load7d])
+    }
+
+    func testOpeningLineBoundaries() {
+        // Lowest exactly 50: not below 50.
+        XCTAssertNil(CoachPrompts.notablyLowPillar(today(recovery: 50, sleep: 80, load: 90)))
+        // Gap of exactly 15 with lowest under 50: named.
+        XCTAssertEqual(CoachPrompts.notablyLowPillar(today(recovery: 40, sleep: 55, load: 90))?.pillar, .recovery)
+        // Tie for lowest: not named.
+        XCTAssertNil(CoachPrompts.notablyLowPillar(today(recovery: 30, sleep: 30, load: 90)))
+    }
+
     func testFocusWithNilBaselinesHasNoFactorsButHasDrivers() {
         let model = CoachFocusModel(focus: .pillar(.recovery), today: today(recovery: 33, withBaselines: false))
         XCTAssertTrue(model.factors.isEmpty)
@@ -137,6 +162,45 @@ final class CoachLogicTests: XCTestCase {
         await convo.ask("one more")
         XCTAssertEqual(rec.calls.count, 10)
         XCTAssertEqual(convo.messages.count, 20)
+    }
+
+    func testLongCoachAnswerIsCappedInHistory() async {
+        let rec = Recorder()
+        rec.results = [.success(String(repeating: "a", count: 4500))]
+        let convo = conversation(rec)
+        await convo.ask("one")
+        await convo.ask("two")
+        let entries = rec.calls[1].history
+        XCTAssertEqual(entries.count, 2)
+        XCTAssertLessThanOrEqual(entries[1].content.count, 4000)
+    }
+
+    func testEmptyAnswerIsDroppedFromHistory() async {
+        let rec = Recorder()
+        rec.results = [.success("   ")]
+        let convo = conversation(rec)
+        await convo.ask("one")
+        await convo.ask("two")
+        XCTAssertEqual(rec.calls[1].history.map(\.content), ["one"])
+    }
+
+    func testOverlongQuestionIsIgnored() async {
+        let rec = Recorder()
+        let convo = conversation(rec)
+        await convo.ask(String(repeating: "q", count: CoachConversation.maxQuestionLength + 1))
+        XCTAssertTrue(rec.calls.isEmpty)
+        await convo.ask(String(repeating: "q", count: CoachConversation.maxQuestionLength))
+        XCTAssertEqual(rec.calls.count, 1)
+    }
+
+    func testNewAskClearsOldFailedRetry() async {
+        let rec = Recorder()
+        rec.results = [.failure(Boom())]
+        let convo = conversation(rec)
+        await convo.ask("one")
+        await convo.ask("two")
+        await convo.retry()
+        XCTAssertEqual(rec.calls.count, 2)
     }
 
     func testBlankQuestionIsIgnored() async {

@@ -212,6 +212,7 @@ export function enforceAnswerDecisionLock(locked: Decision, answer: string): str
   const directive = locked === "recover"
     ? "Locked decision: RECOVER. Do not train hard today; walk, mobility, or full rest only."
     : "Locked decision: MAINTAIN. No PRs or maximal work; cap intensity at RPE 7.";
+  if (answer.includes(directive)) return answer;
   return `${answer.trim()}\n\n${directive}`;
 }
 

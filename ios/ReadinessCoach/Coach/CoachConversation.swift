@@ -32,9 +32,12 @@ struct CoachMessage: Identifiable, Equatable {
 @MainActor @Observable
 final class CoachConversation {
     static let messageCap = 20
+    /// The server's limits on a question and on each history entry.
+    static let maxQuestionLength = 1500
+    static let maxHistoryEntryLength = 4000
     private static let lockPrefix = "Locked decision:"
 
-    typealias Send = (String, String, [CoachTurnDTO]) async throws -> String
+    typealias Send = @Sendable (String, String, [CoachTurnDTO]) async throws -> String
 
     let focus: CoachFocus
     private(set) var messages: [CoachMessage] = []
@@ -56,7 +59,8 @@ final class CoachConversation {
 
     func ask(_ question: String) async {
         let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !isAtCap, !isPending else { return }
+        guard !trimmed.isEmpty, trimmed.count <= Self.maxQuestionLength, !isAtCap, !isPending else { return }
+        failedRequest = nil
         let history = historyTurns()
         messages.append(CoachMessage(role: .user, text: trimmed, state: .done))
         messages.append(CoachMessage(role: .coach, text: "", state: .pending))
@@ -81,8 +85,12 @@ final class CoachConversation {
     }
 
     private func historyTurns() -> [CoachTurnDTO] {
-        messages.filter { $0.state == .done }.map {
-            CoachTurnDTO(role: $0.role == .user ? "user" : "assistant", content: $0.wireText)
+        messages.filter { $0.state == .done }.compactMap { message in
+            let content = String(
+                message.wireText.trimmingCharacters(in: .whitespacesAndNewlines).prefix(Self.maxHistoryEntryLength)
+            )
+            guard !content.isEmpty else { return nil }
+            return CoachTurnDTO(role: message.role == .user ? "user" : "assistant", content: content)
         }
     }
 
